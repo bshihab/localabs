@@ -8,13 +8,13 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "5.9"
+    SWIFT_VERSION: "6.0"
     DEVELOPMENT_TEAM: ""
 
 packages:
   llama.swift:
     url: https://github.com/mattt/llama.swift
-    from: 1.0.0
+    from: 2.0.0
 
 targets:
   MedGemma:
