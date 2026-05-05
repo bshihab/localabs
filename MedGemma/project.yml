@@ -1,0 +1,43 @@
+name: MedGemma
+options:
+  bundleIdPrefix: com.bilalshihab
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: ""
+
+packages:
+  llama.swift:
+    url: https://github.com/mattt/llama.swift
+    from: 1.0.0
+
+targets:
+  MedGemma:
+    type: application
+    platform: iOS
+    sources:
+      - MedGemma
+    dependencies:
+      - package: llama.swift
+        product: LlamaSwift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bilalshihab.MedGemma
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: 1
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: false
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_NSCameraUsageDescription: "MedGemma uses the camera to scan physical lab reports and medical documents for AI analysis."
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "MedGemma accesses your photo library so you can select existing photos of lab reports."
+        INFOPLIST_KEY_NSHealthShareUsageDescription: "MedGemma reads your Apple Health data to provide personalized context alongside your lab report analysis."
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: "MedGemma does not write any data to Apple Health."
+    entitlements:
+      path: MedGemma/MedGemma.entitlements

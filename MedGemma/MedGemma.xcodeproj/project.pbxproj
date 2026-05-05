@@ -1,0 +1,459 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		076FB9614DF1994E66009DBF /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39F8C7B17151B1446BFF8991 /* ContentView.swift */; };
+		157E738425ED718DA5828B8F /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96343B601BF3CD72DBB0AC9D /* ScanView.swift */; };
+		1AF1B2F4C4ED08F788FC6A44 /* DocumentViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29FD52EFC98F9FC56725054 /* DocumentViewerView.swift */; };
+		42134FF77D671EA005110026 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5D4FDB50F37E6F17C83606C /* HistoryView.swift */; };
+		5B54DCAD0A3921191DAC824B /* LlamaContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5424ADC9875FD124D6A5920 /* LlamaContext.swift */; };
+		5C90AFECC0022C9E310081DA /* InferenceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA18C4510936DEF7D0CE9DEC /* InferenceEngine.swift */; };
+		66888A12FAD61E9B8C7A3EA0 /* StructuredReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331F589039751B005CE5962B /* StructuredReport.swift */; };
+		6ADB9406915144A46F3CC5DB /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01C5BA0289CE03907CB6680 /* ProfileView.swift */; };
+		7F5C541E59CDFB30C60070C3 /* SectionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8D8E17D39E6CD048377D723 /* SectionCard.swift */; };
+		887C9853E75526A0138B624E /* LocalStorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F9C066723FCC7CD8E43548 /* LocalStorageService.swift */; };
+		8CE90ED0C3C2E8416944CDEA /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76D6889FC43EDF8DB1DF46B /* DashboardView.swift */; };
+		91CDA3593825599A4B27A504 /* ModelDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40DBCB8F9DFC8C2AE028AD53 /* ModelDownloader.swift */; };
+		A1FDEA9E9249FF0B6F377E7B /* LlamaSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 183E944C6D506EC520C05826 /* LlamaSwift */; };
+		A3B1E92DD6EDA49F8975468F /* VisionOCRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA007D8F3BBAC1D2C2A37C64 /* VisionOCRService.swift */; };
+		B66248FAA610FDD1D7249699 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3A383189B3A59FEC3BE254 /* UserProfile.swift */; };
+		DDB24D48D519DBA8ECE040A4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 05024CBE1BC31465754C3542 /* Assets.xcassets */; };
+		E70BFD1FC1481F2BEAC5A6A1 /* MedGemmaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E8A4D7CC30C146E3BAF55B /* MedGemmaApp.swift */; };
+		E9772E5E3A8A09D9BCC51D1B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E27C4A6CCC0383D113EA140 /* OnboardingView.swift */; };
+		F9960F960C5490AC7EB62704 /* HealthKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85FCE5C4BB1B660268827E57 /* HealthKitService.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		05024CBE1BC31465754C3542 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		331F589039751B005CE5962B /* StructuredReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StructuredReport.swift; sourceTree = "<group>"; };
+		35FE34CEC4F515081C53FB9A /* MedGemma.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MedGemma.entitlements; sourceTree = "<group>"; };
+		39F8C7B17151B1446BFF8991 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		40DBCB8F9DFC8C2AE028AD53 /* ModelDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloader.swift; sourceTree = "<group>"; };
+		59F9C066723FCC7CD8E43548 /* LocalStorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalStorageService.swift; sourceTree = "<group>"; };
+		5E27C4A6CCC0383D113EA140 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		85FCE5C4BB1B660268827E57 /* HealthKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitService.swift; sourceTree = "<group>"; };
+		96343B601BF3CD72DBB0AC9D /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
+		A8E8A4D7CC30C146E3BAF55B /* MedGemmaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedGemmaApp.swift; sourceTree = "<group>"; };
+		B5D4FDB50F37E6F17C83606C /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		BA18C4510936DEF7D0CE9DEC /* InferenceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InferenceEngine.swift; sourceTree = "<group>"; };
+		C9CC8D459BEF345CC6646B4A /* MedGemma.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MedGemma.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC3A383189B3A59FEC3BE254 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
+		D01C5BA0289CE03907CB6680 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
+		E29FD52EFC98F9FC56725054 /* DocumentViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DocumentViewerView.swift; sourceTree = "<group>"; };
+		E5424ADC9875FD124D6A5920 /* LlamaContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaContext.swift; sourceTree = "<group>"; };
+		E8D8E17D39E6CD048377D723 /* SectionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionCard.swift; sourceTree = "<group>"; };
+		EA007D8F3BBAC1D2C2A37C64 /* VisionOCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionOCRService.swift; sourceTree = "<group>"; };
+		F76D6889FC43EDF8DB1DF46B /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		38BE8AF623FD99209C14942D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1FDEA9E9249FF0B6F377E7B /* LlamaSwift in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		32212BF5C3D88423BA09150B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C9CC8D459BEF345CC6646B4A /* MedGemma.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4FAE43149A36AD1642C5BB0C /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				331F589039751B005CE5962B /* StructuredReport.swift */,
+				CC3A383189B3A59FEC3BE254 /* UserProfile.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		8ECE20308CA35E0C49FAAC85 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				85FCE5C4BB1B660268827E57 /* HealthKitService.swift */,
+				BA18C4510936DEF7D0CE9DEC /* InferenceEngine.swift */,
+				59F9C066723FCC7CD8E43548 /* LocalStorageService.swift */,
+				40DBCB8F9DFC8C2AE028AD53 /* ModelDownloader.swift */,
+				EA007D8F3BBAC1D2C2A37C64 /* VisionOCRService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		9BC631AE29B3B55F68633AAC = {
+			isa = PBXGroup;
+			children = (
+				F805592897C11F3C35F44D25 /* MedGemma */,
+				32212BF5C3D88423BA09150B /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A8FED983C7B0A33551B1E2EB /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				E8D8E17D39E6CD048377D723 /* SectionCard.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		C550D1FD6280B59917CF449F /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				F76D6889FC43EDF8DB1DF46B /* DashboardView.swift */,
+				E29FD52EFC98F9FC56725054 /* DocumentViewerView.swift */,
+				B5D4FDB50F37E6F17C83606C /* HistoryView.swift */,
+				5E27C4A6CCC0383D113EA140 /* OnboardingView.swift */,
+				D01C5BA0289CE03907CB6680 /* ProfileView.swift */,
+				96343B601BF3CD72DBB0AC9D /* ScanView.swift */,
+				A8FED983C7B0A33551B1E2EB /* Components */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		CAFAA2F10038DA174016E27C /* LLaMA */ = {
+			isa = PBXGroup;
+			children = (
+				E5424ADC9875FD124D6A5920 /* LlamaContext.swift */,
+			);
+			path = LLaMA;
+			sourceTree = "<group>";
+		};
+		F805592897C11F3C35F44D25 /* MedGemma */ = {
+			isa = PBXGroup;
+			children = (
+				05024CBE1BC31465754C3542 /* Assets.xcassets */,
+				39F8C7B17151B1446BFF8991 /* ContentView.swift */,
+				35FE34CEC4F515081C53FB9A /* MedGemma.entitlements */,
+				A8E8A4D7CC30C146E3BAF55B /* MedGemmaApp.swift */,
+				CAFAA2F10038DA174016E27C /* LLaMA */,
+				4FAE43149A36AD1642C5BB0C /* Models */,
+				8ECE20308CA35E0C49FAAC85 /* Services */,
+				C550D1FD6280B59917CF449F /* Views */,
+			);
+			path = MedGemma;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B83EBE893D04B64B8407B413 /* MedGemma */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 30225E922FA87E14E8295C70 /* Build configuration list for PBXNativeTarget "MedGemma" */;
+			buildPhases = (
+				45EDEB376965264B92F0074D /* Sources */,
+				C244219DFD2FFD966847E492 /* Resources */,
+				38BE8AF623FD99209C14942D /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MedGemma;
+			packageProductDependencies = (
+				183E944C6D506EC520C05826 /* LlamaSwift */,
+			);
+			productName = MedGemma;
+			productReference = C9CC8D459BEF345CC6646B4A /* MedGemma.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		DD1264EC289031BF104DAC9E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 73DBF75424A227D97754560C /* Build configuration list for PBXProject "MedGemma" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 9BC631AE29B3B55F68633AAC;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DDC406990115677141E6C91B /* XCRemoteSwiftPackageReference "llama" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 32212BF5C3D88423BA09150B /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B83EBE893D04B64B8407B413 /* MedGemma */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C244219DFD2FFD966847E492 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DDB24D48D519DBA8ECE040A4 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		45EDEB376965264B92F0074D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				076FB9614DF1994E66009DBF /* ContentView.swift in Sources */,
+				8CE90ED0C3C2E8416944CDEA /* DashboardView.swift in Sources */,
+				1AF1B2F4C4ED08F788FC6A44 /* DocumentViewerView.swift in Sources */,
+				F9960F960C5490AC7EB62704 /* HealthKitService.swift in Sources */,
+				42134FF77D671EA005110026 /* HistoryView.swift in Sources */,
+				5C90AFECC0022C9E310081DA /* InferenceEngine.swift in Sources */,
+				5B54DCAD0A3921191DAC824B /* LlamaContext.swift in Sources */,
+				887C9853E75526A0138B624E /* LocalStorageService.swift in Sources */,
+				E70BFD1FC1481F2BEAC5A6A1 /* MedGemmaApp.swift in Sources */,
+				91CDA3593825599A4B27A504 /* ModelDownloader.swift in Sources */,
+				E9772E5E3A8A09D9BCC51D1B /* OnboardingView.swift in Sources */,
+				6ADB9406915144A46F3CC5DB /* ProfileView.swift in Sources */,
+				157E738425ED718DA5828B8F /* ScanView.swift in Sources */,
+				7F5C541E59CDFB30C60070C3 /* SectionCard.swift in Sources */,
+				66888A12FAD61E9B8C7A3EA0 /* StructuredReport.swift in Sources */,
+				B66248FAA610FDD1D7249699 /* UserProfile.swift in Sources */,
+				A3B1E92DD6EDA49F8975468F /* VisionOCRService.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0169DB8E2D0B9DD4FC65D901 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MedGemma/MedGemma.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N9J82G33L9;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "MedGemma uses the camera to scan physical lab reports and medical documents for AI analysis.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "MedGemma reads your Apple Health data to provide personalized context alongside your lab report analysis.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "MedGemma does not write any data to Apple Health.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "MedGemma accesses your photo library so you can select existing photos of lab reports.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bilalshihab.MedGemma;
+				SDKROOT = iphoneos;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		07F9C7D61EE274F92854BB54 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MedGemma/MedGemma.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = N9J82G33L9;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "MedGemma uses the camera to scan physical lab reports and medical documents for AI analysis.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "MedGemma reads your Apple Health data to provide personalized context alongside your lab report analysis.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "MedGemma does not write any data to Apple Health.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "MedGemma accesses your photo library so you can select existing photos of lab reports.";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.bilalshihab.MedGemma;
+				SDKROOT = iphoneos;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		1A109688701B892D5E1EEF3A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		8084113D43C53261E388DFD9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		30225E922FA87E14E8295C70 /* Build configuration list for PBXNativeTarget "MedGemma" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				07F9C7D61EE274F92854BB54 /* Debug */,
+				0169DB8E2D0B9DD4FC65D901 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		73DBF75424A227D97754560C /* Build configuration list for PBXProject "MedGemma" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8084113D43C53261E388DFD9 /* Debug */,
+				1A109688701B892D5E1EEF3A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DDC406990115677141E6C91B /* XCRemoteSwiftPackageReference "llama" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mattt/llama.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		183E944C6D506EC520C05826 /* LlamaSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DDC406990115677141E6C91B /* XCRemoteSwiftPackageReference "llama" */;
+			productName = LlamaSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = DD1264EC289031BF104DAC9E /* Project object */;
+}
