@@ -220,10 +220,11 @@ struct FollowUpChatView: View {
     @State private var inputText = ""
     @State private var isThinking = false
 
-    struct ChatMessage: Identifiable {
+    struct ChatMessage: Identifiable, Equatable {
         let id = UUID()
         let role: Role
-        let content: String
+        var content: String
+        var isStreaming: Bool = false
         enum Role { case user, ai }
     }
 
@@ -364,15 +365,31 @@ struct FollowUpChatView: View {
         inputText = ""
         isThinking = true
 
+        let aiMessage = ChatMessage(role: .ai, content: "", isStreaming: true)
+        let aiId = aiMessage.id
+        messages.append(aiMessage)
+
         Task {
-            let answer = await engine.askFollowUp(
+            let stream = engine.askFollowUp(
                 question: question,
                 selectedText: selectedText,
                 reportContext: fullReportContext,
                 ocrText: ocrText
             )
-            messages.append(ChatMessage(role: .ai, content: answer))
+            var receivedFirstPiece = false
+            for await piece in stream {
+                if !receivedFirstPiece {
+                    isThinking = false
+                    receivedFirstPiece = true
+                }
+                if let idx = messages.firstIndex(where: { $0.id == aiId }) {
+                    messages[idx].content += piece
+                }
+            }
             isThinking = false
+            if let idx = messages.firstIndex(where: { $0.id == aiId }) {
+                messages[idx].isStreaming = false
+            }
         }
     }
 }

@@ -14,6 +14,7 @@ final class InferenceEngine: ObservableObject {
     @Published var bytesExpected: Int64 = 0
     @Published var isProcessing = false
     @Published var processingStatus = ""
+    @Published var streamingText = ""
     @Published var isDownloading = false
     @Published var downloadError: String?
 
@@ -227,18 +228,30 @@ final class InferenceEngine: ObservableObject {
             )
         }
 
-        let resultText = await Task.detached(priority: .userInitiated) {
-            context.predict(prompt: prompt, maxTokens: 1000)
-        }.value
+        streamingText = ""
+        var collected = ""
+        let stream = context.predict(prompt: prompt, maxTokens: 1000)
+        for await piece in stream {
+            collected += piece
+            streamingText = collected
+        }
+        streamingText = ""
 
-        var parsed = StructuredReport.parse(from: resultText)
-        if parsed.rawText.isEmpty { parsed.rawText = resultText }
+        var parsed = StructuredReport.parse(from: collected)
+        if parsed.rawText.isEmpty { parsed.rawText = collected }
         return parsed
     }
 
     // MARK: - Follow-Up Chat
 
-    func askFollowUp(question: String, selectedText: String, reportContext: String, ocrText: String) async -> String {
+    /// Streams the answer to a highlighted-text follow-up question.
+    /// The caller iterates the stream and appends each piece to a chat bubble.
+    func askFollowUp(
+        question: String,
+        selectedText: String,
+        reportContext: String,
+        ocrText: String
+    ) -> AsyncStream<String> {
         let profile = UserProfile.load()
 
         let prompt = """
@@ -263,11 +276,14 @@ final class InferenceEngine: ObservableObject {
         """
 
         guard let context = llamaContext else {
-            return "MedGemma isn't loaded yet. Download \(selectedModel.displayName) in Profile to get a real answer about “\(selectedText.prefix(60))…”."
+            let model = selectedModel
+            let preview = selectedText.prefix(60)
+            return AsyncStream { continuation in
+                continuation.yield("MedGemma isn't loaded yet. Download \(model.displayName) in Profile to get a real answer about “\(preview)…”.")
+                continuation.finish()
+            }
         }
 
-        return await Task.detached(priority: .userInitiated) {
-            context.predict(prompt: prompt, maxTokens: 400)
-        }.value
+        return context.predict(prompt: prompt, maxTokens: 400)
     }
 }

@@ -87,16 +87,28 @@ struct ScanView: View {
     @ViewBuilder
     private var actionStack: some View {
         if engine.isProcessing {
-            HStack(spacing: 14) {
-                ProgressView()
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Analyzing")
-                        .font(.system(size: 17, weight: .semibold))
-                    Text(engine.processingStatus)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 14) {
+                    ProgressView()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Analyzing")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text(engine.processingStatus)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
                 }
-                Spacer()
+                if !engine.streamingText.isEmpty {
+                    ScrollView {
+                        Text(engine.streamingText)
+                            .font(.system(size: 13, design: .rounded))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 180)
+                }
             }
             .padding(16)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
