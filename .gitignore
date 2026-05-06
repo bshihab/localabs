@@ -7,8 +7,8 @@
 *.gguf
 *.bin
 *.mmproj
-models/
-test_model/
+/models/
+/test_model/
 
 # Node / React Native
 node_modules/
@@ -49,3 +49,4 @@ env/
 # Project specific
 MASTER_REQUIREMENTS.md
 PROJECT_REQUIREMENTS.txt
+*.xcodeproj

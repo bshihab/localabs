@@ -6,98 +6,51 @@ import Vision
 struct DocumentViewerView: View {
     let report: StructuredReport
     @EnvironmentObject var engine: InferenceEngine
-    
+
     @State private var scanImage: UIImage?
     @State private var recognizedBlocks: [TextBlock] = []
     @State private var selectedBlocks: Set<UUID> = []
     @State private var showChat = false
-    @State private var imageSize: CGSize = .zero
-    
+    @State private var renderedImageSize: CGSize = .zero
+    @Namespace private var glassNamespace
+
     struct TextBlock: Identifiable {
         let id = UUID()
         let text: String
-        let boundingBox: CGRect // Normalized (0-1) coordinates from Vision
+        let boundingBox: CGRect // Normalized (0-1), bottom-left origin (Vision)
     }
-    
+
     var body: some View {
         ZStack {
             Color(.systemGroupedBackground).ignoresSafeArea()
-            
+
             if let image = scanImage {
-                GeometryReader { geo in
-                    ScrollView {
-                        ZStack(alignment: .topLeading) {
-                            // Original scan image
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: geo.size.width)
-                                .background(
-                                    GeometryReader { imgGeo in
-                                        Color.clear.onAppear {
-                                            imageSize = imgGeo.size
-                                        }
-                                    }
-                                )
-                            
-                            // Text overlay blocks (tappable)
-                            ForEach(recognizedBlocks) { block in
-                                let rect = convertRect(block.boundingBox, in: imageSize)
-                                
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(selectedBlocks.contains(block.id)
-                                          ? Color.blue.opacity(0.3)
-                                          : Color.clear)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 3)
-                                            .stroke(selectedBlocks.contains(block.id)
-                                                    ? Color.blue : Color.clear, lineWidth: 2)
-                                    )
-                                    .frame(width: rect.width, height: rect.height)
-                                    .position(x: rect.midX, y: rect.midY)
-                                    .onTapGesture {
-                                        withAnimation(.easeInOut(duration: 0.15)) {
-                                            if selectedBlocks.contains(block.id) {
-                                                selectedBlocks.remove(block.id)
-                                            } else {
-                                                selectedBlocks.insert(block.id)
-                                            }
-                                        }
-                                    }
-                            }
-                        }
-                    }
-                }
+                imageScroller(image: image)
             } else {
-                VStack(spacing: 16) {
-                    Image(systemName: "doc.questionmark")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.secondary)
-                    Text("Original scan not available")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                }
+                emptyState
+            }
+
+            VStack {
+                Spacer()
+                askPill
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 24)
             }
         }
         .navigationTitle("Scan Viewer")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if !selectedBlocks.isEmpty {
-                ToolbarItem(placement: .bottomBar) {
+            ToolbarItem(placement: .topBarTrailing) {
+                if !selectedBlocks.isEmpty {
                     Button {
-                        showChat = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "sparkles")
-                            Text("Ask about \(selectedBlocks.count) selection\(selectedBlocks.count > 1 ? "s" : "")")
-                                .fontWeight(.semibold)
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            selectedBlocks.removeAll()
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(14)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
                     }
+                    .buttonStyle(.glass)
                 }
             }
         }
@@ -108,28 +61,119 @@ struct DocumentViewerView: View {
                 ocrText: report.rawText
             )
             .environmentObject(engine)
+            .presentationBackground(.thinMaterial)
+            .presentationDragIndicator(.visible)
         }
         .onAppear {
             loadImage()
         }
     }
-    
+
+    private func imageScroller(image: UIImage) -> some View {
+        GeometryReader { geo in
+            ScrollView {
+                ZStack(alignment: .topLeading) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: geo.size.width)
+                        .background(
+                            GeometryReader { imgGeo in
+                                Color.clear
+                                    .onAppear { renderedImageSize = imgGeo.size }
+                                    .onChange(of: imgGeo.size) { _, new in renderedImageSize = new }
+                            }
+                        )
+
+                    GlassEffectContainer(spacing: 4) {
+                        ZStack(alignment: .topLeading) {
+                            ForEach(recognizedBlocks) { block in
+                                let rect = convertRect(block.boundingBox, in: renderedImageSize)
+                                let isSelected = selectedBlocks.contains(block.id)
+
+                                Group {
+                                    if isSelected {
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(.clear)
+                                            .glassEffect(
+                                                .regular.tint(.yellow.opacity(0.55)).interactive(),
+                                                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            )
+                                            .glassEffectID(block.id, in: glassNamespace)
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(Color.white.opacity(0.001))
+                                    }
+                                }
+                                .frame(width: rect.width, height: rect.height)
+                                .position(x: rect.midX, y: rect.midY)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                                        if isSelected {
+                                            selectedBlocks.remove(block.id)
+                                        } else {
+                                            selectedBlocks.insert(block.id)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .frame(width: renderedImageSize.width, height: renderedImageSize.height)
+                    }
+                }
+                .padding(.bottom, 100)
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "doc.questionmark")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("Original scan not available")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var askPill: some View {
+        if !selectedBlocks.isEmpty {
+            Button {
+                showChat = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("Ask about \(selectedBlocks.count) selection\(selectedBlocks.count > 1 ? "s" : "")")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
     private func loadImage() {
         guard let url = report.imageURL,
               let data = try? Data(contentsOf: url),
               let image = UIImage(data: data) else { return }
-        
+
         scanImage = image
         recognizeText(in: image)
     }
-    
-    /// Runs VisionKit text recognition to get bounding boxes for each text block.
+
     private func recognizeText(in image: UIImage) {
         guard let cgImage = image.cgImage else { return }
-        
-        let request = VNRecognizeTextRequest { request, error in
+
+        let request = VNRecognizeTextRequest { request, _ in
             guard let observations = request.results as? [VNRecognizedTextObservation] else { return }
-            
+
             DispatchQueue.main.async {
                 self.recognizedBlocks = observations.compactMap { obs in
                     guard let topCandidate = obs.topCandidates(1).first else { return nil }
@@ -137,18 +181,16 @@ struct DocumentViewerView: View {
                 }
             }
         }
-        
+
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
-        
+
         DispatchQueue.global(qos: .userInitiated).async {
             let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
             try? handler.perform([request])
         }
     }
-    
-    /// Converts a normalized Vision bounding box to view coordinates.
-    /// Vision uses bottom-left origin with normalized (0-1) coordinates.
+
     private func convertRect(_ visionRect: CGRect, in size: CGSize) -> CGRect {
         let x = visionRect.origin.x * size.width
         let y = (1 - visionRect.origin.y - visionRect.height) * size.height
@@ -156,7 +198,7 @@ struct DocumentViewerView: View {
         let h = visionRect.height * size.height
         return CGRect(x: x, y: y, width: w, height: h)
     }
-    
+
     private func getSelectedText() -> String {
         recognizedBlocks
             .filter { selectedBlocks.contains($0.id) }
@@ -173,78 +215,40 @@ struct FollowUpChatView: View {
     let ocrText: String
     @EnvironmentObject var engine: InferenceEngine
     @Environment(\.dismiss) var dismiss
-    
+
     @State private var messages: [ChatMessage] = []
     @State private var inputText = ""
     @State private var isThinking = false
-    
+
     struct ChatMessage: Identifiable {
         let id = UUID()
         let role: Role
         let content: String
         enum Role { case user, ai }
     }
-    
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Chat messages
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 16) {
-                            // Context banner
-                            GroupBox {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Label("Selected Text", systemImage: "text.quote")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.blue)
-                                    Text(selectedText)
-                                        .font(.system(size: 14))
-                                        .foregroundStyle(.primary)
-                                }
-                            }
-                            .padding(.horizontal)
-                            
-                            ForEach(messages) { message in
-                                HStack(alignment: .top, spacing: 10) {
-                                    if message.role == .ai {
-                                        Image(systemName: "brain.head.profile")
-                                            .font(.system(size: 20))
-                                            .foregroundColor(.blue)
-                                            .padding(.top, 2)
-                                    }
-                                    
-                                    VStack(alignment: message.role == .user ? .trailing : .leading) {
-                                        Text(message.content)
-                                            .padding(12)
-                                            .background(
-                                                message.role == .user
-                                                ? Color.blue
-                                                : Color(.secondarySystemGroupedBackground)
-                                            )
-                                            .foregroundColor(message.role == .user ? .white : .primary)
-                                            .cornerRadius(16)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
-                                    
-                                    if message.role == .user {
-                                        Image(systemName: "person.circle.fill")
-                                            .font(.system(size: 20))
-                                            .foregroundColor(.secondary)
-                                            .padding(.top, 2)
-                                    }
-                                }
+                            selectionBanner
                                 .padding(.horizontal)
-                                .id(message.id)
+                                .padding(.top, 8)
+
+                            ForEach(messages) { message in
+                                messageRow(message: message)
+                                    .id(message.id)
                             }
-                            
+
                             if isThinking {
                                 HStack(spacing: 10) {
                                     Image(systemName: "brain.head.profile")
-                                        .font(.system(size: 20))
-                                        .foregroundColor(.blue)
+                                        .font(.system(size: 18))
+                                        .foregroundStyle(.blue)
                                     ProgressView()
-                                    Text("Thinking...")
+                                    Text("Thinking…")
                                         .font(.subheadline)
                                         .foregroundStyle(.secondary)
                                 }
@@ -253,59 +257,113 @@ struct FollowUpChatView: View {
                         }
                         .padding(.vertical)
                     }
+                    .scrollContentBackground(.hidden)
                     .onChange(of: messages.count) { _, _ in
                         if let last = messages.last {
-                            withAnimation {
+                            withAnimation(.easeOut(duration: 0.3)) {
                                 proxy.scrollTo(last.id, anchor: .bottom)
                             }
                         }
                     }
                 }
-                
-                Divider()
-                
-                // Input bar
-                HStack(spacing: 12) {
-                    TextField("Ask about this text...", text: $inputText, axis: .vertical)
-                        .lineLimit(1...4)
-                        .textFieldStyle(.roundedBorder)
-                    
-                    Button {
-                        sendMessage()
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 32))
-                            .foregroundColor(inputText.isEmpty ? .gray : .blue)
-                    }
-                    .disabled(inputText.isEmpty || isThinking)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 10)
+
+                inputBar
             }
+            .background(Color.clear)
             .navigationTitle("Ask MedGemma")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                        .buttonStyle(.glass)
                 }
             }
             .onAppear {
-                // Auto-send the initial question about the selected text
-                let autoQuestion = "What does this mean in simple terms? Is this normal?"
-                inputText = autoQuestion
+                inputText = "What does this mean in simple terms? Is this normal?"
                 sendMessage()
             }
         }
     }
-    
+
+    private var selectionBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Selected Text", systemImage: "text.quote")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.blue)
+            Text(selectedText)
+                .font(.system(size: 14))
+                .foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func messageRow(message: ChatMessage) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            if message.role == .ai {
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.blue)
+                    .padding(.top, 6)
+            }
+
+            Text(message.content)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: 280, alignment: message.role == .user ? .trailing : .leading)
+                .glassEffect(
+                    message.role == .user
+                        ? .regular.tint(.blue.opacity(0.85))
+                        : .regular,
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                )
+                .foregroundStyle(message.role == .user ? Color.white : Color.primary)
+
+            if message.role == .ai { Spacer(minLength: 0) }
+            if message.role == .user {
+                Image(systemName: "person.crop.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 6)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+        .padding(.horizontal)
+    }
+
+    private var inputBar: some View {
+        HStack(spacing: 10) {
+            TextField("Ask about this text…", text: $inputText, axis: .vertical)
+                .lineLimit(1...4)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .glassEffect(.regular, in: Capsule())
+
+            Button {
+                sendMessage()
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.glassProminent)
+            .clipShape(Circle())
+            .disabled(inputText.isEmpty || isThinking)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
     private func sendMessage() {
         let question = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
-        
+
         messages.append(ChatMessage(role: .user, content: question))
         inputText = ""
         isThinking = true
-        
+
         Task {
             let answer = await engine.askFollowUp(
                 question: question,

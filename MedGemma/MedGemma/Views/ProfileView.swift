@@ -5,140 +5,232 @@ struct ProfileView: View {
     @AppStorage("onboarding_complete") var onboardingComplete = false
     @State private var profile = UserProfile.load()
     @State private var showOnboarding = false
-    
+    @State private var confirmDelete = false
+    @State private var confirmReset = false
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
-                    // AI Engine Status Card
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("OFFLINE AI ENGINE")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.blue)
-                                .tracking(1.5)
-                            
-                            Text("MedGemma requires a 2.5GB local weights file to analyze lab results entirely on-device.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineSpacing(2)
-                            
-                            if engine.isModelLoaded {
-                                HStack {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.green)
-                                    Text("Model Loaded & Ready")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundColor(.green)
-                                }
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 14)
-                                .background(.green.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                            } else if engine.loadingProgress > 0 && engine.loadingProgress < 100 {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack {
-                                        Text("Downloading Weights...")
-                                            .font(.caption.weight(.semibold))
-                                        Spacer()
-                                        Text("\(Int(engine.loadingProgress))%")
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    ProgressView(value: engine.loadingProgress, total: 100)
-                                        .tint(.blue)
-                                }
-                            } else {
-                                Button {
-                                    Task { await engine.initializeModel() }
-                                } label: {
-                                    Label("Download MedGemma 4B", systemImage: "arrow.down.circle.fill")
-                                        .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.large)
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    // Core Info Card
-                    GroupBox {
-                        VStack(spacing: 0) {
-                            profileRow(label: "Age", value: profile.age.isEmpty ? "Not set" : profile.age)
-                            Divider()
-                            profileRow(label: "Biological Sex", value: profile.biologicalSex.isEmpty ? "Not set" : profile.biologicalSex)
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    // Known Conditions Card
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("KNOWN CONDITIONS")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.blue)
-                                .tracking(1.5)
-                            Text(profile.medicalConditions.isEmpty ? "None reported." : profile.medicalConditions)
-                                .font(.body)
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    // Current Medications Card
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("CURRENT MEDICATIONS")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.blue)
-                                .tracking(1.5)
-                            Text("List your daily medications so MedGemma can cross-reference them against your lab results.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineSpacing(2)
-                            
-                            TextField("e.g. Lisinopril 10mg, Metformin 500mg...", text: $profile.medications, axis: .vertical)
-                                .lineLimit(3...6)
-                                .textFieldStyle(.roundedBorder)
-                                .onChange(of: profile.medications) { _, _ in
-                                    profile.save()
-                                }
-                        }
-                    }
-                    .padding(.horizontal)
-                    
-                    // Edit Profile & Reset
-                    Button {
-                        showOnboarding = true
-                    } label: {
-                        Label("Edit Health Profile", systemImage: "pencil")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .padding(.horizontal)
-                    
-                    Button(role: .destructive) {
-                        UserProfile.reset()
-                        LocalStorageService.shared.clearHistory()
-                        onboardingComplete = false
-                    } label: {
-                        Label("Reset App & Erase Data", systemImage: "trash")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .padding(.horizontal)
-                    .padding(.bottom, 100)
+                VStack(spacing: 18) {
+                    aiEngineCard
+                        .padding(.horizontal)
+
+                    coreInfoCard
+                        .padding(.horizontal)
+
+                    knownConditionsCard
+                        .padding(.horizontal)
+
+                    medicationsCard
+                        .padding(.horizontal)
+
+                    actionButtons
+                        .padding(.horizontal)
+                        .padding(.bottom, 100)
                 }
-                .padding(.top, 8)
+                .padding(.top, 12)
             }
+            .scrollContentBackground(.hidden)
+            .background(.background)
             .navigationTitle("Medical Profile")
             .sheet(isPresented: $showOnboarding) {
                 OnboardingView()
             }
+            .alert("Delete Model File?", isPresented: $confirmDelete) {
+                Button("Delete", role: .destructive) { engine.deleteSelectedModel() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\(engine.selectedModel.displayName) (\(engine.selectedModel.humanSize)) will be removed from this device. You can re-download it any time.")
+            }
+            .alert("Reset App?", isPresented: $confirmReset) {
+                Button("Erase Everything", role: .destructive) {
+                    UserProfile.reset()
+                    LocalStorageService.shared.clearHistory()
+                    onboardingComplete = false
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This deletes your profile, all scanned reports, and history. The downloaded model file is kept.")
+            }
         }
     }
-    
+
+    // MARK: - Cards
+
+    private var aiEngineCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("ON-DEVICE AI ENGINE")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.blue)
+                .tracking(1.5)
+
+            Text("MedGemma runs entirely on your phone. Choose a model and download it once — no cloud, no account.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineSpacing(2)
+
+            modelPicker
+
+            engineStatus
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var modelPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(AvailableModel.allCases) { model in
+                ModelPickerRow(
+                    model: model,
+                    isSelected: engine.selectedModel == model,
+                    isDisabled: engine.isDownloading
+                ) {
+                    engine.selectModel(model)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var engineStatus: some View {
+        if engine.isModelLoaded {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                Text("\(engine.selectedModel.displayName) loaded & ready")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.green)
+                Spacer()
+                Button(role: .destructive) {
+                    confirmDelete = true
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .buttonStyle(.glass)
+            }
+            .padding(12)
+            .glassEffect(.regular.tint(.green.opacity(0.12)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        } else if engine.isDownloading {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Downloading…")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(Int(engine.loadingProgress * 100))%")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                ProgressView(value: engine.loadingProgress)
+                    .tint(.blue)
+                if engine.bytesExpected > 0 {
+                    Text("\(formatBytes(engine.bytesWritten)) of \(formatBytes(engine.bytesExpected))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                Button("Cancel", role: .destructive) {
+                    engine.cancelDownload()
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+            }
+            .padding(14)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        } else {
+            VStack(spacing: 10) {
+                Button {
+                    engine.downloadSelectedModel()
+                } label: {
+                    Label("Download \(engine.selectedModel.displayName)", systemImage: "arrow.down.circle.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.glassProminent)
+
+                if let err = engine.downloadError {
+                    Text(err)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                }
+            }
+        }
+    }
+
+    private var coreInfoCard: some View {
+        VStack(spacing: 0) {
+            profileRow(label: "Age", value: profile.age.isEmpty ? "Not set" : profile.age)
+            Divider().padding(.horizontal, 16)
+            profileRow(label: "Biological Sex", value: profile.biologicalSex.isEmpty ? "Not set" : profile.biologicalSex)
+            Divider().padding(.horizontal, 16)
+            profileRow(label: "Blood Type", value: profile.bloodType.isEmpty ? "Not set" : profile.bloodType)
+        }
+        .frame(maxWidth: .infinity)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private var knownConditionsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("KNOWN CONDITIONS")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.blue)
+                .tracking(1.5)
+            Text(profile.medicalConditions.isEmpty ? "None reported." : profile.medicalConditions)
+                .font(.body)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private var medicationsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("CURRENT MEDICATIONS")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.blue)
+                .tracking(1.5)
+            Text("List your daily medications so MedGemma can cross-reference them against your lab results.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineSpacing(2)
+
+            TextField("e.g. Lisinopril 10mg, Metformin 500mg…", text: $profile.medications, axis: .vertical)
+                .lineLimit(3...6)
+                .padding(12)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .onChange(of: profile.medications) { _, _ in
+                    profile.save()
+                }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private var actionButtons: some View {
+        VStack(spacing: 12) {
+            Button {
+                showOnboarding = true
+            } label: {
+                Label("Edit Health Profile", systemImage: "pencil")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.glass)
+
+            Button(role: .destructive) {
+                confirmReset = true
+            } label: {
+                Label("Reset App & Erase Data", systemImage: "trash")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.glass)
+        }
+    }
+
     private func profileRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
@@ -147,6 +239,64 @@ struct ProfileView: View {
             Text(value)
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 10)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+}
+
+// MARK: - Model picker row
+
+private struct ModelPickerRow: View {
+    let model: AvailableModel
+    let isSelected: Bool
+    let isDisabled: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(isSelected ? Color.blue : Color.secondary)
+                    .padding(.top, 2)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    headerRow
+                    Text(model.subtitle)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(rowGlass, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+    }
+
+    private var headerRow: some View {
+        HStack(spacing: 6) {
+            Text(model.displayName)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.primary)
+            Text(model.humanSize)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if model.isDownloaded {
+                Image(systemName: "arrow.down.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.system(size: 14))
+            }
+        }
+    }
+
+    private var rowGlass: Glass {
+        isSelected ? .regular.tint(.blue.opacity(0.18)) : .regular
     }
 }

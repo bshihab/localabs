@@ -1,42 +1,78 @@
 import Foundation
 
-/// Handles securely downloading large .gguf weights files in the background.
-class ModelDownloader: NSObject, URLSessionDownloadDelegate {
-    var onProgress: ((Double) -> Void)?
-    var completion: ((Error?) -> Void)?
-    var destinationURL: URL?
-    
+/// Streams a .gguf file to disk with byte-accurate progress and cancel support.
+final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
+    struct Progress {
+        let fractionCompleted: Double
+        let bytesWritten: Int64
+        let bytesExpected: Int64
+    }
+
+    var onProgress: ((Progress) -> Void)?
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var destinationURL: URL?
+    private var session: URLSession?
+    private var task: URLSessionDownloadTask?
+
     func download(from url: URL, to destination: URL) async throws {
         self.destinationURL = destination
-        return try await withCheckedThrowingContinuation { continuation in
-            self.completion = { error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume()
-                }
+
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                let session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
+                self.session = session
+                let task = session.downloadTask(with: url)
+                self.task = task
+                task.resume()
             }
-            // Use the main queue so we can safely update the UI with progress
-            let session = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
-            session.downloadTask(with: url).resume()
+        } onCancel: { [weak self] in
+            self?.cancel()
         }
     }
-    
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        let progress = (Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)) * 100
-        self.onProgress?(progress)
+
+    func cancel() {
+        task?.cancel()
+        task = nil
     }
-    
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        onProgress?(Progress(
+            fractionCompleted: Double(totalBytesWritten) / Double(totalBytesExpectedToWrite),
+            bytesWritten: totalBytesWritten,
+            bytesExpected: totalBytesExpectedToWrite
+        ))
+    }
+
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let dest = destinationURL else { return }
         try? FileManager.default.removeItem(at: dest)
-        try? FileManager.default.moveItem(at: location, to: dest)
-        self.completion?(nil)
-    }
-    
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error = error {
-            self.completion?(error)
+        do {
+            try FileManager.default.moveItem(at: location, to: dest)
+        } catch {
+            continuation?.resume(throwing: error)
+            continuation = nil
         }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        defer {
+            self.session?.invalidateAndCancel()
+            self.session = nil
+            self.task = nil
+        }
+        if let error {
+            continuation?.resume(throwing: error)
+        } else {
+            continuation?.resume()
+        }
+        continuation = nil
     }
 }
