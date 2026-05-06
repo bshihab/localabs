@@ -1,5 +1,5 @@
 import Foundation
-import LlamaSwift
+import Llama
 
 public class LlamaContext {
     private var model: OpaquePointer?
