@@ -361,6 +361,12 @@ struct FollowUpChatView: View {
         let question = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
 
+        // Snapshot prior completed turns BEFORE appending the new user message
+        // and the empty AI placeholder.
+        let history: [InferenceEngine.ChatTurn] = messages.map {
+            InferenceEngine.ChatTurn(isUser: $0.role == .user, content: $0.content)
+        }
+
         messages.append(ChatMessage(role: .user, content: question))
         inputText = ""
         isThinking = true
@@ -372,6 +378,7 @@ struct FollowUpChatView: View {
         Task {
             let stream = engine.askFollowUp(
                 question: question,
+                history: history,
                 selectedText: selectedText,
                 reportContext: fullReportContext,
                 ocrText: ocrText

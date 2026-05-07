@@ -244,18 +244,27 @@ final class InferenceEngine: ObservableObject {
 
     // MARK: - Follow-Up Chat
 
+    struct ChatTurn: Sendable {
+        let isUser: Bool
+        let content: String
+    }
+
     /// Streams the answer to a highlighted-text follow-up question.
     /// The caller iterates the stream and appends each piece to a chat bubble.
+    /// `history` is every prior completed turn in the same chat sheet,
+    /// alternating user/model starting with user. Pass `[]` for the first
+    /// question. The system context (selected text, report excerpt, profile)
+    /// is folded into the first user turn; subsequent turns are raw.
     func askFollowUp(
         question: String,
+        history: [ChatTurn] = [],
         selectedText: String,
         reportContext: String,
         ocrText: String
     ) -> AsyncStream<String> {
         let profile = UserProfile.load()
 
-        let prompt = """
-        <start_of_turn>user
+        let systemHeader = """
         You are an empathetic medical assistant. The user has a lab report and is asking about specific text they highlighted.
 
         Context from their full report analysis:
@@ -268,12 +277,20 @@ final class InferenceEngine: ObservableObject {
         - Conditions: \(profile.medicalConditions.isEmpty ? "None reported" : profile.medicalConditions)
         - Medications: \(profile.medications.isEmpty ? "None reported" : profile.medications)
 
-        Their question: "\(question)"
-
-        Provide a clear, empathetic answer in 2-4 sentences. Use simple language. If the highlighted text contains a medical term, define it. If it's a lab value, explain whether it's normal and what it means.
-        <end_of_turn>
-        <start_of_turn>model
+        Provide clear, empathetic answers in 2-4 sentences. Use simple language. If the highlighted text contains a medical term, define it. If it's a lab value, explain whether it's normal and what it means.
         """
+
+        var prompt = ""
+        if let firstTurn = history.first, firstTurn.isUser {
+            prompt += "<start_of_turn>user\n\(systemHeader)\n\nTheir first question: \"\(firstTurn.content)\"\n<end_of_turn>\n"
+            for turn in history.dropFirst() {
+                let role = turn.isUser ? "user" : "model"
+                prompt += "<start_of_turn>\(role)\n\(turn.content)\n<end_of_turn>\n"
+            }
+            prompt += "<start_of_turn>user\n\(question)\n<end_of_turn>\n<start_of_turn>model\n"
+        } else {
+            prompt += "<start_of_turn>user\n\(systemHeader)\n\nTheir question: \"\(question)\"\n<end_of_turn>\n<start_of_turn>model\n"
+        }
 
         guard let context = llamaContext else {
             let model = selectedModel
