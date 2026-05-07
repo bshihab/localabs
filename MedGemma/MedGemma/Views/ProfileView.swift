@@ -251,7 +251,10 @@ struct ProfileView: View {
     }
 
     private func formatBytes(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        // Whole MB only (decimal megabytes, matching ByteCountFormatter's .file
+        // convention). Avoids the jittery fractional digits that ByteCountFormatter
+        // produces when it auto-switches units.
+        "\(bytes / 1_000_000) MB"
     }
 }
 
