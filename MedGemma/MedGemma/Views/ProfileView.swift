@@ -129,6 +129,13 @@ struct ProfileView: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                HStack(spacing: 6) {
+                    Image(systemName: "bell.badge")
+                        .font(.caption)
+                    Text("You'll get a notification when the download is done — feel free to switch apps.")
+                        .font(.caption)
+                }
+                .foregroundStyle(.secondary)
                 Button("Cancel", role: .destructive) {
                     engine.cancelDownload()
                 }
