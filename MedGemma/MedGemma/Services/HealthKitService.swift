@@ -3,6 +3,7 @@ import HealthKit
 
 /// Reads historical health metrics from Apple Health (HealthKit).
 /// All data stays on-device — nothing is uploaded.
+@MainActor
 class HealthKitService {
     
     static let shared = HealthKitService()

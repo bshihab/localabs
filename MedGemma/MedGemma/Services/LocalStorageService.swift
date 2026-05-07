@@ -5,6 +5,7 @@ import Foundation
 /// (Retrieval-Augmented Generation) so MedGemma can reference past reports.
 ///
 /// All data stays on the phone — nothing is uploaded to the cloud.
+@MainActor
 class LocalStorageService {
     
     static let shared = LocalStorageService()
