@@ -14,7 +14,7 @@ import llama
 public final class LlamaContext: @unchecked Sendable {
     private let model: OpaquePointer
     private let context: OpaquePointer
-    private let sampler: OpaquePointer
+    private let sampler: UnsafeMutablePointer<llama_sampler>
 
     public init(modelPath: String) throws {
         llama_backend_init()
@@ -32,7 +32,7 @@ public final class LlamaContext: @unchecked Sendable {
 
         var ctxParams = llama_context_default_params()
         ctxParams.n_ctx = 2048
-        ctxParams.n_threads = UInt32(max(1, ProcessInfo.processInfo.processorCount - 1))
+        ctxParams.n_threads = Int32(max(1, ProcessInfo.processInfo.processorCount - 1))
         ctxParams.n_threads_batch = ctxParams.n_threads
 
         guard let context = llama_new_context_with_model(model, ctxParams) else {
@@ -102,7 +102,8 @@ public final class LlamaContext: @unchecked Sendable {
 
     private func runPredict(prompt: String, maxTokens: Int, onToken: (String) -> Void) {
         // Each call is independent — clear residual state from prior generations.
-        llama_kv_cache_clear(context)
+        // llama.cpp b7484 replaced llama_kv_cache_clear with the unified memory API.
+        llama_memory_clear(llama_get_memory(context), true)
         llama_sampler_reset(sampler)
 
         let promptCStr = Array(prompt.utf8CString)
