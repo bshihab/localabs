@@ -13,6 +13,7 @@ import llama
 /// call. Don't call `predict` concurrently on the same instance.
 public final class LlamaContext: @unchecked Sendable {
     private let model: OpaquePointer
+    private let vocab: OpaquePointer
     private let context: OpaquePointer
     private let sampler: UnsafeMutablePointer<llama_sampler>
 
@@ -27,6 +28,20 @@ public final class LlamaContext: @unchecked Sendable {
                 domain: "LlamaError",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to load model from \(modelPath)"]
+            )
+        }
+
+        // llama.cpp b7484 split the vocab off the model — tokenize/token_to_piece/
+        // token_is_eog now take a `llama_vocab *`, not a `llama_model *`. Both come
+        // through Swift as OpaquePointer, so passing the wrong one type-checks but
+        // EXC_BAD_ACCESS's at runtime when llama.cpp dereferences the model
+        // pointer expecting vocab struct layout. Cache the vocab once at init.
+        guard let vocab = llama_model_get_vocab(model) else {
+            llama_free_model(model)
+            throw NSError(
+                domain: "LlamaError",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to extract vocab from model"]
             )
         }
 
@@ -76,6 +91,7 @@ public final class LlamaContext: @unchecked Sendable {
         llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED))
 
         self.model = model
+        self.vocab = vocab
         self.context = context
         self.sampler = sampler
     }
@@ -110,7 +126,7 @@ public final class LlamaContext: @unchecked Sendable {
         let nCtx = Int32(llama_n_ctx(context))
         var promptTokens = [llama_token](repeating: 0, count: Int(nCtx))
         let nPromptTokens = llama_tokenize(
-            model,
+            vocab,
             promptCStr,
             Int32(promptCStr.count - 1), // exclude trailing NUL
             &promptTokens,
@@ -133,14 +149,14 @@ public final class LlamaContext: @unchecked Sendable {
             if Task.isCancelled { return }
 
             let nextToken = llama_sampler_sample(sampler, context, -1)
-            if llama_token_is_eog(model, nextToken) { return }
+            if llama_token_is_eog(vocab, nextToken) { return }
 
             llama_sampler_accept(sampler, nextToken)
 
             // Convert the token id to its UTF-8 piece. 128 chars covers any
             // single sub-word in Gemma's vocab with room to spare.
             var buf = [CChar](repeating: 0, count: 128)
-            let nChars = llama_token_to_piece(model, nextToken, &buf, Int32(buf.count), 0, true)
+            let nChars = llama_token_to_piece(vocab, nextToken, &buf, Int32(buf.count), 0, true)
             if nChars > 0 {
                 buf[Int(nChars)] = 0
                 let piece = String(cString: buf)
