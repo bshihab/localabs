@@ -12,9 +12,8 @@ settings:
     DEVELOPMENT_TEAM: ""
 
 packages:
-  llama.swift:
-    url: https://github.com/mattt/llama.swift
-    exactVersion: 1.7484.0
+  llama-binary:
+    path: ../llama-binary
 
 targets:
   MedGemma:
@@ -23,8 +22,8 @@ targets:
     sources:
       - MedGemma
     dependencies:
-      - package: llama.swift
-        product: Llama
+      - package: llama-binary
+        product: llama
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bilalshihab.MedGemma

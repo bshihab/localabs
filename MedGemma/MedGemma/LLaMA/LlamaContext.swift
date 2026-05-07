@@ -1,5 +1,5 @@
 import Foundation
-import Llama
+import llama
 
 /// Swift wrapper around llama.cpp's text-generation pipeline.
 ///
