@@ -12,6 +12,8 @@ struct DocumentViewerView: View {
     @State private var selectedBlocks: Set<UUID> = []
     @State private var showChat = false
     @State private var renderedImageSize: CGSize = .zero
+    @State private var lassoPoints: [CGPoint] = []
+    @State private var isLassoing = false
     @Namespace private var glassNamespace
 
     struct TextBlock: Identifiable {
@@ -58,7 +60,8 @@ struct DocumentViewerView: View {
             FollowUpChatView(
                 selectedText: getSelectedText(),
                 fullReportContext: report.patientSummary,
-                ocrText: report.rawText
+                ocrText: report.rawText,
+                isWholeDocumentAsk: selectedBlocks.isEmpty
             )
             .environmentObject(engine)
             .presentationBackground(.thinMaterial)
@@ -71,6 +74,11 @@ struct DocumentViewerView: View {
 
     private func imageScroller(image: UIImage) -> some View {
         GeometryReader { geo in
+            // Disable scroll for single-page docs (the common case for lab reports)
+            // AND while the user is actively drawing a lasso — otherwise SwiftUI's
+            // ScrollView would steal the drag and turn it into a vertical pan.
+            let fitsOnePage = renderedImageSize.height > 0
+                && renderedImageSize.height <= geo.size.height
             ScrollView {
                 ZStack(alignment: .topLeading) {
                     Image(uiImage: image)
@@ -121,10 +129,75 @@ struct DocumentViewerView: View {
                         }
                         .frame(width: renderedImageSize.width, height: renderedImageSize.height)
                     }
+
+                    // Lasso path - drawn in the same coordinate space as the
+                    // image overlay grid so polygon hit-test against the
+                    // recognized blocks lines up exactly.
+                    if !lassoPoints.isEmpty {
+                        LassoPath(points: lassoPoints)
+                            .frame(width: renderedImageSize.width, height: renderedImageSize.height)
+                            .allowsHitTesting(false)
+                    }
                 }
+                .contentShape(Rectangle())
+                .gesture(lassoGesture)
                 .padding(.bottom, 100)
             }
+            .scrollDisabled(fitsOnePage || isLassoing)
         }
+    }
+
+    private var lassoGesture: some Gesture {
+        // 8pt minimum — short taps still go to the per-block onTapGesture,
+        // longer drags fall through to here.
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                if !isLassoing {
+                    isLassoing = true
+                    lassoPoints = [value.startLocation]
+                }
+                // Throttle by minimum distance: keeps the path smooth and
+                // saves SwiftUI from re-rendering for every sub-pixel move.
+                if let last = lassoPoints.last,
+                   hypot(value.location.x - last.x, value.location.y - last.y) > 4 {
+                    lassoPoints.append(value.location)
+                }
+            }
+            .onEnded { _ in
+                let polygon = lassoPoints
+                let hitIDs: [UUID] = recognizedBlocks.compactMap { block in
+                    let rect = convertRect(block.boundingBox, in: renderedImageSize)
+                    let center = CGPoint(x: rect.midX, y: rect.midY)
+                    return Self.pointInPolygon(center, polygon: polygon) ? block.id : nil
+                }
+
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.78)) {
+                    if !hitIDs.isEmpty {
+                        selectedBlocks.formUnion(hitIDs)
+                    }
+                    lassoPoints = []
+                    isLassoing = false
+                }
+            }
+    }
+
+    /// Standard ray-casting point-in-polygon test. Returns true if `point`
+    /// is inside the closed polygon defined by `polygon`'s vertices (with
+    /// implicit closing segment from last back to first).
+    private static func pointInPolygon(_ point: CGPoint, polygon: [CGPoint]) -> Bool {
+        guard polygon.count >= 3 else { return false }
+        var inside = false
+        var j = polygon.count - 1
+        for i in 0..<polygon.count {
+            let xi = polygon[i].x, yi = polygon[i].y
+            let xj = polygon[j].x, yj = polygon[j].y
+            if ((yi > point.y) != (yj > point.y)) &&
+                (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi) {
+                inside.toggle()
+            }
+            j = i
+        }
+        return inside
     }
 
     private var emptyState: some View {
@@ -138,25 +211,32 @@ struct DocumentViewerView: View {
         }
     }
 
-    @ViewBuilder
     private var askPill: some View {
-        if !selectedBlocks.isEmpty {
-            Button {
-                showChat = true
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 16, weight: .semibold))
-                    Text("Ask about \(selectedBlocks.count) selection\(selectedBlocks.count > 1 ? "s" : "")")
-                        .font(.system(size: 16, weight: .semibold))
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
-                .frame(maxWidth: .infinity)
+        Button {
+            showChat = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: selectedBlocks.isEmpty ? "sparkles" : "highlighter")
+                    .font(.system(size: 16, weight: .semibold))
+                Text(askLabel)
+                    .font(.system(size: 16, weight: .semibold))
+                    .contentTransition(.opacity)
             }
-            .buttonStyle(.glassProminent)
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.glassProminent)
+        .animation(.easeInOut(duration: 0.25), value: selectedBlocks.count)
+    }
+
+    private var askLabel: String {
+        if selectedBlocks.isEmpty {
+            return "Ask about this document"
+        }
+        return selectedBlocks.count == 1
+            ? "Elaborate on highlighted text"
+            : "Elaborate on \(selectedBlocks.count) highlights"
     }
 
     private func loadImage() {
@@ -186,10 +266,43 @@ struct DocumentViewerView: View {
     }
 
     private func getSelectedText() -> String {
-        recognizedBlocks
+        // Empty selection → ask about the whole document. Hand the model the
+        // full OCR text so it has something to anchor the answer to.
+        if selectedBlocks.isEmpty {
+            return recognizedBlocks.map(\.text).joined(separator: "\n")
+        }
+        return recognizedBlocks
             .filter { selectedBlocks.contains($0.id) }
             .map(\.text)
             .joined(separator: "\n")
+    }
+}
+
+// MARK: - Glowing lasso path
+
+/// Apple-Intelligence-style multicolor glowing stroke. Drawn on top of the
+/// document while the user is dragging.
+private struct LassoPath: View {
+    let points: [CGPoint]
+
+    var body: some View {
+        Path { path in
+            guard let first = points.first else { return }
+            path.move(to: first)
+            for p in points.dropFirst() {
+                path.addLine(to: p)
+            }
+        }
+        .stroke(
+            LinearGradient(
+                colors: [.cyan, .blue, .purple, .pink, .blue, .cyan],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+        )
+        .shadow(color: .blue.opacity(0.7), radius: 10)
+        .shadow(color: .cyan.opacity(0.5), radius: 16)
     }
 }
 
@@ -199,6 +312,7 @@ struct FollowUpChatView: View {
     let selectedText: String
     let fullReportContext: String
     let ocrText: String
+    var isWholeDocumentAsk: Bool = false
     @EnvironmentObject var engine: InferenceEngine
     @Environment(\.dismiss) var dismiss
 
@@ -266,7 +380,9 @@ struct FollowUpChatView: View {
                 }
             }
             .onAppear {
-                inputText = "What does this mean in simple terms? Is this normal?"
+                inputText = isWholeDocumentAsk
+                    ? "Can you summarize this report in plain language?"
+                    : "What does this mean in simple terms? Is this normal?"
                 sendMessage()
             }
         }
@@ -274,12 +390,22 @@ struct FollowUpChatView: View {
 
     private var selectionBanner: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Selected Text", systemImage: "text.quote")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.blue)
-            Text(selectedText)
-                .font(.system(size: 14))
-                .foregroundStyle(.primary)
+            Label(
+                isWholeDocumentAsk ? "Whole Document" : "Selected Text",
+                systemImage: isWholeDocumentAsk ? "doc.text" : "text.quote"
+            )
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.blue)
+
+            if isWholeDocumentAsk {
+                Text("Asking about the entire scan.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(selectedText)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.primary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
