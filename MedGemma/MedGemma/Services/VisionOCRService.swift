@@ -7,8 +7,16 @@ import CoreGraphics
 /// This is the "Eyes" of the pipeline — zero download size, runs on the Neural Engine.
 class VisionOCRService {
 
-    /// Extracts all text from a UIImage using Apple's Vision framework.
-    /// Uses the highest accuracy recognition level with language correction enabled.
+    /// One recognized text region: the string + its normalized bounding box
+    /// (Vision's [0,1] coordinate space, origin bottom-left). Sendable so
+    /// the OCR work can cross actor boundaries without copying observations.
+    struct RecognizedBlock: Sendable {
+        let text: String
+        let boundingBox: CGRect
+    }
+
+    /// Extracts text observations as `RecognizedBlock`s. Used by the document
+    /// viewer to lay tap targets over the original scan.
     ///
     /// Two important things this does that the naive version didn't:
     ///   1. Downscales the image to ~2048px on its longest side before OCR.
@@ -18,7 +26,11 @@ class VisionOCRService {
     ///   2. Runs `handler.perform` on a userInitiated background queue.
     ///      Vision's perform is synchronous and was previously blocking
     ///      MainActor for the full OCR duration.
-    static func extractText(from image: UIImage) async throws -> String {
+    ///
+    /// Bounding boxes stay in Vision's normalized coordinates regardless of
+    /// the OCR input resolution, so callers can downscale-for-recognition
+    /// while still rendering overlays against the full-resolution image.
+    static func extractBlocks(from image: UIImage) async throws -> [RecognizedBlock] {
         guard let originalCGImage = image.cgImage else {
             throw OCRError.invalidImage
         }
@@ -34,11 +46,14 @@ class VisionOCRService {
                         return
                     }
                     guard let observations = req.results as? [VNRecognizedTextObservation] else {
-                        continuation.resume(returning: "")
+                        continuation.resume(returning: [])
                         return
                     }
-                    let lines = observations.compactMap { $0.topCandidates(1).first?.string }
-                    continuation.resume(returning: lines.joined(separator: "\n"))
+                    let blocks: [RecognizedBlock] = observations.compactMap { obs in
+                        guard let text = obs.topCandidates(1).first?.string else { return nil }
+                        return RecognizedBlock(text: text, boundingBox: obs.boundingBox)
+                    }
+                    continuation.resume(returning: blocks)
                 }
                 request.recognitionLevel = .accurate
                 request.usesLanguageCorrection = true
@@ -55,6 +70,13 @@ class VisionOCRService {
                 }
             }
         }
+    }
+
+    /// Convenience: all OCR text joined by newlines. The pipeline calls this
+    /// when it doesn't need positions.
+    static func extractText(from image: UIImage) async throws -> String {
+        let blocks = try await extractBlocks(from: image)
+        return blocks.map(\.text).joined(separator: "\n")
     }
 
     /// Pure-CoreGraphics downscale (no UIKit drawing context, so it's safe to

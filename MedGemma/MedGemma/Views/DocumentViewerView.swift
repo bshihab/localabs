@@ -165,29 +165,15 @@ struct DocumentViewerView: View {
               let image = UIImage(data: data) else { return }
 
         scanImage = image
-        recognizeText(in: image)
-    }
 
-    private func recognizeText(in image: UIImage) {
-        guard let cgImage = image.cgImage else { return }
-
-        let request = VNRecognizeTextRequest { request, _ in
-            guard let observations = request.results as? [VNRecognizedTextObservation] else { return }
-
-            DispatchQueue.main.async {
-                self.recognizedBlocks = observations.compactMap { obs in
-                    guard let topCandidate = obs.topCandidates(1).first else { return nil }
-                    return TextBlock(text: topCandidate.string, boundingBox: obs.boundingBox)
-                }
-            }
-        }
-
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-            try? handler.perform([request])
+        // Route through VisionOCRService.extractBlocks so we get the same
+        // downscale + background-queue safety as the initial scan path.
+        // Running Vision on the raw stored JPEG (full sensor resolution)
+        // while MedGemma 4B is still resident in RAM was getting this view
+        // jetsam-killed the moment the user opened it.
+        Task {
+            let blocks = (try? await VisionOCRService.extractBlocks(from: image)) ?? []
+            recognizedBlocks = blocks.map { TextBlock(text: $0.text, boundingBox: $0.boundingBox) }
         }
     }
 
