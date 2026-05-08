@@ -57,12 +57,14 @@ struct DocumentViewerView: View {
             }
         }
         .sheet(isPresented: $showChat) {
+            let bd = lassoBreakdown
             FollowUpChatView(
                 selectedText: getSelectedText(),
                 fullReportContext: report.patientSummary,
                 ocrText: report.rawText,
                 isWholeDocumentAsk: selectedBlocks.isEmpty,
-                detectedTable: detectedTable
+                detectedTable: bd.table,
+                extraText: bd.extraText
             )
             .environmentObject(engine)
             .presentationBackground(.thinMaterial)
@@ -292,32 +294,68 @@ struct DocumentViewerView: View {
         if selectedBlocks.isEmpty {
             return recognizedBlocks.map(\.text).joined(separator: "\n")
         }
-        // If the selection forms a table, hand the model the markdown form
-        // so it can reason positionally about cell relationships rather than
-        // guess from a flat list of strings.
-        if let table = detectedTable {
+        // Hand the LLM both pieces when the selection has a table AND
+        // surrounding paragraphs: markdown table first (reasons positionally),
+        // then the prose. Either may be empty depending on what was lassoed.
+        let bd = lassoBreakdown
+        switch (bd.table, bd.extraText.isEmpty) {
+        case (let table?, true):
             return table.asMarkdown()
+        case (let table?, false):
+            return table.asMarkdown() + "\n\n" + bd.extraText
+        case (nil, _):
+            return bd.extraText.isEmpty
+                ? recognizedBlocks.filter { selectedBlocks.contains($0.id) }
+                    .map(\.text).joined(separator: "\n")
+                : bd.extraText
         }
-        return recognizedBlocks
-            .filter { selectedBlocks.contains($0.id) }
-            .map(\.text)
-            .joined(separator: "\n")
     }
 
-    /// Runs table detection over whatever text blocks are currently selected.
-    /// Returns nil if either nothing is selected or the selection's geometry
-    /// doesn't look table-shaped — `getSelectedText` falls back to plain text
-    /// in that case.
-    private var detectedTable: VisionOCRService.RecognizedTable? {
-        guard !selectedBlocks.isEmpty else { return nil }
+    /// Runs the table-vs-paragraph breakdown over the current lasso selection.
+    /// Always returns a value (never nil); callers check `.table` and
+    /// `.extraText` to decide what to render.
+    private var lassoBreakdown: VisionOCRService.LassoBreakdown {
+        guard !selectedBlocks.isEmpty else {
+            return VisionOCRService.LassoBreakdown(table: nil, extraText: "")
+        }
         let selected = recognizedBlocks
             .filter { selectedBlocks.contains($0.id) }
             .map { VisionOCRService.RecognizedBlock(text: $0.text, boundingBox: $0.boundingBox) }
-        return VisionOCRService.detectTable(from: selected)
+        return VisionOCRService.breakdown(of: selected)
+    }
+
+    /// Convenience accessor for the table portion (used by the sheet).
+    private var detectedTable: VisionOCRService.RecognizedTable? {
+        lassoBreakdown.table
     }
 }
 
 // MARK: - Glowing lasso path
+
+/// Plain-text card used by the chat banner. Rendered alongside (or instead
+/// of) `DetectedTableBanner` depending on what the lasso captured. Title is
+/// dynamic so we can say "Surrounding Text" when there's also a table, and
+/// just "Selected Text" otherwise.
+private struct ExtraTextBanner: View {
+    let text: String
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: "text.quote")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.blue)
+
+            Text(text)
+                .textSelection(.enabled)
+                .font(.system(size: 14))
+                .foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
 
 /// Renders a `RecognizedTable` as an actual SwiftUI Grid in the chat banner.
 /// Each cell is independently selectable so the user can copy a single value
@@ -402,6 +440,7 @@ struct FollowUpChatView: View {
     let ocrText: String
     var isWholeDocumentAsk: Bool = false
     var detectedTable: VisionOCRService.RecognizedTable? = nil
+    var extraText: String = ""
     @EnvironmentObject var engine: InferenceEngine
     @Environment(\.dismiss) var dismiss
 
@@ -491,34 +530,46 @@ struct FollowUpChatView: View {
 
     @ViewBuilder
     private var selectionBanner: some View {
-        if let table = detectedTable {
-            // Lasso captured something with grid structure → show it as an
-            // actual table the user can read and copy from cell-by-cell.
-            DetectedTableBanner(table: table)
+        if isWholeDocumentAsk {
+            wholeDocumentBanner
         } else {
-            VStack(alignment: .leading, spacing: 8) {
-                Label(
-                    isWholeDocumentAsk ? "Whole Document" : "Selected Text",
-                    systemImage: isWholeDocumentAsk ? "doc.text" : "text.quote"
-                )
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.blue)
-
-                if isWholeDocumentAsk {
-                    Text("Asking about the entire scan.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text(selectedText)
-                        .textSelection(.enabled)
-                        .font(.system(size: 14))
-                        .foregroundStyle(.primary)
+            // The lasso may have captured a table, paragraph text, or both.
+            // Render whichever pieces are non-empty as separate banners so
+            // the structure stays clear (table widget for the grid, plain
+            // text card for the surrounding prose).
+            VStack(alignment: .leading, spacing: 12) {
+                if let table = detectedTable {
+                    DetectedTableBanner(table: table)
+                }
+                if !extraText.isEmpty {
+                    ExtraTextBanner(
+                        text: extraText,
+                        title: detectedTable != nil ? "Surrounding Text" : "Selected Text"
+                    )
+                }
+                // Defensive fallback — only fires if both pieces were empty
+                // (e.g., a single-block selection that's also too short for
+                // the table heuristic). Keeps the banner non-empty so the
+                // user always has visible context.
+                if detectedTable == nil && extraText.isEmpty {
+                    ExtraTextBanner(text: selectedText, title: "Selected Text")
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
+    }
+
+    private var wholeDocumentBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Whole Document", systemImage: "doc.text")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.blue)
+            Text("Asking about the entire scan.")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func messageRow(message: ChatMessage) -> some View {

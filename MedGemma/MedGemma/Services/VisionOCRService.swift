@@ -44,35 +44,53 @@ class VisionOCRService {
         }
     }
 
-    /// Tries to recover a table structure from a set of recognized blocks
-    /// (typically the user's lasso selection). Returns nil if the layout
-    /// doesn't look table-like — caller falls back to plain text.
+    /// What `breakdown(of:)` returns: an optional table, plus any non-table
+    /// text in the same selection rendered separately. When the user lassos
+    /// a region that contains a table AND surrounding paragraphs (e.g., a
+    /// "Note:" line below the lab values), `extraText` carries the
+    /// paragraphs in document order so the UI can show them apart from the
+    /// table widget.
+    struct LassoBreakdown: Sendable {
+        let table: RecognizedTable?
+        let extraText: String
+    }
+
+    /// Splits a set of recognized blocks into a structured table region
+    /// (when present) and any surrounding paragraph text. Used by the chat
+    /// sheet to render tables and prose separately.
     ///
-    /// Algorithm, in order:
-    ///   1. Cluster blocks into rows by Y-center proximity. Tolerance is
-    ///      60% of the median text height, which is loose enough to absorb
-    ///      slight baseline drift in scanned docs but tight enough to keep
-    ///      adjacent rows separate.
-    ///   2. Cluster left-edge X positions across all rows into column
-    ///      boundaries. Tolerance is 4% of normalized image width — anything
-    ///      closer is treated as the same column. Most lab tables are
-    ///      left-aligned within columns, so left edges are the cleanest
-    ///      anchor (right edges vary with content length).
-    ///   3. Snap each block to its nearest column boundary. Multiple blocks
-    ///      landing in the same (row, col) get joined with a space — handles
-    ///      the case where Vision splits a cell into two observations
-    ///      ("70-100", "mg/dL").
-    ///   4. Validate: need ≥2 rows AND ≥2 columns AND ≥50% of expected
-    ///      cells filled AND average cell length ≤ 60 chars. The last check
-    ///      rules out paragraph text that happens to wrap on consistent
-    ///      indentation (looks gridlike but isn't).
-    static func detectTable(from blocks: [RecognizedBlock]) -> RecognizedTable? {
-        guard blocks.count >= 4 else { return nil }
+    /// Algorithm:
+    ///   1. Cluster blocks into rows by Y-center proximity (tolerance =
+    ///      60% of median text height).
+    ///   2. Find global column boundaries by clustering left-edge X
+    ///      positions across all rows (tolerance = 4% of normalized width).
+    ///   3. Classify each row as tabular vs. paragraph. A row is tabular
+    ///      iff its blocks span ≥2 distinct columns AND no single block in
+    ///      the row exceeds 60 chars (long blocks are sentences, not cells).
+    ///   4. Find the longest contiguous run of tabular rows — that's the
+    ///      table. Everything outside that run becomes paragraph text,
+    ///      preserved in document order (above-table prose then
+    ///      below-table prose).
+    ///   5. Validate the candidate table: need ≥2 rows, ≥2 columns, and
+    ///      ≥50% of expected cells filled. If it fails any check, drop the
+    ///      table and return everything as plain text.
+    ///
+    /// The contiguous-run requirement matters because lab reports often
+    /// have a section heading + table + footnote layout. We want to
+    /// extract the table portion cleanly without folding the heading into
+    /// row 0 or the footnote into the last row.
+    static func breakdown(of blocks: [RecognizedBlock]) -> LassoBreakdown {
+        guard !blocks.isEmpty else {
+            return LassoBreakdown(table: nil, extraText: "")
+        }
+
+        // Selections too small to be meaningful tables get returned as text.
+        guard blocks.count >= 4 else {
+            return LassoBreakdown(table: nil, extraText: joinedText(blocks))
+        }
 
         // ── Step 1: row clustering by Y-center proximity ──
-        // Vision uses bottom-left origin, so descending midY = top-down.
         let sortedByY = blocks.sorted { $0.boundingBox.midY > $1.boundingBox.midY }
-
         let sortedHeights = blocks.map(\.boundingBox.height).sorted()
         let medianHeight = sortedHeights[sortedHeights.count / 2]
         let rowTolerance = medianHeight * 0.6
@@ -86,12 +104,10 @@ class VisionOCRService {
                 rows.append([block])
             }
         }
-        guard rows.count >= 2 else { return nil }
 
-        // ── Step 2: column boundary detection by left-edge clustering ──
+        // ── Step 2: global column boundaries ──
         let columnTolerance: CGFloat = 0.04
         let sortedLeftEdges = blocks.map(\.boundingBox.minX).sorted()
-
         var columnEdges: [CGFloat] = []
         var currentCluster: [CGFloat] = [sortedLeftEdges[0]]
         for edge in sortedLeftEdges.dropFirst() {
@@ -103,35 +119,111 @@ class VisionOCRService {
             }
         }
         columnEdges.append(currentCluster.reduce(0, +) / CGFloat(currentCluster.count))
-        guard columnEdges.count >= 2 else { return nil }
 
-        // ── Step 3: snap blocks into (row, column) cells ──
+        // ── Step 3: classify each row ──
+        // Tabular = spans ≥2 columns AND no single block is sentence-length.
+        // The length check kills the false-positive where a multi-word
+        // paragraph row hits multiple columns just because Vision split
+        // the words across different X positions.
+        let rowIsTabular: [Bool] = rows.map { row in
+            var hitColumns = Set<Int>()
+            var maxBlockLength = 0
+            for block in row {
+                let nearest = columnEdges.enumerated().min { a, b in
+                    abs(a.element - block.boundingBox.minX)
+                        < abs(b.element - block.boundingBox.minX)
+                }!
+                hitColumns.insert(nearest.offset)
+                maxBlockLength = max(maxBlockLength, block.text.count)
+            }
+            return hitColumns.count >= 2 && maxBlockLength <= 60
+        }
+
+        // ── Step 4: longest contiguous tabular run ──
+        var bestStart = 0
+        var bestLength = 0
+        var runStart = 0
+        for (i, isTabular) in rowIsTabular.enumerated() {
+            if isTabular {
+                if i == 0 || !rowIsTabular[i - 1] { runStart = i }
+                let runLength = i - runStart + 1
+                if runLength > bestLength {
+                    bestStart = runStart
+                    bestLength = runLength
+                }
+            }
+        }
+        let tableRange = bestStart..<(bestStart + bestLength)
+
+        // Need at least 2 tabular rows AND 2 columns to have a table at all.
+        guard bestLength >= 2, columnEdges.count >= 2 else {
+            return LassoBreakdown(table: nil, extraText: joinedFromRows(rows))
+        }
+
+        // ── Step 5: build the grid from the tabular run only ──
         var grid: [[String]] = []
-        for row in rows {
+        for row in rows[tableRange] {
             var cells = [String](repeating: "", count: columnEdges.count)
             let leftSorted = row.sorted { $0.boundingBox.minX < $1.boundingBox.minX }
             for block in leftSorted {
                 let nearest = columnEdges.enumerated().min { a, b in
-                    abs(a.element - block.boundingBox.minX) < abs(b.element - block.boundingBox.minX)
+                    abs(a.element - block.boundingBox.minX)
+                        < abs(b.element - block.boundingBox.minX)
                 }!
                 let col = nearest.offset
-                cells[col] = cells[col].isEmpty ? block.text : cells[col] + " " + block.text
+                cells[col] = cells[col].isEmpty
+                    ? block.text
+                    : cells[col] + " " + block.text
             }
             grid.append(cells)
         }
 
-        // ── Step 4: validate this actually looks like a table ──
-        let totalExpected = rows.count * columnEdges.count
-        let filledCells = grid.flatMap { $0 }.filter { !$0.isEmpty }
-        let fillRate = Double(filledCells.count) / Double(totalExpected)
-        guard fillRate >= 0.5 else { return nil }
+        let totalExpected = grid.count * columnEdges.count
+        let filledCount = grid.flatMap { $0 }.filter { !$0.isEmpty }.count
+        let fillRate = Double(filledCount) / Double(totalExpected)
+        guard fillRate >= 0.5 else {
+            return LassoBreakdown(table: nil, extraText: joinedFromRows(rows))
+        }
 
-        // Long average cell length suggests paragraph text that just happens
-        // to wrap on consistent indentation, not a real table.
-        let avgCellLength = filledCells.map(\.count).reduce(0, +) / max(filledCells.count, 1)
-        guard avgCellLength <= 60 else { return nil }
+        // ── Step 6: paragraph rows outside the run become extraText ──
+        // Document order is preserved: above-table rows first, then
+        // below-table rows. Each row's blocks are joined left-to-right.
+        var extraLines: [String] = []
+        for (i, row) in rows.enumerated() where !tableRange.contains(i) {
+            let line = row.sorted { $0.boundingBox.minX < $1.boundingBox.minX }
+                .map(\.text)
+                .joined(separator: " ")
+            extraLines.append(line)
+        }
 
-        return RecognizedTable(rows: grid)
+        return LassoBreakdown(
+            table: RecognizedTable(rows: grid),
+            extraText: extraLines.joined(separator: "\n")
+        )
+    }
+
+    /// Convenience wrapper for callers that only want the table portion.
+    static func detectTable(from blocks: [RecognizedBlock]) -> RecognizedTable? {
+        breakdown(of: blocks).table
+    }
+
+    private static func joinedText(_ blocks: [RecognizedBlock]) -> String {
+        // Order top-down, then left-to-right within roughly-the-same row.
+        let sorted = blocks.sorted { lhs, rhs in
+            if abs(lhs.boundingBox.midY - rhs.boundingBox.midY) < 0.01 {
+                return lhs.boundingBox.minX < rhs.boundingBox.minX
+            }
+            return lhs.boundingBox.midY > rhs.boundingBox.midY
+        }
+        return sorted.map(\.text).joined(separator: "\n")
+    }
+
+    private static func joinedFromRows(_ rows: [[RecognizedBlock]]) -> String {
+        rows.map { row in
+            row.sorted { $0.boundingBox.minX < $1.boundingBox.minX }
+                .map(\.text)
+                .joined(separator: " ")
+        }.joined(separator: "\n")
     }
 
     /// Extracts text observations as `RecognizedBlock`s. Used by the document
