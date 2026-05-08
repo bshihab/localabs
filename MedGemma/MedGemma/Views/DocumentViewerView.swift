@@ -280,8 +280,9 @@ struct DocumentViewerView: View {
 
 // MARK: - Glowing lasso path
 
-/// Apple-Intelligence-style multicolor glowing stroke. Drawn on top of the
-/// document while the user is dragging.
+/// Soft blue glowing stroke. Drawn on top of the document while the user
+/// is dragging — single color so it doesn't fight the document for visual
+/// weight.
 private struct LassoPath: View {
     let points: [CGPoint]
 
@@ -294,15 +295,10 @@ private struct LassoPath: View {
             }
         }
         .stroke(
-            LinearGradient(
-                colors: [.cyan, .blue, .purple, .pink, .blue, .cyan],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
+            Color.blue.opacity(0.9),
             style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
         )
-        .shadow(color: .blue.opacity(0.7), radius: 10)
-        .shadow(color: .cyan.opacity(0.5), radius: 16)
+        .shadow(color: .blue.opacity(0.45), radius: 6)
     }
 }
 
@@ -422,9 +418,14 @@ struct FollowUpChatView: View {
             }
 
             Text(message.content)
+                .textSelection(.enabled)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .frame(maxWidth: 280, alignment: message.role == .user ? .trailing : .leading)
+                // maxWidth without alignment caps wrapping at 280pt but lets
+                // the bubble shrink to fit short messages. The previous
+                // alignment parameter forced the bubble to a full 280pt and
+                // glued short text to one edge, leaving a big empty side.
+                .frame(maxWidth: 280)
                 .glassEffect(
                     message.role == .user
                         ? .regular.tint(.blue.opacity(0.85))
