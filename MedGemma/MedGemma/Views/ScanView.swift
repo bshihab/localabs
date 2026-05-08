@@ -213,7 +213,7 @@ private struct LiveReportSectionsView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     ForEach(ReportSection.allCases) { section in
-                        SectionCard(
+                        LiveSectionCard(
                             section: section,
                             text: cleanText(for: section),
                             state: state(for: section)
@@ -269,7 +269,7 @@ private struct LiveReportSectionsView: View {
         return raw
     }
 
-    private func state(for section: ReportSection) -> SectionCardState {
+    private func state(for section: ReportSection) -> LiveSectionState {
         if !text(for: section).isEmpty {
             return section == activeSection ? .active : .complete
         }
@@ -312,14 +312,14 @@ private enum ReportSection: Int, CaseIterable, Identifiable {
     }
 }
 
-private enum SectionCardState {
+private enum LiveSectionState {
     case pending, active, complete
 }
 
-private struct SectionCard: View {
+private struct LiveSectionCard: View {
     let section: ReportSection
     let text: String
-    let state: SectionCardState
+    let state: LiveSectionState
 
     @State private var pulse = false
 
