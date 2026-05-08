@@ -289,14 +289,21 @@ final class InferenceEngine: ObservableObject {
     /// disambiguate cases where the same value appears on multiple pages.
     /// Single-page input gets no marker.
     private func combinePageTexts(_ pages: [String]) -> String {
-        let nonEmpty: [(Int, String)] = pages.enumerated().compactMap { idx, text in
+        // Plain loop — Swift's compactMap inference choked on the
+        // EnumeratedSequence's named tuple element ((offset:Int, element:String))
+        // when the closure tried to destructure it as `{ idx, text in }`.
+        var nonEmpty: [(index: Int, text: String)] = []
+        for (idx, text) in pages.enumerated() {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : (idx, trimmed)
+            if !trimmed.isEmpty {
+                nonEmpty.append((idx, trimmed))
+            }
         }
         guard nonEmpty.count > 1 else {
-            return nonEmpty.first?.1 ?? ""
+            return nonEmpty.first?.text ?? ""
         }
-        return nonEmpty.map { idx, text in "--- Page \(idx + 1) ---\n\(text)" }
+        return nonEmpty
+            .map { "--- Page \($0.index + 1) ---\n\($0.text)" }
             .joined(separator: "\n\n")
     }
 
