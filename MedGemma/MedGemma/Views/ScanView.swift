@@ -1,13 +1,15 @@
 import SwiftUI
 import PhotosUI
 import AVFoundation
+import UniformTypeIdentifiers
 
 struct ScanView: View {
     @EnvironmentObject var engine: InferenceEngine
     @State private var selectedImage: UIImage?
     @State private var report: StructuredReport?
     @State private var showCamera = false
-    @State private var pickerItem: PhotosPickerItem?
+    @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var showPDFPicker = false
     @State private var navigateToDashboard = false
     @State private var showPermissionAlert = false
 
@@ -28,6 +30,15 @@ struct ScanView: View {
                 NativeCameraView(image: $selectedImage)
                     .ignoresSafeArea()
             }
+            .sheet(isPresented: $showPDFPicker) {
+                PDFDocumentPicker { url in
+                    Task {
+                        report = await engine.analyzePDF(at: url)
+                        navigateToDashboard = true
+                    }
+                }
+                .ignoresSafeArea()
+            }
             .alert("Camera Access Required", isPresented: $showPermissionAlert) {
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -38,20 +49,32 @@ struct ScanView: View {
             } message: {
                 Text("Please enable camera access in Settings to scan lab reports.")
             }
-            .onChange(of: pickerItem) { _, newItem in
-                guard let newItem else { return }
+            .onChange(of: pickerItems) { _, newItems in
+                guard !newItems.isEmpty else { return }
                 Task {
-                    if let data = try? await newItem.loadTransferable(type: Data.self),
-                       let image = UIImage(data: data) {
-                        selectedImage = image
+                    // Load all picked photos in document order, dropping
+                    // any that fail to decode rather than crashing the
+                    // whole batch on one bad item.
+                    var images: [UIImage] = []
+                    for item in newItems {
+                        if let data = try? await item.loadTransferable(type: Data.self),
+                           let img = UIImage(data: data) {
+                            images.append(img)
+                        }
                     }
-                    pickerItem = nil
+                    pickerItems = []
+                    if !images.isEmpty {
+                        report = await engine.analyzeImages(images)
+                        navigateToDashboard = true
+                    }
                 }
             }
             .onChange(of: selectedImage) { _, newImage in
+                // Camera path: single shot. Funnel through analyzeImages so
+                // there's only one analysis pipeline to maintain.
                 guard let image = newImage else { return }
                 Task {
-                    report = await engine.analyzeImage(image)
+                    report = await engine.analyzeImages([image])
                     navigateToDashboard = true
                     selectedImage = nil
                 }
@@ -107,8 +130,25 @@ struct ScanView: View {
                         .buttonStyle(.glassProminent)
                         .disabled(!engine.isModelLoaded)
 
-                        PhotosPicker(selection: $pickerItem, matching: .images) {
+                        // Up to 10 photos for a multi-page report. iOS's
+                        // built-in picker handles the multi-select UI.
+                        PhotosPicker(
+                            selection: $pickerItems,
+                            maxSelectionCount: 10,
+                            matching: .images
+                        ) {
                             Label("Choose from Photos", systemImage: "photo.on.rectangle")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(!engine.isModelLoaded)
+
+                        Button {
+                            showPDFPicker = true
+                        } label: {
+                            Label("Choose a PDF", systemImage: "doc.fill")
                                 .font(.system(size: 17, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 14)
@@ -386,6 +426,44 @@ private struct LiveSectionCard: View {
         .scaleEffect(state == .pending ? 0.97 : 1.0)
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: state)
         .animation(.easeOut(duration: 0.18), value: text)
+    }
+}
+
+// MARK: - PDF Document Picker
+
+/// Wraps UIDocumentPickerViewController so SwiftUI can present a PDF picker
+/// as a sheet. Calls `onPicked(url)` once the user selects a file. The URL
+/// it hands back is a security-scoped resource — InferenceEngine.analyzePDF
+/// handles the start/stopAccessingSecurityScopedResource dance.
+struct PDFDocumentPicker: UIViewControllerRepresentable {
+    let onPicked: (URL) -> Void
+    @Environment(\.dismiss) var dismiss
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.pdf], asCopy: false)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let parent: PDFDocumentPicker
+        init(_ parent: PDFDocumentPicker) { self.parent = parent }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            if let url = urls.first {
+                parent.onPicked(url)
+            }
+            parent.dismiss()
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            parent.dismiss()
+        }
     }
 }
 

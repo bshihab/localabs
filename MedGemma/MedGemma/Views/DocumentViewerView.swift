@@ -7,8 +7,9 @@ struct DocumentViewerView: View {
     let report: StructuredReport
     @EnvironmentObject var engine: InferenceEngine
 
-    @State private var scanImage: UIImage?
-    @State private var recognizedBlocks: [TextBlock] = []
+    @State private var scanImages: [UIImage] = []
+    @State private var pageBlocks: [[TextBlock]] = []
+    @State private var currentPageIndex: Int = 0
     @State private var selectedBlocks: Set<UUID> = []
     @State private var showChat = false
     @State private var renderedImageSize: CGSize = .zero
@@ -22,18 +23,43 @@ struct DocumentViewerView: View {
         let boundingBox: CGRect // Normalized (0-1), bottom-left origin (Vision)
     }
 
+    /// Current page's loaded image, if any.
+    private var currentImage: UIImage? {
+        guard scanImages.indices.contains(currentPageIndex) else { return nil }
+        return scanImages[currentPageIndex]
+    }
+
+    /// Vision-recognized blocks for the page that's currently visible.
+    /// Lasso hit-testing and overlay rendering use this — cross-page
+    /// selections accumulate in `selectedBlocks` (UUID-keyed) but the
+    /// gesture only compares against what's on screen right now.
+    private var recognizedBlocks: [TextBlock] {
+        guard pageBlocks.indices.contains(currentPageIndex) else { return [] }
+        return pageBlocks[currentPageIndex]
+    }
+
+    /// Every recognized block across every page, used by the chat sheet to
+    /// resolve a UUID-keyed selection back to text regardless of which
+    /// page each selected block came from.
+    private var allBlocks: [TextBlock] { pageBlocks.flatMap { $0 } }
+
     var body: some View {
         ZStack {
             Color(.systemGroupedBackground).ignoresSafeArea()
 
-            if let image = scanImage {
+            if let image = currentImage {
                 imageScroller(image: image)
+                    .id(currentPageIndex) // force fresh layout on page change
             } else {
                 emptyState
             }
 
-            VStack {
+            VStack(spacing: 8) {
                 Spacer()
+                if scanImages.count > 1 {
+                    pageNavigation
+                        .padding(.horizontal, 20)
+                }
                 askPill
                     .padding(.horizontal, 20)
                     .padding(.bottom, 24)
@@ -71,7 +97,7 @@ struct DocumentViewerView: View {
             .presentationDragIndicator(.visible)
         }
         .onAppear {
-            loadImage()
+            loadAllPages()
         }
     }
 
@@ -158,31 +184,42 @@ struct DocumentViewerView: View {
     }
 
     private var lassoGesture: some Gesture {
-        // Long-press-then-drag. On a 2-axis ScrollView, a plain DragGesture
-        // gets eaten by the scroll view's pan recognizer before our gesture
-        // can claim it. A short long-press (0.3s) wins over scroll: once
-        // it succeeds we own the drag and can free-hand the lasso path.
-        // Matches iOS's built-in "press and hold to enter selection mode"
-        // pattern from Notes / Photos.
-        LongPressGesture(minimumDuration: 0.3)
+        // Long-press-then-drag.
+        //   - minimumDuration: 0.18s. Short enough to feel responsive
+        //     (previous 0.3s required a deliberate hold that felt finicky)
+        //     but still distinguishable from a tap.
+        //   - maximumDistance: 30pt. Default 10pt cancelled the long-press
+        //     if the user's finger drifted slightly during the hold; 30pt
+        //     is forgiving without false-triggering.
+        //   - As soon as the long-press succeeds (transition into .second
+        //     state, even before any drag value arrives) we lock the
+        //     scroll view via isLassoing and fire a haptic so the user
+        //     knows they've "engaged" lasso mode. This eliminates the
+        //     small window where ScrollView could still grab the gesture.
+        LongPressGesture(minimumDuration: 0.18, maximumDistance: 30)
             .sequenced(before: DragGesture(minimumDistance: 0))
             .onChanged { value in
                 switch value {
                 case .first:
-                    // Long press completed without a drag yet. Could surface
-                    // a haptic here; leaving silent for now to keep things calm.
+                    // Long-press measurement in progress; do nothing yet.
                     break
                 case .second(_, let drag):
-                    guard let drag else { return }
                     if !isLassoing {
+                        // Engage the moment long-press succeeds. Haptic
+                        // confirms the mode change without UI noise.
                         isLassoing = true
-                        lassoPoints = [drag.startLocation]
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                     }
-                    // Throttle by minimum distance: keeps the path smooth and
-                    // saves SwiftUI from re-rendering for every sub-pixel move.
-                    if let last = lassoPoints.last,
-                       hypot(drag.location.x - last.x, drag.location.y - last.y) > 4 {
-                        lassoPoints.append(drag.location)
+                    if let drag {
+                        if lassoPoints.isEmpty {
+                            lassoPoints = [drag.startLocation]
+                        } else if let last = lassoPoints.last,
+                                  hypot(drag.location.x - last.x, drag.location.y - last.y) > 4 {
+                            // Throttle by minimum distance: keeps the path
+                            // smooth and prevents SwiftUI from re-rendering
+                            // for every sub-pixel move.
+                            lassoPoints.append(drag.location)
+                        }
                     }
                 }
             }
@@ -262,22 +299,73 @@ struct DocumentViewerView: View {
             : "Elaborate on \(selectedBlocks.count) highlights"
     }
 
-    private func loadImage() {
-        guard let url = report.imageURL,
-              let data = try? Data(contentsOf: url),
-              let image = UIImage(data: data) else { return }
-
-        scanImage = image
-
-        // Route through VisionOCRService.extractBlocks so we get the same
-        // downscale + background-queue safety as the initial scan path.
-        // Running Vision on the raw stored JPEG (full sensor resolution)
-        // while MedGemma 4B is still resident in RAM was getting this view
-        // jetsam-killed the moment the user opened it.
-        Task {
-            let blocks = (try? await VisionOCRService.extractBlocks(from: image)) ?? []
-            recognizedBlocks = blocks.map { TextBlock(text: $0.text, boundingBox: $0.boundingBox) }
+    private func loadAllPages() {
+        let urls = report.allImageURLs
+        var images: [UIImage] = []
+        for url in urls {
+            if let data = try? Data(contentsOf: url),
+               let image = UIImage(data: data) {
+                images.append(image)
+            }
         }
+        scanImages = images
+        // Pre-allocate per-page block arrays so OCR can fill them in place
+        // without races while we navigate between pages.
+        pageBlocks = Array(repeating: [], count: images.count)
+
+        // OCR each page sequentially. Routes through VisionOCRService for
+        // downscale + background-queue safety. With MedGemma 4B resident
+        // in RAM, parallel OCR on N pages would court the same jetsam
+        // crash we already fixed for the initial scan path.
+        Task {
+            for (idx, image) in images.enumerated() {
+                let blocks = (try? await VisionOCRService.extractBlocks(from: image)) ?? []
+                pageBlocks[idx] = blocks.map {
+                    TextBlock(text: $0.text, boundingBox: $0.boundingBox)
+                }
+            }
+        }
+    }
+
+    private var pageNavigation: some View {
+        HStack(spacing: 14) {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    currentPageIndex = max(0, currentPageIndex - 1)
+                    lassoPoints = []
+                    isLassoing = false
+                }
+            } label: {
+                Image(systemName: "chevron.left.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(currentPageIndex == 0 ? Color.gray.opacity(0.4) : Color.blue)
+            }
+            .disabled(currentPageIndex == 0)
+
+            Text("Page \(currentPageIndex + 1) of \(scanImages.count)")
+                .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                .frame(minWidth: 110)
+
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    currentPageIndex = min(scanImages.count - 1, currentPageIndex + 1)
+                    lassoPoints = []
+                    isLassoing = false
+                }
+            } label: {
+                Image(systemName: "chevron.right.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(
+                        currentPageIndex == scanImages.count - 1
+                            ? Color.gray.opacity(0.4)
+                            : Color.blue
+                    )
+            }
+            .disabled(currentPageIndex == scanImages.count - 1)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 8)
+        .glassEffect(.regular, in: Capsule())
     }
 
     private func convertRect(_ visionRect: CGRect, in size: CGSize) -> CGRect {
@@ -289,14 +377,11 @@ struct DocumentViewerView: View {
     }
 
     private func getSelectedText() -> String {
-        // Empty selection → ask about the whole document. Hand the model the
-        // full OCR text so it has something to anchor the answer to.
+        // Empty selection → ask about the whole document. Hand the model
+        // every page's text in order so it has full context.
         if selectedBlocks.isEmpty {
-            return recognizedBlocks.map(\.text).joined(separator: "\n")
+            return allBlocks.map(\.text).joined(separator: "\n")
         }
-        // Hand the LLM both pieces when the selection has a table AND
-        // surrounding paragraphs: markdown table first (reasons positionally),
-        // then the prose. Either may be empty depending on what was lassoed.
         let bd = lassoBreakdown
         switch (bd.table, bd.extraText.isEmpty) {
         case (let table?, true):
@@ -305,20 +390,31 @@ struct DocumentViewerView: View {
             return table.asMarkdown() + "\n\n" + bd.extraText
         case (nil, _):
             return bd.extraText.isEmpty
-                ? recognizedBlocks.filter { selectedBlocks.contains($0.id) }
+                ? allBlocks.filter { selectedBlocks.contains($0.id) }
                     .map(\.text).joined(separator: "\n")
                 : bd.extraText
         }
     }
 
     /// Runs the table-vs-paragraph breakdown over the current lasso selection.
-    /// Always returns a value (never nil); callers check `.table` and
-    /// `.extraText` to decide what to render.
+    /// Cross-page selections skip table detection because each page's
+    /// blocks live in their own [0,1] normalized space — mixing coordinates
+    /// would scramble row/column clustering. In that case we just emit the
+    /// concatenated text and let the LLM read it as prose.
     private var lassoBreakdown: VisionOCRService.LassoBreakdown {
         guard !selectedBlocks.isEmpty else {
             return VisionOCRService.LassoBreakdown(table: nil, extraText: "")
         }
-        let selected = recognizedBlocks
+        let pagesWithSelections = pageBlocks.filter { page in
+            page.contains { selectedBlocks.contains($0.id) }
+        }
+        if pagesWithSelections.count > 1 {
+            // Cross-page selection — collapse to plain text, no table.
+            let text = allBlocks.filter { selectedBlocks.contains($0.id) }
+                .map(\.text).joined(separator: "\n")
+            return VisionOCRService.LassoBreakdown(table: nil, extraText: text)
+        }
+        let selected = allBlocks
             .filter { selectedBlocks.contains($0.id) }
             .map { VisionOCRService.RecognizedBlock(text: $0.text, boundingBox: $0.boundingBox) }
         return VisionOCRService.breakdown(of: selected)
@@ -618,6 +714,10 @@ struct FollowUpChatView: View {
                 .padding(.vertical, 12)
                 .glassEffect(.regular, in: Capsule())
 
+            // Explicit gray (idle) → blue (active) so the send button is
+            // always legible. The previous .glassProminent style rendered
+            // the disabled state nearly transparent against the chat
+            // background.
             Button {
                 sendMessage()
             } label: {
@@ -625,13 +725,19 @@ struct FollowUpChatView: View {
                     .font(.system(size: 18, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
+                    .background(canSend ? Color.blue : Color.gray.opacity(0.45))
+                    .clipShape(Circle())
             }
-            .buttonStyle(.glassProminent)
-            .clipShape(Circle())
-            .disabled(inputText.isEmpty || isThinking)
+            .disabled(!canSend)
+            .animation(.easeInOut(duration: 0.2), value: canSend)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    private var canSend: Bool {
+        !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isThinking
     }
 
     private func sendMessage() {

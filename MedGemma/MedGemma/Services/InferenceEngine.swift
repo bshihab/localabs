@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import UserNotifications
+import PDFKit
 
 /// Orchestrates the full pipeline:
 /// Apple VisionKit OCR → MedGemma 4B (via llama.cpp on Metal GPU)
@@ -156,36 +157,147 @@ final class InferenceEngine: ObservableObject {
     // MARK: - Pipeline
 
     /// Image → Apple VisionKit OCR → MedGemma → StructuredReport
+    /// Single-image convenience wrapper.
     func analyzeImage(_ image: UIImage) async -> StructuredReport {
+        await analyzeImages([image])
+    }
+
+    /// Multi-page entry point. Runs OCR on each image (or PDF page rendered
+    /// to image), concatenates the extracted text with page markers so
+    /// MedGemma can reason about page boundaries, saves every image, and
+    /// returns a single StructuredReport with `imagePath` = page 1 and
+    /// `additionalPagePaths` = pages 2…N.
+    func analyzeImages(_ images: [UIImage]) async -> StructuredReport {
+        guard !images.isEmpty else {
+            return StructuredReport(patientSummary: "No pages were provided.")
+        }
+
         isProcessing = true
         defer { isProcessing = false }
 
-        processingStatus = "Scanning with Apple Vision…"
-        let extractedText: String
-        do {
-            extractedText = try await VisionOCRService.extractText(from: image)
-        } catch {
-            return StructuredReport(patientSummary: "Failed to extract text from the image. Please try a clearer photo.")
+        // ── OCR every page sequentially ──
+        // Sequential (not concurrent) because each Vision call already
+        // allocates significant memory; running 5 in parallel against a
+        // 4B model in RAM courts the same jetsam crash we just fixed.
+        var pageTexts: [String] = []
+        for (idx, image) in images.enumerated() {
+            processingStatus = images.count == 1
+                ? "Scanning with Apple Vision…"
+                : "Scanning page \(idx + 1) of \(images.count)…"
+            do {
+                let text = try await VisionOCRService.extractText(from: image)
+                pageTexts.append(text)
+            } catch {
+                pageTexts.append("")
+            }
         }
 
-        if extractedText.isEmpty {
-            return StructuredReport(patientSummary: "No text was found in this image. Please ensure the lab report is clearly visible and try again.")
+        let combinedText = combinePageTexts(pageTexts)
+        if combinedText.isEmpty {
+            return StructuredReport(patientSummary: "No text was found in these pages. Please ensure the document is clearly visible and try again.")
         }
 
+        // ── Save every page image ──
         processingStatus = "Saving scan…"
-        let savedImageName = saveScannedImage(image)
+        let savedNames = images.compactMap { saveScannedImage($0) }
+        let firstPath = savedNames.first
+        let extraPaths = savedNames.count > 1 ? Array(savedNames.dropFirst()) : nil
 
         processingStatus = "Fetching Apple Health context…"
         let healthMetrics = await HealthKitService.shared.getHealthMetrics()
 
         processingStatus = "MedGemma is analyzing your results…"
-        var report = await runInference(extractedText: extractedText, healthMetrics: healthMetrics, mode: .lab)
-        report.imagePath = savedImageName
+        var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics, mode: .lab)
+        report.imagePath = firstPath
+        report.additionalPagePaths = extraPaths
 
         LocalStorageService.shared.saveReport(report)
-
         processingStatus = ""
         return report
+    }
+
+    /// Picks up a PDF, renders each page to an image, extracts text (using
+    /// the embedded PDF text where available, falling back to Vision OCR
+    /// per page), and runs the same MedGemma pipeline as `analyzeImages`.
+    /// The rendered page images are kept around so the document viewer
+    /// can show what the user looked at.
+    func analyzePDF(at url: URL) async -> StructuredReport {
+        let needsScopedAccess = url.startAccessingSecurityScopedResource()
+        defer { if needsScopedAccess { url.stopAccessingSecurityScopedResource() } }
+
+        guard let document = PDFDocument(url: url), document.pageCount > 0 else {
+            return StructuredReport(patientSummary: "Couldn't open this PDF. Try a different file.")
+        }
+
+        // Render every page as an image so the user can see the pages
+        // in the document viewer later. Quality is high enough for OCR
+        // and overlay alignment without ballooning memory.
+        var images: [UIImage] = []
+        var pdfTextByPage: [String] = []
+        for i in 0..<document.pageCount {
+            guard let page = document.page(at: i) else { continue }
+            images.append(renderPDFPage(page))
+            pdfTextByPage.append(page.string ?? "")
+        }
+
+        // If the PDF has embedded text on every page, skip OCR and use it
+        // directly — much faster and more accurate. If any page is empty
+        // (scanned PDF), fall through to OCR via analyzeImages.
+        let hasEmbeddedTextEverywhere = pdfTextByPage.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if hasEmbeddedTextEverywhere {
+            isProcessing = true
+            defer { isProcessing = false }
+
+            processingStatus = "Saving PDF…"
+            let savedNames = images.compactMap { saveScannedImage($0) }
+            let firstPath = savedNames.first
+            let extraPaths = savedNames.count > 1 ? Array(savedNames.dropFirst()) : nil
+
+            processingStatus = "Fetching Apple Health context…"
+            let healthMetrics = await HealthKitService.shared.getHealthMetrics()
+
+            let combinedText = combinePageTexts(pdfTextByPage)
+            processingStatus = "MedGemma is analyzing your results…"
+            var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics, mode: .lab)
+            report.imagePath = firstPath
+            report.additionalPagePaths = extraPaths
+            LocalStorageService.shared.saveReport(report)
+            processingStatus = ""
+            return report
+        }
+
+        // Scanned PDF (no embedded text) — go through the OCR path.
+        return await analyzeImages(images)
+    }
+
+    private func renderPDFPage(_ page: PDFPage) -> UIImage {
+        let bounds = page.bounds(for: .mediaBox)
+        let renderer = UIGraphicsImageRenderer(bounds: bounds)
+        return renderer.image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(bounds)
+            // PDF coordinate system has y up; UIKit has y down. Flip.
+            ctx.cgContext.translateBy(x: 0, y: bounds.height)
+            ctx.cgContext.scaleBy(x: 1.0, y: -1.0)
+            page.draw(with: .mediaBox, to: ctx.cgContext)
+        }
+    }
+
+    /// Joins per-page text with explicit page markers. The markers help
+    /// MedGemma cite information by page when the user later asks
+    /// "where was the cholesterol value?" type questions, and they
+    /// disambiguate cases where the same value appears on multiple pages.
+    /// Single-page input gets no marker.
+    private func combinePageTexts(_ pages: [String]) -> String {
+        let nonEmpty = pages.enumerated().compactMap { idx, text -> String? in
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : (idx, trimmed)
+        }
+        guard nonEmpty.count > 1 else {
+            return nonEmpty.first?.1 ?? ""
+        }
+        return nonEmpty.map { idx, text in "--- Page \(idx + 1) ---\n\(text)" }
+            .joined(separator: "\n\n")
     }
 
     private func saveScannedImage(_ image: UIImage) -> String? {

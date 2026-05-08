@@ -10,6 +10,10 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     var medicationNotes: String
     var rawText: String
     var imagePath: String?
+    /// Additional page filenames for multi-page scans (PDFs or multiple
+    /// photos). The first page's path stays in `imagePath` so existing
+    /// saved reports decode unchanged.
+    var additionalPagePaths: [String]?
 
     init(
         id: UUID = UUID(),
@@ -20,7 +24,8 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         medicalGlossary: String = "",
         medicationNotes: String = "",
         rawText: String = "",
-        imagePath: String? = nil
+        imagePath: String? = nil,
+        additionalPagePaths: [String]? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -31,12 +36,29 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         self.medicationNotes = medicationNotes
         self.rawText = rawText
         self.imagePath = imagePath
+        self.additionalPagePaths = additionalPagePaths
     }
 
     var imageURL: URL? {
         guard let imagePath else { return nil }
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("scans").appendingPathComponent(imagePath)
+    }
+
+    /// All page image URLs in document order. Empty if the report has no
+    /// saved scans (e.g., weekly Apple Health review). Multi-page reports
+    /// have one URL per page in chronological scan order.
+    var allImageURLs: [URL] {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let scansDir = docs.appendingPathComponent("scans")
+        var urls: [URL] = []
+        if let imagePath {
+            urls.append(scansDir.appendingPathComponent(imagePath))
+        }
+        if let extras = additionalPagePaths {
+            urls.append(contentsOf: extras.map { scansDir.appendingPathComponent($0) })
+        }
+        return urls
     }
 
     static func parse(from rawText: String) -> StructuredReport {
