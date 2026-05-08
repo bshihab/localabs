@@ -289,7 +289,7 @@ final class InferenceEngine: ObservableObject {
     /// disambiguate cases where the same value appears on multiple pages.
     /// Single-page input gets no marker.
     private func combinePageTexts(_ pages: [String]) -> String {
-        let nonEmpty = pages.enumerated().compactMap { idx, text -> String? in
+        let nonEmpty: [(Int, String)] = pages.enumerated().compactMap { idx, text in
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : (idx, trimmed)
         }
