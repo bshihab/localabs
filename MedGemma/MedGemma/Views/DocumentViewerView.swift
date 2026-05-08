@@ -61,7 +61,8 @@ struct DocumentViewerView: View {
                 selectedText: getSelectedText(),
                 fullReportContext: report.patientSummary,
                 ocrText: report.rawText,
-                isWholeDocumentAsk: selectedBlocks.isEmpty
+                isWholeDocumentAsk: selectedBlocks.isEmpty,
+                detectedTable: detectedTable
             )
             .environmentObject(engine)
             .presentationBackground(.thinMaterial)
@@ -74,17 +75,24 @@ struct DocumentViewerView: View {
 
     private func imageScroller(image: UIImage) -> some View {
         GeometryReader { geo in
-            // Disable scroll for single-page docs (the common case for lab reports)
-            // AND while the user is actively drawing a lasso — otherwise SwiftUI's
-            // ScrollView would steal the drag and turn it into a vertical pan.
+            // Render documents at 1.5× the natural fit-width so the user can
+            // actually read small print. Lab reports are dense, and rendering
+            // at exact viewport width was leaving body text unreadable. The
+            // ScrollView is now 2-axis: horizontal pan if the scaled image
+            // exceeds viewport width, vertical pan for tall documents.
+            let displayWidth = geo.size.width * 1.5
+            // Disable scroll for short single-page docs AND while the user is
+            // actively lassoing — otherwise SwiftUI's ScrollView would steal
+            // the drag and turn it into a pan instead of a selection.
             let fitsOnePage = renderedImageSize.height > 0
                 && renderedImageSize.height <= geo.size.height
-            ScrollView {
+                && displayWidth <= geo.size.width
+            ScrollView([.horizontal, .vertical]) {
                 ZStack(alignment: .topLeading) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: geo.size.width)
+                        .frame(width: displayWidth)
                         .background(
                             GeometryReader { imgGeo in
                                 Color.clear
@@ -148,19 +156,32 @@ struct DocumentViewerView: View {
     }
 
     private var lassoGesture: some Gesture {
-        // 8pt minimum — short taps still go to the per-block onTapGesture,
-        // longer drags fall through to here.
-        DragGesture(minimumDistance: 8)
+        // Long-press-then-drag. On a 2-axis ScrollView, a plain DragGesture
+        // gets eaten by the scroll view's pan recognizer before our gesture
+        // can claim it. A short long-press (0.3s) wins over scroll: once
+        // it succeeds we own the drag and can free-hand the lasso path.
+        // Matches iOS's built-in "press and hold to enter selection mode"
+        // pattern from Notes / Photos.
+        LongPressGesture(minimumDuration: 0.3)
+            .sequenced(before: DragGesture(minimumDistance: 0))
             .onChanged { value in
-                if !isLassoing {
-                    isLassoing = true
-                    lassoPoints = [value.startLocation]
-                }
-                // Throttle by minimum distance: keeps the path smooth and
-                // saves SwiftUI from re-rendering for every sub-pixel move.
-                if let last = lassoPoints.last,
-                   hypot(value.location.x - last.x, value.location.y - last.y) > 4 {
-                    lassoPoints.append(value.location)
+                switch value {
+                case .first:
+                    // Long press completed without a drag yet. Could surface
+                    // a haptic here; leaving silent for now to keep things calm.
+                    break
+                case .second(_, let drag):
+                    guard let drag else { return }
+                    if !isLassoing {
+                        isLassoing = true
+                        lassoPoints = [drag.startLocation]
+                    }
+                    // Throttle by minimum distance: keeps the path smooth and
+                    // saves SwiftUI from re-rendering for every sub-pixel move.
+                    if let last = lassoPoints.last,
+                       hypot(drag.location.x - last.x, drag.location.y - last.y) > 4 {
+                        lassoPoints.append(drag.location)
+                    }
                 }
             }
             .onEnded { _ in
@@ -271,14 +292,85 @@ struct DocumentViewerView: View {
         if selectedBlocks.isEmpty {
             return recognizedBlocks.map(\.text).joined(separator: "\n")
         }
+        // If the selection forms a table, hand the model the markdown form
+        // so it can reason positionally about cell relationships rather than
+        // guess from a flat list of strings.
+        if let table = detectedTable {
+            return table.asMarkdown()
+        }
         return recognizedBlocks
             .filter { selectedBlocks.contains($0.id) }
             .map(\.text)
             .joined(separator: "\n")
     }
+
+    /// Runs table detection over whatever text blocks are currently selected.
+    /// Returns nil if either nothing is selected or the selection's geometry
+    /// doesn't look table-shaped — `getSelectedText` falls back to plain text
+    /// in that case.
+    private var detectedTable: VisionOCRService.RecognizedTable? {
+        guard !selectedBlocks.isEmpty else { return nil }
+        let selected = recognizedBlocks
+            .filter { selectedBlocks.contains($0.id) }
+            .map { VisionOCRService.RecognizedBlock(text: $0.text, boundingBox: $0.boundingBox) }
+        return VisionOCRService.detectTable(from: selected)
+    }
 }
 
 // MARK: - Glowing lasso path
+
+/// Renders a `RecognizedTable` as an actual SwiftUI Grid in the chat banner.
+/// Each cell is independently selectable so the user can copy a single value
+/// out, and the first row is treated as a header (subtle background tint +
+/// semibold) so reading reproduces the original table's hierarchy.
+private struct DetectedTableBanner: View {
+    let table: VisionOCRService.RecognizedTable
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "tablecells")
+                    .font(.caption.weight(.semibold))
+                Text("Detected Table")
+                    .font(.caption.weight(.semibold))
+                Text("· \(table.rowCount) row\(table.rowCount == 1 ? "" : "s") × \(table.columnCount) col\(table.columnCount == 1 ? "" : "s")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.blue)
+
+            // Horizontal scroll keeps wide tables readable without forcing
+            // the chat sheet to expand.
+            ScrollView(.horizontal, showsIndicators: false) {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
+                    ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIdx, row in
+                        GridRow {
+                            ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                                Text(cell)
+                                    .font(.system(size: 13, design: .rounded))
+                                    .fontWeight(rowIdx == 0 ? .semibold : .regular)
+                                    .foregroundStyle(rowIdx == 0 ? Color.primary : Color.secondary)
+                                    .textSelection(.enabled)
+                                    .padding(.vertical, 6)
+                                    .padding(.horizontal, 8)
+                                    .frame(minHeight: 28, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(rowIdx == 0 ? Color.blue.opacity(0.10) : Color.clear)
+                                    )
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.bottom, 4)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
 
 /// Soft blue glowing stroke. Drawn on top of the document while the user
 /// is dragging — single color so it doesn't fight the document for visual
@@ -309,6 +401,7 @@ struct FollowUpChatView: View {
     let fullReportContext: String
     let ocrText: String
     var isWholeDocumentAsk: Bool = false
+    var detectedTable: VisionOCRService.RecognizedTable? = nil
     @EnvironmentObject var engine: InferenceEngine
     @Environment(\.dismiss) var dismiss
 
@@ -371,41 +464,61 @@ struct FollowUpChatView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                        .buttonStyle(.glass)
+                    // Plain SF Symbol — the previous "Done" button under
+                    // .glass style was rendering near-illegibly on iOS 26
+                    // (looked like the letters "or"). chevron.backward with
+                    // default tint reads as a back affordance immediately.
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.backward")
+                            .font(.system(size: 18, weight: .semibold))
+                    }
                 }
             }
             .onAppear {
-                inputText = isWholeDocumentAsk
-                    ? "Can you summarize this report in plain language?"
-                    : "What does this mean in simple terms? Is this normal?"
+                if detectedTable != nil {
+                    inputText = "Can you walk me through this table and explain what each value means in plain language?"
+                } else if isWholeDocumentAsk {
+                    inputText = "Can you summarize this report in plain language?"
+                } else {
+                    inputText = "What does this mean in simple terms? Is this normal?"
+                }
                 sendMessage()
             }
         }
     }
 
+    @ViewBuilder
     private var selectionBanner: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(
-                isWholeDocumentAsk ? "Whole Document" : "Selected Text",
-                systemImage: isWholeDocumentAsk ? "doc.text" : "text.quote"
-            )
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.blue)
+        if let table = detectedTable {
+            // Lasso captured something with grid structure → show it as an
+            // actual table the user can read and copy from cell-by-cell.
+            DetectedTableBanner(table: table)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(
+                    isWholeDocumentAsk ? "Whole Document" : "Selected Text",
+                    systemImage: isWholeDocumentAsk ? "doc.text" : "text.quote"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.blue)
 
-            if isWholeDocumentAsk {
-                Text("Asking about the entire scan.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            } else {
-                Text(selectedText)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.primary)
+                if isWholeDocumentAsk {
+                    Text("Asking about the entire scan.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(selectedText)
+                        .textSelection(.enabled)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.primary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private func messageRow(message: ChatMessage) -> some View {
