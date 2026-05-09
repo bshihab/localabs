@@ -30,6 +30,19 @@ struct DashboardView: View {
                     summaryCard
                         .padding(.horizontal)
 
+                    // Pulled out of the AI Insights stack and moved up so
+                    // it's the first action after the summary — the document
+                    // viewer is where most users will spend their time.
+                    if let report = currentReport, report.imagePath != nil {
+                        NavigationLink {
+                            DocumentViewerView(report: report)
+                        } label: {
+                            askMoreCTA
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal)
+                    }
+
                     if let report = currentReport {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("AI INSIGHTS")
@@ -37,15 +50,6 @@ struct DashboardView: View {
                                 .foregroundStyle(.secondary)
                                 .tracking(1.5)
                                 .padding(.horizontal, 20)
-
-                            if report.imagePath != nil {
-                                NavigationLink {
-                                    DocumentViewerView(report: report)
-                                } label: {
-                                    viewScanRow
-                                }
-                                .buttonStyle(.plain)
-                            }
 
                             SectionCard(
                                 icon: "cross.case.fill",
@@ -112,31 +116,47 @@ struct DashboardView: View {
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
-    private var viewScanRow: some View {
-        HStack(spacing: 14) {
+    /// Prominent call-to-action that opens the interactive document viewer.
+    /// Bold gradient, white text, animated SF Symbol — sits right under the
+    /// summary card so it's the first thing the user reaches for after
+    /// reading the AI's translation.
+    private var askMoreCTA: some View {
+        HStack(spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(.blue.opacity(0.16))
-                    .frame(width: 40, height: 40)
-                Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.blue)
+                    .fill(Color.white.opacity(0.22))
+                    .frame(width: 52, height: 52)
+                Image(systemName: "hand.point.up.left.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.white)
+                    // SF Symbols' built-in pulse — Apple's own subtle bounce
+                    // that signals "interactive" without being distracting.
+                    .symbolEffect(.pulse, options: .repeat(.continuous))
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("View Original Scan")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text("Tap text to highlight & ask follow-up questions")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Ask More About Your Scan")
+                    .font(.system(size: 19, weight: .bold))
+                    .foregroundStyle(.white)
+                Text("Circle any value or section to dig deeper")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.88))
             }
-            Spacer()
+            Spacer(minLength: 8)
             Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white.opacity(0.85))
         }
-        .padding(16)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(
+                colors: [Color.blue, Color.blue.opacity(0.82)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: Color.blue.opacity(0.28), radius: 14, y: 6)
     }
 
     private var healthMetricsCard: some View {

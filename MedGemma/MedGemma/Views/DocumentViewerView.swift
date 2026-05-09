@@ -15,6 +15,9 @@ struct DocumentViewerView: View {
     @State private var renderedImageSize: CGSize = .zero
     @State private var lassoPoints: [CGPoint] = []
     @State private var isLassoing = false
+    @State private var showInteractionHint = false
+    @State private var hintRingProgress: CGFloat = 0
+    @AppStorage("document_viewer_hint_seen") private var hintSeen = false
     @Namespace private var glassNamespace
 
     struct TextBlock: Identifiable {
@@ -63,6 +66,12 @@ struct DocumentViewerView: View {
                 askPill
                     .padding(.horizontal, 20)
                     .padding(.bottom, 24)
+            }
+
+            if showInteractionHint {
+                interactionHint
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    .allowsHitTesting(false) // taps pass through to the document
             }
         }
         .navigationTitle("Scan Viewer")
@@ -153,6 +162,7 @@ struct DocumentViewerView: View {
                                 .position(x: rect.midX, y: rect.midY)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
+                                    dismissHintIfShown()
                                     withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
                                         if isSelected {
                                             selectedBlocks.remove(block.id)
@@ -209,6 +219,7 @@ struct DocumentViewerView: View {
                         // confirms the mode change without UI noise.
                         isLassoing = true
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        dismissHintIfShown()
                     }
                     if let drag {
                         if lassoPoints.isEmpty {
@@ -325,6 +336,83 @@ struct DocumentViewerView: View {
                 }
             }
         }
+
+        // First-time hint: shown once per device. Auto-dismisses after 6s
+        // or as soon as the user touches anything (lasso starts or a block
+        // gets selected).
+        if !hintSeen && !images.isEmpty {
+            withAnimation(.easeOut(duration: 0.4)) {
+                showInteractionHint = true
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                if showInteractionHint {
+                    withAnimation(.easeOut(duration: 0.5)) {
+                        showInteractionHint = false
+                    }
+                    hintSeen = true
+                }
+            }
+        }
+    }
+
+    /// Animated tutorial overlay: a finger SF Symbol orbits a continuously-
+    /// traced circle, mimicking the "press & hold then drag" lasso gesture.
+    /// Uses `.symbolEffect(.pulse)` (Apple's built-in SF Symbol animation)
+    /// for the finger, plus a custom Path.trim animation for the ring.
+    /// Disappears on first interaction or after 6 seconds.
+    private var interactionHint: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .trim(from: 0, to: hintRingProgress)
+                    .stroke(
+                        Color.blue.opacity(0.85),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 92, height: 92)
+                    .shadow(color: .blue.opacity(0.45), radius: 8)
+
+                Image(systemName: "hand.point.up.left.fill")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(.blue)
+                    .symbolEffect(.pulse, options: .repeat(.continuous))
+                    .offset(
+                        x: cos(hintRingProgress * 2 * .pi - .pi / 2) * 46,
+                        y: sin(hintRingProgress * 2 * .pi - .pi / 2) * 46
+                    )
+            }
+
+            Text("Press & hold, then drag to circle text")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.primary)
+
+            Text("Or tap any word to select it")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+        .padding(22)
+        .glassEffect(
+            .regular.tint(.blue.opacity(0.10)),
+            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+        )
+        .padding(.horizontal, 50)
+        .onAppear {
+            withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) {
+                hintRingProgress = 1.0
+            }
+        }
+    }
+
+    /// Called whenever the user interacts in a way that proves they
+    /// understand the gesture — dismisses the hint immediately.
+    private func dismissHintIfShown() {
+        guard showInteractionHint else { return }
+        withAnimation(.easeOut(duration: 0.35)) {
+            showInteractionHint = false
+        }
+        hintSeen = true
     }
 
     private var pageNavigation: some View {
