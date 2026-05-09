@@ -17,7 +17,6 @@ struct DocumentViewerView: View {
     @State private var isLassoing = false
     @State private var showInteractionHint = false
     @State private var hintRingProgress: CGFloat = 0
-    @AppStorage("document_viewer_hint_seen") private var hintSeen = false
     @Namespace private var glassNamespace
 
     struct TextBlock: Identifiable {
@@ -337,10 +336,11 @@ struct DocumentViewerView: View {
             }
         }
 
-        // First-time hint: shown once per device. Auto-dismisses after 6s
-        // or as soon as the user touches anything (lasso starts or a block
-        // gets selected).
-        if !hintSeen && !images.isEmpty {
+        // Tutorial hint shown every visit. Auto-dismisses after 6s or as
+        // soon as the user touches anything (lasso engages or a block gets
+        // tapped) — returning users barely see it before it fades, new
+        // users still get the demo. No persistence; cheap to show.
+        if !images.isEmpty {
             withAnimation(.easeOut(duration: 0.4)) {
                 showInteractionHint = true
             }
@@ -350,7 +350,6 @@ struct DocumentViewerView: View {
                     withAnimation(.easeOut(duration: 0.5)) {
                         showInteractionHint = false
                     }
-                    hintSeen = true
                 }
             }
         }
@@ -412,7 +411,6 @@ struct DocumentViewerView: View {
         withAnimation(.easeOut(duration: 0.35)) {
             showInteractionHint = false
         }
-        hintSeen = true
     }
 
     private var pageNavigation: some View {
