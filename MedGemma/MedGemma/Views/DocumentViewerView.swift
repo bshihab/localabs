@@ -19,7 +19,17 @@ struct DocumentViewerView: View {
     @State private var hintRingProgress: CGFloat = 0
     @State private var zoomScale: CGFloat = 1.0
     @State private var committedZoom: CGFloat = 1.0
+    @State private var mode: ViewerMode = .browse
     @Namespace private var glassNamespace
+
+    /// Two explicit interaction modes — replaces the long-press-to-engage
+    /// pattern that kept fighting with scroll. Browse is the default
+    /// (Photos-style: drag to scroll, pinch to zoom, tap-to-select still
+    /// works for precision). Select disables scroll and turns plain drag
+    /// into the lasso path.
+    enum ViewerMode {
+        case browse, select
+    }
 
     struct TextBlock: Identifiable {
         let id = UUID()
@@ -59,6 +69,8 @@ struct DocumentViewerView: View {
             }
 
             VStack(spacing: 8) {
+                modeToggle
+                    .padding(.top, 8)
                 Spacer()
                 if scanImages.count > 1 {
                     pageNavigation
@@ -187,10 +199,17 @@ struct DocumentViewerView: View {
                     }
                 }
                 .contentShape(Rectangle())
-                .gesture(lassoGesture)
+                // Lasso gesture only fires in Select mode. In Browse mode
+                // .none disables the gesture so single-finger drags fall
+                // through to the ScrollView's pan recognizer normally.
+                .gesture(lassoGesture, including: mode == .select ? .all : .none)
                 .padding(.bottom, 100)
             }
-            .scrollDisabled(fitsOnePage || isLassoing)
+            // Scroll is on in Browse mode (single finger pans/zooms),
+            // off in Select mode so the drag becomes a lasso path. Also
+            // off when the whole image already fits so iOS doesn't render
+            // a useless scrollable container.
+            .scrollDisabled(fitsOnePage || mode == .select)
             // Centers the document in the viewport on first appear (and
             // whenever zoom changes the content size) so the user isn't
             // looking at the left edge of an oversized page.
@@ -225,44 +244,21 @@ struct DocumentViewerView: View {
     }
 
     private var lassoGesture: some Gesture {
-        // Long-press-then-drag.
-        //   - minimumDuration: 0.18s. Short enough to feel responsive
-        //     (previous 0.3s required a deliberate hold that felt finicky)
-        //     but still distinguishable from a tap.
-        //   - maximumDistance: 30pt. Default 10pt cancelled the long-press
-        //     if the user's finger drifted slightly during the hold; 30pt
-        //     is forgiving without false-triggering.
-        //   - As soon as the long-press succeeds (transition into .second
-        //     state, even before any drag value arrives) we lock the
-        //     scroll view via isLassoing and fire a haptic so the user
-        //     knows they've "engaged" lasso mode. This eliminates the
-        //     small window where ScrollView could still grab the gesture.
-        LongPressGesture(minimumDuration: 0.18, maximumDistance: 30)
-            .sequenced(before: DragGesture(minimumDistance: 0))
+        // Plain drag — no long-press dance needed because we're already in
+        // Select mode (gated via .gesture(_:including:) on the parent).
+        // ScrollView is disabled in Select mode, so drags can't be stolen.
+        DragGesture(minimumDistance: 0)
             .onChanged { value in
-                switch value {
-                case .first:
-                    // Long-press measurement in progress; do nothing yet.
-                    break
-                case .second(_, let drag):
-                    if !isLassoing {
-                        // Engage the moment long-press succeeds. Haptic
-                        // confirms the mode change without UI noise.
-                        isLassoing = true
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        dismissHintIfShown()
-                    }
-                    if let drag {
-                        if lassoPoints.isEmpty {
-                            lassoPoints = [drag.startLocation]
-                        } else if let last = lassoPoints.last,
-                                  hypot(drag.location.x - last.x, drag.location.y - last.y) > 4 {
-                            // Throttle by minimum distance: keeps the path
-                            // smooth and prevents SwiftUI from re-rendering
-                            // for every sub-pixel move.
-                            lassoPoints.append(drag.location)
-                        }
-                    }
+                if !isLassoing {
+                    isLassoing = true
+                    lassoPoints = [value.startLocation]
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    dismissHintIfShown()
+                } else if let last = lassoPoints.last,
+                          hypot(value.location.x - last.x, value.location.y - last.y) > 4 {
+                    // Throttle by minimum distance: keeps the path smooth
+                    // and prevents SwiftUI re-renders for sub-pixel moves.
+                    lassoPoints.append(value.location)
                 }
             }
             .onEnded { _ in
@@ -281,6 +277,45 @@ struct DocumentViewerView: View {
                     isLassoing = false
                 }
             }
+    }
+
+    /// Two-button mode selector at the top of the screen. Browse vs Select.
+    /// Capsule with two buttons; the active one fills with blue. Switching
+    /// modes mid-drag clears any in-progress lasso path so it doesn't bleed
+    /// into the new mode.
+    private var modeToggle: some View {
+        HStack(spacing: 0) {
+            modeButton(.browse, label: "Browse", icon: "hand.draw")
+            modeButton(.select, label: "Select", icon: "lasso")
+        }
+        .padding(4)
+        .glassEffect(.regular, in: Capsule())
+    }
+
+    private func modeButton(_ targetMode: ViewerMode, label: String, icon: String) -> some View {
+        let isActive = mode == targetMode
+        return Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                mode = targetMode
+                lassoPoints = []
+                isLassoing = false
+            }
+            dismissHintIfShown()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(minWidth: 90)
+            .background(isActive ? Color.blue : Color.clear)
+            .foregroundStyle(isActive ? Color.white : Color.primary)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Standard ray-casting point-in-polygon test. Returns true if `point`
@@ -415,11 +450,11 @@ struct DocumentViewerView: View {
                     )
             }
 
-            Text("Press & hold, then drag to circle text")
+            Text("Tap Select, then drag to circle text")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.primary)
 
-            Text("Or tap any word to select it")
+            Text("Or tap any word in either mode")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
