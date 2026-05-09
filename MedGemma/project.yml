@@ -40,3 +40,6 @@ targets:
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: "MedGemma does not write any data to Apple Health."
     entitlements:
       path: MedGemma/MedGemma.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []

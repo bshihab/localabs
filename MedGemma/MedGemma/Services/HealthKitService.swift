@@ -5,29 +5,48 @@ import HealthKit
 /// All data stays on-device — nothing is uploaded.
 @MainActor
 class HealthKitService {
-    
+
     static let shared = HealthKitService()
     private let healthStore = HKHealthStore()
-    
+
+    /// We track whether the auth sheet has been presented at least once via
+    /// UserDefaults. iOS deliberately doesn't tell apps whether read access
+    /// was granted (privacy by design) — apps just get empty results when
+    /// denied. So the best we can do is track "did the user complete the
+    /// auth flow once" and infer everything else from query results.
+    private let hasRequestedKey = "healthkit_auth_requested"
+
+    var hasRequestedAuthorization: Bool {
+        UserDefaults.standard.bool(forKey: hasRequestedKey)
+    }
+
+    var isHealthDataAvailable: Bool {
+        HKHealthStore.isHealthDataAvailable()
+    }
+
     struct HealthMetrics {
         var avgRestingHR: Double?
         var avgSleepHours: Double?
         var avgHRV: Double?
         var isMockData: Bool = false
     }
-    
+
     /// Requests read-only access to the health data types we need.
+    /// Returns true if the auth flow completed (the user saw the sheet and
+    /// dismissed it) — NOT necessarily that they granted access. iOS hides
+    /// that distinction for privacy.
     func requestAuthorization() async -> Bool {
         guard HKHealthStore.isHealthDataAvailable() else { return false }
-        
+
         let typesToRead: Set<HKObjectType> = [
             HKObjectType.quantityType(forIdentifier: .restingHeartRate)!,
             HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
             HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
         ]
-        
+
         do {
             try await healthStore.requestAuthorization(toShare: [], read: typesToRead)
+            UserDefaults.standard.set(true, forKey: hasRequestedKey)
             return true
         } catch {
             print("[HealthKit] Authorization failed: \(error)")

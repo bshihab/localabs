@@ -7,12 +7,18 @@ struct ProfileView: View {
     @State private var showOnboarding = false
     @State private var confirmDelete = false
     @State private var confirmReset = false
+    @State private var hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
+    @State private var healthMetrics: HealthKitService.HealthMetrics?
+    @State private var isRequestingHealth = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 18) {
                     aiEngineCard
+                        .padding(.horizontal)
+
+                    appleHealthCard
                         .padding(.horizontal)
 
                     coreInfoCard
@@ -176,6 +182,107 @@ struct ProfileView: View {
         }
         .frame(maxWidth: .infinity)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    // MARK: - Apple Health card
+
+    /// Three states:
+    ///   1. Not yet requested → "Connect Apple Health" button
+    ///   2. Requested + has data → green check + last-fetched values
+    ///   3. Requested + no data → "Connected — no recent data found"
+    /// We can't reliably tell if the user *granted* read access (iOS hides
+    /// that for privacy), so we infer from query results.
+    private var appleHealthCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.pink)
+                Text("Apple Health")
+                    .font(.system(size: 17, weight: .semibold))
+                Spacer()
+                if isRequestingHealth {
+                    ProgressView().scaleEffect(0.8)
+                } else if hasRequestedHealth, healthMetrics?.isMockData == false {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.green)
+                }
+            }
+
+            if !hasRequestedHealth {
+                Text("Lets MedGemma factor your resting heart rate, sleep, and HRV into every report.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    Task { await connectAppleHealth() }
+                } label: {
+                    Label("Connect Apple Health", systemImage: "heart.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(isRequestingHealth)
+            } else if let metrics = healthMetrics, metrics.isMockData == false {
+                healthMetricsGrid(metrics)
+            } else if let metrics = healthMetrics, metrics.isMockData {
+                Text("Connected — but no recent data found in Apple Health. The app will use placeholder values until your data syncs.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ProgressView("Reading from Apple Health…")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .task(id: hasRequestedHealth) {
+            // Refresh whenever auth state flips. First load on appear if
+            // already authorized in a previous session.
+            if hasRequestedHealth {
+                healthMetrics = await HealthKitService.shared.getHealthMetrics()
+            }
+        }
+    }
+
+    private func healthMetricsGrid(_ m: HealthKitService.HealthMetrics) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+            GridRow {
+                metricCell(label: "Resting HR", value: m.avgRestingHR.map { "\(Int($0)) bpm" } ?? "—")
+                metricCell(label: "Sleep", value: m.avgSleepHours.map { String(format: "%.1f hrs", $0) } ?? "—")
+            }
+            GridRow {
+                metricCell(label: "HRV", value: m.avgHRV.map { "\(Int($0)) ms" } ?? "—")
+                metricCell(label: "Window", value: "30 days")
+            }
+        }
+    }
+
+    private func metricCell(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.8)
+            Text(value)
+                .font(.system(size: 16, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func connectAppleHealth() async {
+        isRequestingHealth = true
+        defer { isRequestingHealth = false }
+        _ = await HealthKitService.shared.requestAuthorization()
+        hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
+        healthMetrics = await HealthKitService.shared.getHealthMetrics()
     }
 
     private var knownConditionsCard: some View {
