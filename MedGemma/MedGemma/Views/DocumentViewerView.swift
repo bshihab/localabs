@@ -19,6 +19,7 @@ struct DocumentViewerView: View {
     @State private var hintRingProgress: CGFloat = 0
     @State private var zoomScale: CGFloat = 1.0
     @State private var committedZoom: CGFloat = 1.0
+    @State private var isPinching = false
     @State private var mode: ViewerMode = .browse
     @Namespace private var glassNamespace
 
@@ -206,10 +207,12 @@ struct DocumentViewerView: View {
                 .padding(.bottom, 100)
             }
             // Scroll is on in Browse mode (single finger pans/zooms),
-            // off in Select mode so the drag becomes a lasso path. Also
-            // off when the whole image already fits so iOS doesn't render
-            // a useless scrollable container.
-            .scrollDisabled(fitsOnePage || mode == .select)
+            // off in Select mode so the drag becomes a lasso path, and
+            // off DURING an active pinch so the layout isn't simultaneously
+            // re-sizing AND scrolling — that combination is what was
+            // producing the jitter the user reported. Pan resumes the
+            // moment they release the pinch.
+            .scrollDisabled(fitsOnePage || mode == .select || isPinching)
             // Centers the document in the viewport on first appear (and
             // whenever zoom changes the content size) so the user isn't
             // looking at the left edge of an oversized page.
@@ -235,11 +238,15 @@ struct DocumentViewerView: View {
     private var zoomGesture: some Gesture {
         MagnifyGesture()
             .onChanged { value in
+                if !isPinching {
+                    isPinching = true
+                }
                 let proposed = committedZoom * value.magnification
                 zoomScale = min(max(proposed, 1.0), 3.0)
             }
             .onEnded { _ in
                 committedZoom = zoomScale
+                isPinching = false
             }
     }
 
@@ -280,16 +287,17 @@ struct DocumentViewerView: View {
     }
 
     /// Two-button mode selector at the top of the screen. Browse vs Select.
-    /// Capsule with two buttons; the active one fills with blue. Switching
-    /// modes mid-drag clears any in-progress lasso path so it doesn't bleed
-    /// into the new mode.
+    /// Each button is its own Liquid Glass capsule; the active one carries
+    /// a blue tint. Wrapping in a GlassEffectContainer groups the two
+    /// glass effects so iOS 26's continuous-glass rendering treats them
+    /// as a coordinated pair rather than two separate floating elements.
     private var modeToggle: some View {
-        HStack(spacing: 0) {
-            modeButton(.browse, label: "Browse", icon: "hand.draw")
-            modeButton(.select, label: "Select", icon: "lasso")
+        GlassEffectContainer(spacing: 4) {
+            HStack(spacing: 4) {
+                modeButton(.browse, label: "Browse", icon: "hand.draw")
+                modeButton(.select, label: "Select", icon: "lasso")
+            }
         }
-        .padding(4)
-        .glassEffect(.regular, in: Capsule())
     }
 
     private func modeButton(_ targetMode: ViewerMode, label: String, icon: String) -> some View {
@@ -308,14 +316,18 @@ struct DocumentViewerView: View {
                 Text(label)
                     .font(.system(size: 14, weight: .semibold))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .frame(minWidth: 90)
-            .background(isActive ? Color.blue : Color.clear)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .frame(minWidth: 100)
             .foregroundStyle(isActive ? Color.white : Color.primary)
-            .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+        .glassEffect(
+            isActive
+                ? .regular.tint(.blue.opacity(0.85)).interactive()
+                : .regular.interactive(),
+            in: Capsule()
+        )
     }
 
     /// Standard ray-casting point-in-polygon test. Returns true if `point`

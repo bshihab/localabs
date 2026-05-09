@@ -369,12 +369,20 @@ final class InferenceEngine: ObservableObject {
         Lab Report OCR Text:
         "\(extractedText)"
 
-        Provide a report with these 5 headers:
+        Provide a report with these 5 sections, each starting with the numbered header on its own line:
+
         1. PATIENT SUMMARY
         2. QUESTIONS FOR YOUR DOCTOR
         3. TARGETED DIETARY ADVICE
         4. MEDICAL GLOSSARY
         5. MEDICATION NOTES
+
+        Within each section, format the body using Markdown:
+        - **Bold** for medical terms, lab values, drug names, and important numbers.
+        - *Italic* sparingly, for tone or emphasis.
+        - Sparingly include emoji where it genuinely aids comprehension — e.g., ✅ for normal results, ⚠️ for values worth discussing with a doctor, 💊 in medication notes, 🥗 in dietary advice. Use at most 1–2 emoji per section. Never use emoji decoratively.
+
+        Do NOT wrap the section headers themselves in asterisks. Keep them as plain text on their own line so they parse cleanly.
         <end_of_turn>
         <start_of_turn>model
         """

@@ -60,17 +60,36 @@ struct SectionCard: View {
                     Divider()
                         .padding(.horizontal, 18)
 
-                    Text(content)
+                    Text(MarkdownText.attributed(content))
                         .font(.system(size: 15))
                         .foregroundStyle(.secondary)
                         .lineSpacing(4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 14)
+                        .textSelection(.enabled)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
+    }
+}
+
+/// Helpers for rendering MedGemma's markdown output.
+///
+/// MedGemma is prompted to return **bold**, *italic*, and occasional emoji.
+/// Without an attributed-markdown parse, those asterisks would show up as
+/// literal characters in the UI. `.inlineOnlyPreservingWhitespace` is the
+/// right interpretation because we render section bodies in cards: we want
+/// inline emphasis to format, but we don't want the parser to swallow
+/// blank lines or treat numbered headers as block markdown.
+enum MarkdownText {
+    static func attributed(_ raw: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        return (try? AttributedString(markdown: raw, options: options))
+            ?? AttributedString(raw)
     }
 }

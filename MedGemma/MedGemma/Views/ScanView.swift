@@ -390,7 +390,10 @@ private struct LiveSectionCard: View {
 
             Group {
                 if !text.isEmpty {
-                    Text(text)
+                    // Render MedGemma's markdown (bold/italic/emoji) as
+                    // attributed text rather than raw asterisks. Lives in
+                    // SectionCard.swift's MarkdownText helper.
+                    Text(MarkdownText.attributed(text))
                         .font(.system(size: 14))
                         .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
