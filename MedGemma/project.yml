@@ -38,8 +38,22 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "MedGemma accesses your photo library so you can select existing photos of lab reports."
         INFOPLIST_KEY_NSHealthShareUsageDescription: "MedGemma reads your Apple Health data to provide personalized context alongside your lab report analysis."
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: "MedGemma does not write any data to Apple Health."
+    # HealthKit entitlement is gated behind a paid Apple Developer Program
+    # membership. Free Personal Teams can't sign a provisioning profile that
+    # includes it, which blocks device builds. Once the paid membership is
+    # active, restore the `properties:` block under entitlements:
+    #
+    #   entitlements:
+    #     path: MedGemma/MedGemma.entitlements
+    #     properties:
+    #       com.apple.developer.healthkit: true
+    #
+    # Do NOT add `com.apple.developer.healthkit.access` — that's the
+    # Clinical Records / Verifiable Health Records capability, a separate
+    # gate requiring per-app Apple approval. We only read HKQuantityType
+    # (resting HR, HRV, sleep), which the basic entitlement covers.
+    #
+    # In the meantime: the HealthKitService code still loads, falls back to
+    # mock data when authorization fails, and the build runs everywhere.
     entitlements:
       path: MedGemma/MedGemma.entitlements
-      properties:
-        com.apple.developer.healthkit: true
-        com.apple.developer.healthkit.access: []
