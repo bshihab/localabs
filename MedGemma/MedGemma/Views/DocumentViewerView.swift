@@ -17,6 +17,8 @@ struct DocumentViewerView: View {
     @State private var isLassoing = false
     @State private var showInteractionHint = false
     @State private var hintRingProgress: CGFloat = 0
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var committedZoom: CGFloat = 1.0
     @Namespace private var glassNamespace
 
     struct TextBlock: Identifiable {
@@ -111,15 +113,15 @@ struct DocumentViewerView: View {
 
     private func imageScroller(image: UIImage) -> some View {
         GeometryReader { geo in
-            // Render documents at 1.5× the natural fit-width so the user can
-            // actually read small print. Lab reports are dense, and rendering
-            // at exact viewport width was leaving body text unreadable. The
-            // ScrollView is now 2-axis: horizontal pan if the scaled image
-            // exceeds viewport width, vertical pan for tall documents.
-            let displayWidth = geo.size.width * 1.5
-            // Disable scroll for short single-page docs AND while the user is
-            // actively lassoing — otherwise SwiftUI's ScrollView would steal
-            // the drag and turn it into a pan instead of a selection.
+            // Default zoom is 1.0× (image fits viewport width — Photos-style
+            // initial state), and the user pinches to zoom in for detail.
+            // The previous 1.5× default forced horizontal scrolling on every
+            // open and couldn't be centered cleanly.
+            let displayWidth = geo.size.width * zoomScale
+            // Disable scroll while the user is actively lassoing OR when the
+            // image fits entirely in the viewport (no scroll needed). At 1.0×
+            // a portrait lab report typically fits horizontally but spills
+            // vertically, so vertical scroll stays available.
             let fitsOnePage = renderedImageSize.height > 0
                 && renderedImageSize.height <= geo.size.height
                 && displayWidth <= geo.size.width
@@ -189,7 +191,37 @@ struct DocumentViewerView: View {
                 .padding(.bottom, 100)
             }
             .scrollDisabled(fitsOnePage || isLassoing)
+            // Centers the document in the viewport on first appear (and
+            // whenever zoom changes the content size) so the user isn't
+            // looking at the left edge of an oversized page.
+            .defaultScrollAnchor(.center)
+            // Two-finger pinch — doesn't conflict with the single-finger
+            // long-press lasso or scroll. Bounds 1.0× (fit) to 3.0× (read
+            // tiny lab values clearly). Double-tap toggles between fit and
+            // 2× as a quick zoom-in shortcut.
+            .simultaneousGesture(zoomGesture)
+            .onTapGesture(count: 2) {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                    if zoomScale > 1.05 {
+                        zoomScale = 1.0
+                    } else {
+                        zoomScale = 2.0
+                    }
+                    committedZoom = zoomScale
+                }
+            }
         }
+    }
+
+    private var zoomGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let proposed = committedZoom * value.magnification
+                zoomScale = min(max(proposed, 1.0), 3.0)
+            }
+            .onEnded { _ in
+                committedZoom = zoomScale
+            }
     }
 
     private var lassoGesture: some Gesture {
@@ -420,6 +452,8 @@ struct DocumentViewerView: View {
                     currentPageIndex = max(0, currentPageIndex - 1)
                     lassoPoints = []
                     isLassoing = false
+                    zoomScale = 1.0
+                    committedZoom = 1.0
                 }
             } label: {
                 Image(systemName: "chevron.left.circle.fill")
@@ -437,6 +471,8 @@ struct DocumentViewerView: View {
                     currentPageIndex = min(scanImages.count - 1, currentPageIndex + 1)
                     lassoPoints = []
                     isLassoing = false
+                    zoomScale = 1.0
+                    committedZoom = 1.0
                 }
             } label: {
                 Image(systemName: "chevron.right.circle.fill")
