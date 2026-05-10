@@ -93,15 +93,21 @@ struct DocumentViewerView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if !selectedBlocks.isEmpty {
+                    // Plain icon button — .buttonStyle(.glass) was wrapping
+                    // the SF Symbol in a visible glass capsule that read as
+                    // a "box" on press. Tinted secondary fill is the native
+                    // iOS toolbar treatment for a clear/cancel action.
                     Button {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                             selectedBlocks.removeAll()
                         }
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
+                            .font(.system(size: 22))
+                            .foregroundStyle(.secondary, .tertiary)
+                            .symbolRenderingMode(.hierarchical)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.plain)
                 }
             }
         }
