@@ -111,7 +111,10 @@ final class InferenceEngine: ObservableObject {
         bytesExpected = selectedModel.expectedSizeBytes
 
         let model = selectedModel
-        let downloader = ModelDownloader()
+        // Reuse the shared background-session downloader. iOS requires a
+        // single URLSession per background-session identifier, so this
+        // can't be a per-call instance.
+        let downloader = ModelDownloader.shared
         activeDownloader = downloader
         downloader.onProgress = { [weak self] progress in
             Task { @MainActor in
@@ -365,6 +368,53 @@ final class InferenceEngine: ObservableObject {
             return filename
         }
         return nil
+    }
+
+    /// Re-runs MedGemma on a previously-saved report's raw OCR text. Used
+    /// to refresh older reports against the current prompt (e.g., to give
+    /// pre-markdown-prompt reports their bullet/bold/emoji formatting).
+    /// Preserves the report's id, timestamp, and image paths so history
+    /// stays continuous.
+    func regenerateReport(from existing: StructuredReport) async -> StructuredReport {
+        // Use rawText if it was saved (post-prompt-update reports), or fall
+        // back to a concatenation of the legacy section bodies for very
+        // old reports where rawText was empty.
+        let sourceText: String
+        if !existing.rawText.isEmpty {
+            sourceText = existing.rawText
+        } else {
+            sourceText = [
+                existing.patientSummary,
+                existing.doctorQuestions,
+                existing.dietaryAdvice,
+                existing.medicalGlossary,
+                existing.medicationNotes
+            ].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        }
+        guard !sourceText.isEmpty else { return existing }
+
+        isInferenceCancelled = false
+        isProcessing = true
+        defer { isProcessing = false }
+
+        processingStatus = "Fetching Apple Health context…"
+        let healthMetrics = await HealthKitService.shared.getHealthMetrics()
+
+        processingStatus = "MedGemma is regenerating your report…"
+        var fresh = await runInference(
+            extractedText: sourceText,
+            healthMetrics: healthMetrics,
+            mode: .lab
+        )
+        // Preserve continuity with the existing record.
+        fresh.id = existing.id
+        fresh.timestamp = existing.timestamp
+        fresh.imagePath = existing.imagePath
+        fresh.additionalPagePaths = existing.additionalPagePaths
+
+        LocalStorageService.shared.saveReport(fresh)
+        processingStatus = ""
+        return fresh
     }
 
     /// Apple Health-only weekly review (no scan).

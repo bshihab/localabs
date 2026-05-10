@@ -187,6 +187,22 @@ struct ScanView: View {
                         .lineLimit(1)
                 }
                 Spacer()
+
+                // Manual cancel — calls into engine.cancelInference() which
+                // flips the same flag the backgrounding observer flips, so
+                // the streaming loop bails at the next token. The user
+                // sees a "interrupted" placeholder, the upload buttons
+                // come back, and they can retry without restarting.
+                Button {
+                    engine.cancelInference()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.secondary, .tertiary)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Cancel analysis")
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -17,9 +17,6 @@ struct DocumentViewerView: View {
     @State private var isLassoing = false
     @State private var showInteractionHint = false
     @State private var hintRingProgress: CGFloat = 0
-    @State private var zoomScale: CGFloat = 1.0
-    @State private var committedZoom: CGFloat = 1.0
-    @State private var isPinching = false
     @State private var mode: ViewerMode = .browse
     @Namespace private var glassNamespace
 
@@ -92,22 +89,37 @@ struct DocumentViewerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if !selectedBlocks.isEmpty {
-                    // Plain icon button — .buttonStyle(.glass) was wrapping
-                    // the SF Symbol in a visible glass capsule that read as
-                    // a "box" on press. Tinted secondary fill is the native
-                    // iOS toolbar treatment for a clear/cancel action.
+                HStack(spacing: 8) {
+                    // "Find table on this page" — runs the same breakdown
+                    // algorithm over every recognized block on the current
+                    // page (no lasso required) and selects the table region
+                    // automatically. Useful for pages where the user
+                    // already knows the table is the main thing.
                     Button {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                            selectedBlocks.removeAll()
-                        }
+                        autoSelectTableOnCurrentPage()
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(.secondary, .tertiary)
-                            .symbolRenderingMode(.hierarchical)
+                        Image(systemName: "tablecells.badge.ellipsis")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.blue)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Find table on this page")
+                    .disabled(recognizedBlocks.isEmpty)
+
+                    if !selectedBlocks.isEmpty {
+                        Button {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                selectedBlocks.removeAll()
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(.secondary, .tertiary)
+                                .symbolRenderingMode(.hierarchical)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear selection")
+                    }
                 }
             }
         }
@@ -139,24 +151,29 @@ struct DocumentViewerView: View {
 
     private func imageScroller(image: UIImage) -> some View {
         GeometryReader { geo in
-            // Default zoom is 1.0× (image fits viewport width — Photos-style
-            // initial state), and the user pinches to zoom in for detail.
-            // The previous 1.5× default forced horizontal scrolling on every
-            // open and couldn't be centered cleanly.
-            let displayWidth = geo.size.width * zoomScale
-            // Disable scroll while the user is actively lassoing OR when the
-            // image fits entirely in the viewport (no scroll needed). At 1.0×
-            // a portrait lab report typically fits horizontally but spills
-            // vertically, so vertical scroll stays available.
-            let fitsOnePage = renderedImageSize.height > 0
-                && renderedImageSize.height <= geo.size.height
-                && displayWidth <= geo.size.width
-            ScrollView([.horizontal, .vertical]) {
+            // The whole document — image + selection overlays + lasso path —
+            // lives inside a UIScrollView (via ZoomablePanContainer). UIKit
+            // handles pan + pinch natively, including pan-while-pinching,
+            // so we no longer have to lock scroll during zoom or apply
+            // .frame(width:) hacks to drive zoom from SwiftUI state.
+            //
+            // Browse mode → isScrollEnabled = true (UIScrollView pans + zooms).
+            // Select mode → isScrollEnabled = false (single-finger drag goes
+            //               to the embedded lasso gesture; pinch still works
+            //               because pinch is two-finger and untouched by
+            //               isScrollEnabled).
+            //
+            // resetZoomTrigger flips zoom back to 1.0 each time the user
+            // navigates to a different page so each page opens at fit.
+            ZoomablePanContainer(
+                isScrollEnabled: mode == .browse,
+                resetZoomTrigger: currentPageIndex
+            ) {
                 ZStack(alignment: .topLeading) {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: displayWidth)
+                        .frame(width: geo.size.width)
                         .background(
                             GeometryReader { imgGeo in
                                 Color.clear
@@ -203,9 +220,9 @@ struct DocumentViewerView: View {
                         .frame(width: renderedImageSize.width, height: renderedImageSize.height)
                     }
 
-                    // Lasso path - drawn in the same coordinate space as the
-                    // image overlay grid so polygon hit-test against the
-                    // recognized blocks lines up exactly.
+                    // Lasso path drawn in the same coordinate space as the
+                    // overlay grid. UIScrollView's transform scales both
+                    // together so hit-tests still line up at any zoom.
                     if !lassoPoints.isEmpty {
                         LassoPath(points: lassoPoints)
                             .frame(width: renderedImageSize.width, height: renderedImageSize.height)
@@ -214,53 +231,11 @@ struct DocumentViewerView: View {
                 }
                 .contentShape(Rectangle())
                 // Lasso gesture only fires in Select mode. In Browse mode
-                // .none disables the gesture so single-finger drags fall
-                // through to the ScrollView's pan recognizer normally.
+                // .none disables it so the UIScrollView pan recognizer
+                // owns single-finger drags.
                 .gesture(lassoGesture, including: mode == .select ? .all : .none)
-                .padding(.bottom, 100)
-            }
-            // Scroll is on in Browse mode (single finger pans/zooms),
-            // off in Select mode so the drag becomes a lasso path, and
-            // off DURING an active pinch so the layout isn't simultaneously
-            // re-sizing AND scrolling — that combination is what was
-            // producing the jitter the user reported. Pan resumes the
-            // moment they release the pinch.
-            .scrollDisabled(fitsOnePage || mode == .select || isPinching)
-            // Centers the document in the viewport on first appear (and
-            // whenever zoom changes the content size) so the user isn't
-            // looking at the left edge of an oversized page.
-            .defaultScrollAnchor(.center)
-            // Two-finger pinch — doesn't conflict with the single-finger
-            // long-press lasso or scroll. Bounds 1.0× (fit) to 3.0× (read
-            // tiny lab values clearly). Double-tap toggles between fit and
-            // 2× as a quick zoom-in shortcut.
-            .simultaneousGesture(zoomGesture)
-            .onTapGesture(count: 2) {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                    if zoomScale > 1.05 {
-                        zoomScale = 1.0
-                    } else {
-                        zoomScale = 2.0
-                    }
-                    committedZoom = zoomScale
-                }
             }
         }
-    }
-
-    private var zoomGesture: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                if !isPinching {
-                    isPinching = true
-                }
-                let proposed = committedZoom * value.magnification
-                zoomScale = min(max(proposed, 1.0), 3.0)
-            }
-            .onEnded { _ in
-                committedZoom = zoomScale
-                isPinching = false
-            }
     }
 
     private var lassoGesture: some Gesture {
@@ -512,8 +487,6 @@ struct DocumentViewerView: View {
                     currentPageIndex = max(0, currentPageIndex - 1)
                     lassoPoints = []
                     isLassoing = false
-                    zoomScale = 1.0
-                    committedZoom = 1.0
                 }
             } label: {
                 Image(systemName: "chevron.left.circle.fill")
@@ -531,8 +504,6 @@ struct DocumentViewerView: View {
                     currentPageIndex = min(scanImages.count - 1, currentPageIndex + 1)
                     lassoPoints = []
                     isLassoing = false
-                    zoomScale = 1.0
-                    committedZoom = 1.0
                 }
             } label: {
                 Image(systemName: "chevron.right.circle.fill")
@@ -606,6 +577,64 @@ struct DocumentViewerView: View {
     private var detectedTable: VisionOCRService.RecognizedTable? {
         lassoBreakdown.table
     }
+
+    /// Runs the table detector against every block on the current page
+    /// and auto-selects the blocks that form the detected table.
+    /// Equivalent to the user manually lassoing the table, but available
+    /// from the toolbar so they don't have to circle.
+    private func autoSelectTableOnCurrentPage() {
+        let pageBlocksOnPage = recognizedBlocks
+        guard !pageBlocksOnPage.isEmpty else { return }
+
+        let serviceBlocks = pageBlocksOnPage.map {
+            VisionOCRService.RecognizedBlock(text: $0.text, boundingBox: $0.boundingBox)
+        }
+        let breakdown = VisionOCRService.breakdown(of: serviceBlocks)
+        guard breakdown.table != nil else {
+            // No table-shaped region on this page — nothing to select.
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            return
+        }
+
+        // The breakdown ran over the deduped *positions* of the page's
+        // RecognizedBlocks, but we need to map those positions back to our
+        // TextBlock UUIDs to flip them into selectedBlocks. Match by
+        // bounding-box equality since each block's boundingBox is unique
+        // within the page.
+        let tableBoxes = Set(serviceBlocks.compactMap { sb -> CGRect? in
+            // Only blocks NOT in the extraText make it into the table.
+            // breakdown.extraText is the prose; the rest is the table.
+            // We re-run the algorithm to get the table-block positions.
+            return sb.boundingBox
+        })
+
+        // Easier path: re-derive which blocks are in the table by running
+        // the algorithm directly. For each TextBlock on this page, ask
+        // whether the breakdown classified its text as part of the table.
+        // Simpler: select every block whose text appears in any cell of
+        // the detected table.
+        let tableTexts: Set<String> = Set(breakdown.table?.rows.flatMap { $0 }.filter { !$0.isEmpty } ?? [])
+        var newSelections = Set<UUID>()
+        for block in pageBlocksOnPage where tableBoxes.contains(block.boundingBox) {
+            // A block belongs to the table if its text is contained in
+            // any joined-cell value. (Cells may be the concatenation of
+            // multiple blocks, so use contains rather than equals.)
+            let blockText = block.text
+            if tableTexts.contains(where: { $0.contains(blockText) }) {
+                newSelections.insert(block.id)
+            }
+        }
+        guard !newSelections.isEmpty else {
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            return
+        }
+
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            selectedBlocks.formUnion(newSelections)
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        dismissHintIfShown()
+    }
 }
 
 // MARK: - Glowing lasso path
@@ -661,18 +690,19 @@ private struct DetectedTableBanner: View {
                 Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                     ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIdx, row in
                         GridRow {
+                            let isHeader = rowIdx == table.headerRowIndex
                             ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
                                 Text(cell)
                                     .font(.system(size: 13, design: .rounded))
-                                    .fontWeight(rowIdx == 0 ? .semibold : .regular)
-                                    .foregroundStyle(rowIdx == 0 ? Color.primary : Color.secondary)
+                                    .fontWeight(isHeader ? .semibold : .regular)
+                                    .foregroundStyle(isHeader ? Color.primary : Color.secondary)
                                     .textSelection(.enabled)
                                     .padding(.vertical, 6)
                                     .padding(.horizontal, 8)
                                     .frame(minHeight: 28, alignment: .leading)
                                     .background(
                                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                            .fill(rowIdx == 0 ? Color.blue.opacity(0.10) : Color.clear)
+                                            .fill(isHeader ? Color.blue.opacity(0.10) : Color.clear)
                                     )
                             }
                         }

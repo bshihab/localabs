@@ -138,7 +138,7 @@ struct ProfileView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "bell.badge")
                         .font(.caption)
-                    Text("You'll get a notification when the download is done — feel free to switch apps.")
+                    Text("You'll get a notification when the download is done — feel free to switch apps or even close MedGemma.")
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)

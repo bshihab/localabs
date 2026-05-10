@@ -5,6 +5,7 @@ struct DashboardView: View {
     var initialReport: StructuredReport?
     @State private var report: StructuredReport?
     @State private var healthMetrics: HealthKitService.HealthMetrics?
+    @State private var isRegenerating = false
 
     var body: some View {
         NavigationStack {
@@ -103,8 +104,32 @@ struct DashboardView: View {
 
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Empathetic Translation")
-                .font(.system(size: 20, weight: .bold))
+            HStack {
+                Text("Empathetic Translation")
+                    .font(.system(size: 20, weight: .bold))
+                Spacer()
+                if currentReport != nil {
+                    // Re-runs MedGemma on the saved OCR text using the
+                    // current prompt. Pre-existing reports written before
+                    // we updated the prompt for bullets/markdown stay as
+                    // walls of text otherwise.
+                    Button {
+                        Task { await regenerate() }
+                    } label: {
+                        if isRegenerating {
+                            ProgressView().scaleEffect(0.85)
+                        } else {
+                            Image(systemName: "arrow.clockwise.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(.blue, .blue.opacity(0.18))
+                                .symbolRenderingMode(.hierarchical)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRegenerating)
+                    .accessibilityLabel("Regenerate report")
+                }
+            }
 
             // Renders MedGemma's markdown (bold/italic/emoji) inline, line
             // by line so per-sentence selection works. Falls back to a
@@ -124,6 +149,13 @@ struct DashboardView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private func regenerate() async {
+        guard let existing = currentReport else { return }
+        isRegenerating = true
+        defer { isRegenerating = false }
+        report = await engine.regenerateReport(from: existing)
     }
 
     /// Prominent call-to-action that opens the interactive document viewer.

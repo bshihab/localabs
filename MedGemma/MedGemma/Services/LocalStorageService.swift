@@ -14,20 +14,23 @@ class LocalStorageService {
     
     // MARK: - Save & Retrieve
     
-    /// Saves a new structured report to the local history vault.
+    /// Saves a structured report. If a report with the same id already
+    /// exists (e.g., this is a regeneration), the existing entry is
+    /// updated in place — the position in history and timestamp are
+    /// preserved, only the content fields change.
     func saveReport(_ report: StructuredReport) {
         var history = getHistory()
-        
-        // Avoid saving duplicate reports (same timestamp)
-        if history.contains(where: { $0.id == report.id }) { return }
-        
-        history.insert(report, at: 0)
-        
-        // Keep only the most recent records to prevent storage bloat
-        if history.count > maxRecords {
-            history = Array(history.prefix(maxRecords))
+
+        if let idx = history.firstIndex(where: { $0.id == report.id }) {
+            history[idx] = report
+        } else {
+            history.insert(report, at: 0)
+            // Keep only the most recent records to prevent storage bloat.
+            if history.count > maxRecords {
+                history = Array(history.prefix(maxRecords))
+            }
         }
-        
+
         if let data = try? JSONEncoder().encode(history) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }

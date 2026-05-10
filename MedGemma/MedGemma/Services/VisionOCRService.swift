@@ -20,14 +20,23 @@ class VisionOCRService {
     /// strings, so callers can iterate `[row][col]` safely.
     struct RecognizedTable: Sendable {
         let rows: [[String]]
+        /// Index of the row that should be styled as the header. Detected
+        /// post-clustering by picking the row with the most all-text
+        /// (non-numeric) cells and the shortest average cell length —
+        /// usually row 0 in lab reports, but not always (e.g. a "Lab Panel"
+        /// title row above the actual column-name row).
+        let headerRowIndex: Int
 
         var rowCount: Int { rows.count }
         var columnCount: Int { rows.map(\.count).max() ?? 0 }
+        var headerRow: [String] {
+            rows.indices.contains(headerRowIndex) ? rows[headerRowIndex] : []
+        }
 
-        /// Markdown table form for handing to an LLM. First row is treated
-        /// as the header. Pipe-separated with a `---` divider after the
-        /// header — Gemma understands this format natively and reasons about
-        /// cells positionally instead of guessing from a flat string.
+        /// Markdown table form for handing to an LLM. The detected header
+        /// row is reordered to position 0 (with the divider directly under
+        /// it) and the remaining rows preserve their original order. Gemma
+        /// reads this format natively and reasons about cells positionally.
         func asMarkdown() -> String {
             guard !rows.isEmpty else { return "" }
             let cols = columnCount
@@ -35,13 +44,44 @@ class VisionOCRService {
                 (0..<cols).map { i in i < row.count ? row[i] : "" }
             }
             var lines: [String] = []
-            lines.append("| " + pad(rows[0]).joined(separator: " | ") + " |")
+            // Header first (reordered if it wasn't already on row 0).
+            lines.append("| " + pad(headerRow).joined(separator: " | ") + " |")
             lines.append("|" + String(repeating: "---|", count: cols))
-            for row in rows.dropFirst() {
+            for (i, row) in rows.enumerated() where i != headerRowIndex {
                 lines.append("| " + pad(row).joined(separator: " | ") + " |")
             }
             return lines.joined(separator: "\n")
         }
+    }
+
+    /// Picks the row most likely to be the table header. Heuristics:
+    ///   - All-text rows (no digits) score higher than rows with numbers,
+    ///     since headers are typically labels and body rows often contain
+    ///     numeric values.
+    ///   - Shorter average cell length scores higher (header cells are
+    ///     usually one or two words; body cells often carry more text).
+    ///   - Row 0 gets a small tiebreaker bonus since it's the conventional
+    ///     header position and we don't want to thrash on edge cases.
+    /// Returns 0 if every row scores equally (e.g. a numeric-only table).
+    private static func detectHeaderRow(_ rows: [[String]]) -> Int {
+        guard !rows.isEmpty else { return 0 }
+        var bestIndex = 0
+        var bestScore: Double = -.infinity
+        for (idx, row) in rows.enumerated() {
+            let nonEmpty = row.filter { !$0.isEmpty }
+            guard !nonEmpty.isEmpty else { continue }
+            let avgLength = Double(nonEmpty.map(\.count).reduce(0, +)) / Double(nonEmpty.count)
+            let allText = nonEmpty.allSatisfy { !$0.contains(where: \.isNumber) }
+            var score = 0.0
+            if allText { score += 100 }
+            score -= avgLength             // shorter cells → higher score
+            if idx == 0 { score += 0.5 }   // tiebreaker for conventional layout
+            if score > bestScore {
+                bestScore = score
+                bestIndex = idx
+            }
+        }
+        return bestIndex
     }
 
     /// What `breakdown(of:)` returns: an optional table, plus any non-table
@@ -197,7 +237,7 @@ class VisionOCRService {
         }
 
         return LassoBreakdown(
-            table: RecognizedTable(rows: grid),
+            table: RecognizedTable(rows: grid, headerRowIndex: detectHeaderRow(grid)),
             extraText: extraLines.joined(separator: "\n")
         )
     }
