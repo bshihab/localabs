@@ -17,6 +17,12 @@ final class InferenceEngine: ObservableObject {
     @Published var isProcessing = false
     @Published var processingStatus = ""
     @Published var streamingText = ""
+    /// 0.0–1.0 progress through the current analysis. Updated as each
+    /// pipeline phase completes (OCR per page, save, Health fetch) and
+    /// then incrementally during MedGemma's token-streaming phase. The
+    /// UI binds a determinate ProgressView to this so the user sees an
+    /// actual percentage instead of an indeterminate spinner.
+    @Published var analysisProgress: Double = 0
     @Published var isDownloading = false
     @Published var downloadError: String?
 
@@ -229,12 +235,16 @@ final class InferenceEngine: ObservableObject {
         // backgrounding event so this analysis starts unblocked.
         isInferenceCancelled = false
         isProcessing = true
+        analysisProgress = 0
         defer { isProcessing = false }
 
         // ── OCR every page sequentially ──
         // Sequential (not concurrent) because each Vision call already
         // allocates significant memory; running 5 in parallel against a
         // 4B model in RAM courts the same jetsam crash we just fixed.
+        // Phases roughly map to fixed slices of the bar so the user sees
+        // monotonic progress: OCR 0 → 0.20, save 0.22, Health 0.25, then
+        // MedGemma 0.25 → 0.95, then 1.0 once the report is saved.
         var pageTexts: [String] = []
         for (idx, image) in images.enumerated() {
             processingStatus = images.count == 1
@@ -246,6 +256,7 @@ final class InferenceEngine: ObservableObject {
             } catch {
                 pageTexts.append("")
             }
+            analysisProgress = Double(idx + 1) / Double(images.count) * 0.20
         }
 
         let combinedText = truncateForContext(combinePageTexts(pageTexts))
@@ -258,9 +269,11 @@ final class InferenceEngine: ObservableObject {
         let savedNames = images.compactMap { saveScannedImage($0) }
         let firstPath = savedNames.first
         let extraPaths = savedNames.count > 1 ? Array(savedNames.dropFirst()) : nil
+        analysisProgress = 0.22
 
         processingStatus = "Fetching Apple Health context…"
         let healthMetrics = await HealthKitService.shared.getHealthMetrics()
+        analysisProgress = 0.25
 
         processingStatus = "MedGemma is analyzing your results…"
         var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics, mode: .lab)
@@ -269,6 +282,7 @@ final class InferenceEngine: ObservableObject {
 
         LocalStorageService.shared.saveReport(report)
         processingStatus = ""
+        analysisProgress = 1.0
         return report
     }
 
@@ -301,24 +315,29 @@ final class InferenceEngine: ObservableObject {
         // (scanned PDF), fall through to OCR via analyzeImages.
         let hasEmbeddedTextEverywhere = pdfTextByPage.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if hasEmbeddedTextEverywhere {
+            isInferenceCancelled = false
             isProcessing = true
+            analysisProgress = 0.20  // OCR is skipped for text-PDFs
             defer { isProcessing = false }
 
             processingStatus = "Saving PDF…"
             let savedNames = images.compactMap { saveScannedImage($0) }
             let firstPath = savedNames.first
             let extraPaths = savedNames.count > 1 ? Array(savedNames.dropFirst()) : nil
+            analysisProgress = 0.22
 
             processingStatus = "Fetching Apple Health context…"
             let healthMetrics = await HealthKitService.shared.getHealthMetrics()
+            analysisProgress = 0.25
 
-            let combinedText = combinePageTexts(pdfTextByPage)
+            let combinedText = truncateForContext(combinePageTexts(pdfTextByPage))
             processingStatus = "MedGemma is analyzing your results…"
             var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics, mode: .lab)
             report.imagePath = firstPath
             report.additionalPagePaths = extraPaths
             LocalStorageService.shared.saveReport(report)
             processingStatus = ""
+            analysisProgress = 1.0
             return report
         }
 
@@ -419,10 +438,12 @@ final class InferenceEngine: ObservableObject {
 
         isInferenceCancelled = false
         isProcessing = true
+        analysisProgress = 0.20  // OCR was already done for the saved report
         defer { isProcessing = false }
 
         processingStatus = "Fetching Apple Health context…"
         let healthMetrics = await HealthKitService.shared.getHealthMetrics()
+        analysisProgress = 0.25
 
         processingStatus = "MedGemma is regenerating your report…"
         var fresh = await runInference(
@@ -438,6 +459,7 @@ final class InferenceEngine: ObservableObject {
 
         LocalStorageService.shared.saveReport(fresh)
         processingStatus = ""
+        analysisProgress = 1.0
         return fresh
     }
 
@@ -519,7 +541,9 @@ final class InferenceEngine: ObservableObject {
 
         streamingText = ""
         var collected = ""
-        let stream = context.predict(prompt: prompt, maxTokens: 1000)
+        let maxTokens = 1000
+        var tokenCount = 0
+        let stream = context.predict(prompt: prompt, maxTokens: maxTokens)
         for await piece in stream {
             // Bail if the user backgrounded the app, manually cancelled
             // from the toolbar, or the parent Task got cancelled. Preserve
@@ -534,6 +558,10 @@ final class InferenceEngine: ObservableObject {
             }
             collected += piece
             streamingText = collected
+            tokenCount += 1
+            // Cap at 0.95 so the bar doesn't visibly hit 100% before save
+            // completes — leaves the final bump for the post-loop write.
+            analysisProgress = min(0.25 + Double(tokenCount) / Double(maxTokens) * 0.70, 0.95)
         }
         streamingText = ""
 

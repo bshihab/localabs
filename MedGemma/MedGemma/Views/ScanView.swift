@@ -153,35 +153,51 @@ struct ScanView: View {
 
     private var processingView: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                ProgressView()
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Analyzing")
-                        .font(.system(size: 17, weight: .semibold))
-                    Text(engine.processingStatus.isEmpty
-                         ? "MedGemma is generating your report…"
-                         : engine.processingStatus)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Analyzing")
+                                .font(.system(size: 17, weight: .semibold))
+                            Spacer()
+                            // Live percentage tied to engine.analysisProgress.
+                            // Using monospaced digits keeps it from twitching
+                            // as the percent changes width.
+                            Text("\(Int(engine.analysisProgress * 100))%")
+                                .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                                .contentTransition(.numericText(value: engine.analysisProgress))
+                        }
+                        Text(engine.processingStatus.isEmpty
+                             ? "MedGemma is generating your report…"
+                             : engine.processingStatus)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
 
-                // Manual cancel — calls into engine.cancelInference() which
-                // flips the same flag the backgrounding observer flips, so
-                // the streaming loop bails at the next token. The user
-                // sees a "interrupted" placeholder, the upload buttons
-                // come back, and they can retry without restarting.
-                Button {
-                    engine.cancelInference()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.secondary, .tertiary)
-                        .symbolRenderingMode(.hierarchical)
+                    // Manual cancel — calls into engine.cancelInference()
+                    // which flips the same flag the backgrounding observer
+                    // does, so the streaming loop bails at the next token.
+                    Button {
+                        engine.cancelInference()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.secondary, .tertiary)
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Cancel analysis")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Cancel analysis")
+
+                // Determinate progress bar — replaces the previous
+                // indeterminate spinner. Fills as each pipeline phase
+                // completes (OCR per page → save → Health → MedGemma
+                // streaming → final save).
+                ProgressView(value: engine.analysisProgress)
+                    .tint(.blue)
+                    .animation(.easeOut(duration: 0.25), value: engine.analysisProgress)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
