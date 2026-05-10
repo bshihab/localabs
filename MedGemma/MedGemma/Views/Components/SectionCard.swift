@@ -60,14 +60,13 @@ struct SectionCard: View {
                     Divider()
                         .padding(.horizontal, 18)
 
-                    Text(MarkdownText.attributed(content))
+                    MarkdownBody(content)
                         .font(.system(size: 15))
                         .foregroundStyle(.secondary)
                         .lineSpacing(4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 18)
                         .padding(.vertical, 14)
-                        .textSelection(.enabled)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
@@ -76,20 +75,38 @@ struct SectionCard: View {
     }
 }
 
-/// Helpers for rendering MedGemma's markdown output.
+/// Renders MedGemma's markdown output as proper formatted text. Splits on
+/// newlines and feeds each line through SwiftUI's LocalizedStringKey
+/// initializer, which is the most reliable way to get inline markdown
+/// (**bold**, *italic*, `code`) parsed in SwiftUI — the AttributedString
+/// markdown initializer has subtle parsing quirks (especially around
+/// whitespace), and Text(String) doesn't parse markdown at all.
 ///
-/// MedGemma is prompted to return **bold**, *italic*, and occasional emoji.
-/// Without an attributed-markdown parse, those asterisks would show up as
-/// literal characters in the UI. `.inlineOnlyPreservingWhitespace` is the
-/// right interpretation because we render section bodies in cards: we want
-/// inline emphasis to format, but we don't want the parser to swallow
-/// blank lines or treat numbered headers as block markdown.
-enum MarkdownText {
-    static func attributed(_ raw: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace
-        )
-        return (try? AttributedString(markdown: raw, options: options))
-            ?? AttributedString(raw)
+/// Keeping line splits explicit means newlines and blank lines render
+/// the way the user expects — the parser doesn't get to decide that
+/// adjacent lines should collapse into a paragraph.
+///
+/// `.textSelection(.enabled)` is applied per-line so long-press-and-drag
+/// can grab a single sentence without selecting the whole card.
+struct MarkdownBody: View {
+    let content: String
+
+    init(_ content: String) {
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(content.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                if line.isEmpty {
+                    // Preserve blank lines as visible spacing
+                    Color.clear.frame(height: 8)
+                } else {
+                    Text(LocalizedStringKey(line))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 }

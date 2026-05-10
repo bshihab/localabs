@@ -390,14 +390,14 @@ private struct LiveSectionCard: View {
 
             Group {
                 if !text.isEmpty {
-                    // Render MedGemma's markdown (bold/italic/emoji) as
-                    // attributed text rather than raw asterisks. Lives in
-                    // SectionCard.swift's MarkdownText helper.
-                    Text(MarkdownText.attributed(text))
+                    // Markdown-aware renderer (lives in SectionCard.swift)
+                    // splits per-line so partial selection works and the
+                    // user can grab one sentence without grabbing the
+                    // whole card.
+                    MarkdownBody(text)
                         .font(.system(size: 14))
                         .foregroundStyle(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
                 } else if state == .active {
                     HStack(spacing: 8) {
                         ProgressView().scaleEffect(0.65)

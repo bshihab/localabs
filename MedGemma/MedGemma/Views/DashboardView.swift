@@ -106,14 +106,20 @@ struct DashboardView: View {
             Text("Empathetic Translation")
                 .font(.system(size: 20, weight: .bold))
 
-            // Renders MedGemma's markdown (bold/italic/emoji) inline.
-            // Falls back to a plain placeholder string when no scan exists.
-            Text(currentReport.map { MarkdownText.attributed($0.patientSummary) }
-                 ?? AttributedString("Your lab report has not been scanned yet. Once you scan a document, the local MedGemma AI will analyze it and provide a simple, easy-to-read summary here."))
-                .font(.system(size: 15))
-                .foregroundStyle(.secondary)
-                .lineSpacing(4)
-                .textSelection(.enabled)
+            // Renders MedGemma's markdown (bold/italic/emoji) inline, line
+            // by line so per-sentence selection works. Falls back to a
+            // plain placeholder when no scan exists.
+            if let report = currentReport {
+                MarkdownBody(report.patientSummary)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(4)
+            } else {
+                Text("Your lab report has not been scanned yet. Once you scan a document, the local MedGemma AI will analyze it and provide a simple, easy-to-read summary here.")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(4)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
