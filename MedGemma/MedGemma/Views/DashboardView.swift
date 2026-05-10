@@ -2,6 +2,7 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject var engine: InferenceEngine
+    @Environment(\.dismiss) private var dismiss
     var initialReport: StructuredReport?
     @State private var report: StructuredReport?
     @State private var healthMetrics: HealthKitService.HealthMetrics?
@@ -178,92 +179,49 @@ struct DashboardView: View {
     /// the user sees the section text filling in live, the same way the
     /// fresh scan flow does.
     private func resumeBanner(for incomplete: StructuredReport) -> some View {
-        Group {
-            if isRegenerating {
-                // Live progress while the resume is running. Shows the
-                // section cards filling in as MedGemma streams tokens.
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 14) {
-                        ProgressView()
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Resuming Analysis")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.white)
-                            Text(engine.processingStatus.isEmpty
-                                 ? "MedGemma is regenerating your report…"
-                                 : engine.processingStatus)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white.opacity(0.85))
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                    }
-                    if !engine.streamingText.isEmpty {
-                        // Live preview — stripped down version of the
-                        // streaming text so the user sees it actually
-                        // generating something.
-                        Text(engine.streamingText)
-                            .font(.system(size: 12, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .lineLimit(4)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                            .background(Color.white.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
+        // Tapping the banner pops the dashboard and signals ScanView to
+        // re-run the analysis there, so the user sees the live streaming
+        // cards fill in instead of staying on the dashboard with a small
+        // status banner.
+        Button {
+            engine.pendingResumeReport = incomplete
+            dismiss()
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.22))
+                        .frame(width: 48, height: 48)
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white)
                 }
-                .padding(18)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    LinearGradient(
-                        colors: [Color.orange, Color.orange.opacity(0.85)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .shadow(color: .orange.opacity(0.28), radius: 14, y: 6)
-            } else {
-                // Idle "tap to resume" state.
-                Button {
-                    Task { await regenerate() }
-                } label: {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.white.opacity(0.22))
-                                .frame(width: 48, height: 48)
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 22, weight: .bold))
-                                .foregroundStyle(.white)
-                        }
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Resume Analysis")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundStyle(.white)
-                            Text("MedGemma didn't finish — tap to retry against the saved scan")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.88))
-                                .multilineTextAlignment(.leading)
-                        }
-                        Spacer(minLength: 8)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.85))
-                    }
-                    .padding(18)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.orange, Color.orange.opacity(0.85)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        )
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .shadow(color: .orange.opacity(0.28), radius: 14, y: 6)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Resume Analysis")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text("MedGemma didn't finish — tap to retry against the saved scan")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.88))
+                        .multilineTextAlignment(.leading)
                 }
-                .buttonStyle(.plain)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.85))
             }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .background(
+                LinearGradient(
+                    colors: [Color.orange, Color.orange.opacity(0.85)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: .orange.opacity(0.28), radius: 14, y: 6)
         }
+        .buttonStyle(.plain)
     }
 
     /// Prominent call-to-action that opens the interactive document viewer.

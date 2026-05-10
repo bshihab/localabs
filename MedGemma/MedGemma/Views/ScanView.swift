@@ -50,34 +50,13 @@ struct ScanView: View {
                 Text("Please enable camera access in Settings to scan lab reports.")
             }
             .onChange(of: pickerItems) { _, newItems in
-                guard !newItems.isEmpty else { return }
-                Task {
-                    // Load all picked photos in document order, dropping
-                    // any that fail to decode rather than crashing the
-                    // whole batch on one bad item.
-                    var images: [UIImage] = []
-                    for item in newItems {
-                        if let data = try? await item.loadTransferable(type: Data.self),
-                           let img = UIImage(data: data) {
-                            images.append(img)
-                        }
-                    }
-                    pickerItems = []
-                    if !images.isEmpty {
-                        report = await engine.analyzeImages(images)
-                        navigateToDashboard = true
-                    }
-                }
+                handlePickerItemsChange(newItems)
             }
             .onChange(of: selectedImage) { _, newImage in
-                // Camera path: single shot. Funnel through analyzeImages so
-                // there's only one analysis pipeline to maintain.
-                guard let image = newImage else { return }
-                Task {
-                    report = await engine.analyzeImages([image])
-                    navigateToDashboard = true
-                    selectedImage = nil
-                }
+                handleCameraImageChange(newImage)
+            }
+            .onChange(of: engine.pendingResumeReport?.id) { _, _ in
+                handleResumeSignal()
             }
             .navigationDestination(isPresented: $navigateToDashboard) {
                 if let report = report {
@@ -215,6 +194,55 @@ struct ScanView: View {
             LiveReportSectionsView(streamingText: engine.streamingText)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
+        }
+    }
+
+    /// Triggered by Dashboard's Resume button — picks up the saved
+    /// `pendingResumeReport`, re-runs MedGemma against its OCR text, and
+    /// pushes a fresh Dashboard with the regenerated content. While the
+    /// regeneration is running, ScanView's body shows `processingView`
+    /// because `engine.isProcessing` flips true inside `regenerateReport`.
+    private func handleResumeSignal() {
+        guard let pending = engine.pendingResumeReport else { return }
+        engine.pendingResumeReport = nil
+        Task {
+            let regenerated = await engine.regenerateReport(from: pending)
+            report = regenerated
+            navigateToDashboard = true
+        }
+    }
+
+    /// Multi-photo path. Loads each picked PhotosPickerItem into a UIImage,
+    /// drops failures rather than aborting the whole batch, then funnels
+    /// through analyzeImages. Extracted to keep the body's view-builder
+    /// expression simple enough for Swift's type-checker — inlining this
+    /// pushed the body past the type-check budget.
+    private func handlePickerItemsChange(_ newItems: [PhotosPickerItem]) {
+        guard !newItems.isEmpty else { return }
+        Task {
+            var images: [UIImage] = []
+            for item in newItems {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let img = UIImage(data: data) {
+                    images.append(img)
+                }
+            }
+            pickerItems = []
+            if !images.isEmpty {
+                report = await engine.analyzeImages(images)
+                navigateToDashboard = true
+            }
+        }
+    }
+
+    /// Single-shot camera path. Same pipeline as multi-photo — the camera
+    /// just only ever produces one image at a time.
+    private func handleCameraImageChange(_ newImage: UIImage?) {
+        guard let image = newImage else { return }
+        Task {
+            report = await engine.analyzeImages([image])
+            navigateToDashboard = true
+            selectedImage = nil
         }
     }
 

@@ -39,6 +39,14 @@ final class InferenceEngine: ObservableObject {
     /// ggml_abort crashes on resume.
     private var isInferenceCancelled = false
 
+    /// Set by DashboardView's Resume button to signal ScanView that it
+    /// should pop back to the upload screen, kick off regenerateReport,
+    /// and (when it finishes) push a fresh Dashboard with the new
+    /// content. ScanView observes this via .onChange and clears it
+    /// immediately after picking it up so the same report can be
+    /// resumed again later if needed.
+    @Published var pendingResumeReport: StructuredReport?
+
     private var modelURL: URL { selectedModel.localURL }
 
     init() {
@@ -240,7 +248,7 @@ final class InferenceEngine: ObservableObject {
             }
         }
 
-        let combinedText = combinePageTexts(pageTexts)
+        let combinedText = truncateForContext(combinePageTexts(pageTexts))
         if combinedText.isEmpty {
             return StructuredReport(patientSummary: "No text was found in these pages. Please ensure the document is clearly visible and try again.")
         }
@@ -336,6 +344,22 @@ final class InferenceEngine: ObservableObject {
     /// "where was the cholesterol value?" type questions, and they
     /// disambiguate cases where the same value appears on multiple pages.
     /// Single-page input gets no marker.
+    /// Hard cap on OCR text length to keep the full prompt within
+    /// LlamaContext's `n_ctx`. Even at 4096-token context, multi-page
+    /// scans of dense lab reports could overflow once the system prompt
+    /// + profile + RAG context + 1000-token output budget are all
+    /// accounted for. We budget ~6000 chars of OCR (~1500 tokens) and
+    /// truncate the rest. A per-page proportional truncation would be
+    /// fairer but the simple prefix-and-note approach handles the
+    /// common case (long-tail pages near the end of the report) just
+    /// fine and is easier to reason about.
+    private func truncateForContext(_ raw: String) -> String {
+        let maxChars = 6000
+        guard raw.count > maxChars else { return raw }
+        let cut = String(raw.prefix(maxChars))
+        return cut + "\n\n[Note: OCR text was truncated to fit MedGemma's context window. If important details are missing, scan fewer pages or use a higher-resolution photo of the relevant section.]"
+    }
+
     private func combinePageTexts(_ pages: [String]) -> String {
         // Plain loop — Swift's compactMap inference choked on the
         // EnumeratedSequence's named tuple element ((offset:Int, element:String))
