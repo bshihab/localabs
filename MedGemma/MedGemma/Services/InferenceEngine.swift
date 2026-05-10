@@ -32,7 +32,35 @@ final class InferenceEngine: ObservableObject {
     private var activeDownloader: ModelDownloader?
     private var downloadTask: Task<Void, Never>?
 
+    /// Flipped to true by `cancelInference()` (e.g., on app backgrounding).
+    /// The streaming inference loop checks it between tokens and bails out
+    /// early. Keeps llama.cpp from resuming into a Metal/GGML state that
+    /// got corrupted while the app was suspended — that's what causes
+    /// ggml_abort crashes on resume.
+    private var isInferenceCancelled = false
+
     private var modelURL: URL { selectedModel.localURL }
+
+    init() {
+        // Listen for the app entering the background. Any inference that
+        // was running gets cancelled at the next safe checkpoint so the
+        // GPU state can settle. Otherwise iOS suspending us mid-decode
+        // can corrupt the Metal command buffer / KV cache, and the next
+        // ggml call crashes with `ggml_abort`.
+        Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification) {
+                self?.cancelInference()
+            }
+        }
+    }
+
+    /// Aborts any in-flight inference. Inference loops check this flag
+    /// between tokens and exit cleanly — the partial output gets parsed
+    /// and saved if there's enough of it, otherwise a "cancelled"
+    /// placeholder is returned.
+    func cancelInference() {
+        isInferenceCancelled = true
+    }
 
     func selectModel(_ model: AvailableModel) {
         guard model != selectedModel else { return }
@@ -186,6 +214,9 @@ final class InferenceEngine: ObservableObject {
             return StructuredReport(patientSummary: "No pages were provided.")
         }
 
+        // Fresh run — clear any cancellation flag left over from a previous
+        // backgrounding event so this analysis starts unblocked.
+        isInferenceCancelled = false
         isProcessing = true
         defer { isProcessing = false }
 
@@ -416,6 +447,18 @@ final class InferenceEngine: ObservableObject {
         var collected = ""
         let stream = context.predict(prompt: prompt, maxTokens: 1000)
         for await piece in stream {
+            // Bail if the user backgrounded the app or the parent task got
+            // cancelled. We DON'T continue feeding the partial buffer back
+            // into llama.cpp — the Metal/GGML state may already be in a
+            // bad place from suspension, and the next call will reset
+            // cleanly via llama_memory_clear at the start of runPredict.
+            if isInferenceCancelled || Task.isCancelled {
+                streamingText = ""
+                return StructuredReport(
+                    patientSummary: "Analysis was interrupted (the app was backgrounded). Tap Scan to try again.",
+                    rawText: collected
+                )
+            }
             collected += piece
             streamingText = collected
         }
