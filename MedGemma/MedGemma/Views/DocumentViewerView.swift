@@ -118,6 +118,13 @@ struct DocumentViewerView: View {
             .environmentObject(engine)
             .presentationBackground(.thinMaterial)
             .presentationDragIndicator(.visible)
+            // Without this, the sheet's pull-to-dismiss gesture wins over
+            // the chat ScrollView's scroll — every time you tried to scroll
+            // up through the chat, the sheet itself would drag down toward
+            // dismissal. .scrolls tells iOS to let the inner ScrollView
+            // handle scrolls first; the sheet only dismisses when the user
+            // grabs the drag indicator at the top.
+            .presentationContentInteraction(.scrolls)
         }
         .onAppear {
             loadAllPages()
