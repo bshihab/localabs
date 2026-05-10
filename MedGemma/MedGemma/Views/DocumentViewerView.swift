@@ -752,6 +752,12 @@ struct FollowUpChatView: View {
                         .padding(.vertical)
                     }
                     .scrollContentBackground(.hidden)
+                    // Keyboard follows the user's scroll: starts to drop the
+                    // moment they begin scrolling and tracks their finger
+                    // until released. Standard iOS Messages / Mail behavior
+                    // — keyboard only comes back when they tap the input
+                    // field again.
+                    .scrollDismissesKeyboard(.interactively)
                     .onChange(of: messages.count) { _, _ in
                         if let last = messages.last {
                             withAnimation(.easeOut(duration: 0.3)) {
