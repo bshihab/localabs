@@ -149,6 +149,11 @@ public final class LlamaContext: @unchecked Sendable {
             print("[LlamaContext] Prompt tokenize failed (returned \(nPromptTokens), n_ctx=\(nCtx)). Most likely the prompt is too long.")
             return
         }
+        // Log successful tokenization so we can correlate prompt size with
+        // any downstream ggml_abort / Metal allocation issues. The
+        // available budget is n_ctx − maxTokens; if this number is close
+        // to that, we're flirting with an overflow during decode.
+        print("[LlamaContext] Tokenize OK: \(nPromptTokens) tokens (n_ctx=\(nCtx), output budget=\(maxTokens), headroom=\(Int(nCtx) - Int(nPromptTokens) - maxTokens))")
 
         // Decode the entire prompt in one batch to populate the KV cache.
         var promptBatch = llama_batch_get_one(&promptTokens, nPromptTokens)
