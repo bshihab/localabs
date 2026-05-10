@@ -228,18 +228,22 @@ struct ScanView: View {
         }
     }
 
-    /// Multi-photo path. Loads each picked PhotosPickerItem into a UIImage,
-    /// drops failures rather than aborting the whole batch, then funnels
-    /// through analyzeImages. Extracted to keep the body's view-builder
-    /// expression simple enough for Swift's type-checker — inlining this
-    /// pushed the body past the type-check budget.
+    /// Multi-photo path. Loads each picked PhotosPickerItem into a UIImage
+    /// via ImageIO's thumbnail API (downsamples to 2048pt during decode so
+    /// the full-resolution bitmap never gets allocated), drops failures
+    /// rather than aborting the whole batch, then funnels through
+    /// analyzeImages. The downsampling is what fixed multi-photo scans
+    /// freezing the app the moment MedGemma started — five 12MP photos
+    /// at full res were ~180MB of decoded bitmap held alongside the 4B
+    /// model + KV cache, which pushed iPhones into memory-pressure
+    /// suspension.
     private func handlePickerItemsChange(_ newItems: [PhotosPickerItem]) {
         guard !newItems.isEmpty else { return }
         Task {
             var images: [UIImage] = []
             for item in newItems {
-                if let data = try? await item.loadTransferable(type: Data.self),
-                   let img = UIImage(data: data) {
+                guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                if let img = InferenceEngine.downsampledImage(from: data) {
                     images.append(img)
                 }
             }

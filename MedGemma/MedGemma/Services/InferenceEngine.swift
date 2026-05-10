@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import UserNotifications
 import PDFKit
+import ImageIO
 
 /// Orchestrates the full pipeline:
 /// Apple VisionKit OCR → MedGemma 4B (via llama.cpp on Metal GPU)
@@ -74,6 +75,33 @@ final class InferenceEngine: ObservableObject {
     /// placeholder is returned.
     func cancelInference() {
         isInferenceCancelled = true
+    }
+
+    /// Memory-efficient image downsampler. ImageIO's thumbnail API decodes
+    /// directly to the target pixel size — the full-resolution bitmap is
+    /// never allocated. For 12MP iPhone photos this drops the in-memory
+    /// footprint from ~36MB per image to ~4MB per image, which is what
+    /// keeps multi-photo scans from going OOM the moment MedGemma starts
+    /// allocating its prompt / KV cache buffers.
+    ///
+    /// Use this for any image that's about to be held in memory across
+    /// multiple async hops (OCR, save, inference). The 2048pt default is
+    /// enough resolution for both Vision OCR and on-screen display.
+    static func downsampledImage(from data: Data, maxDimension: CGFloat = 2048) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else {
+            return nil
+        }
+        let downsampleOptions = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDimension
+        ] as CFDictionary
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, downsampleOptions) else {
+            return nil
+        }
+        return UIImage(cgImage: cgImage)
     }
 
     func selectModel(_ model: AvailableModel) {
@@ -543,6 +571,10 @@ final class InferenceEngine: ObservableObject {
         var collected = ""
         let maxTokens = 1000
         var tokenCount = 0
+        // Surface prompt size in the Xcode console — useful for diagnosing
+        // tokenize-overflow / slow-decode complaints. Approximate token
+        // count assumes ~4 chars/token for English text + medical jargon.
+        print("[InferenceEngine] Prompt: \(prompt.count) chars (~\(prompt.count / 4) tokens) before MedGemma run.")
         let stream = context.predict(prompt: prompt, maxTokens: maxTokens)
         for await piece in stream {
             // Bail if the user backgrounded the app, manually cancelled
