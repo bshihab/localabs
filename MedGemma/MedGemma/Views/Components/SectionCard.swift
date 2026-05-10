@@ -82,9 +82,9 @@ struct SectionCard: View {
 /// markdown initializer has subtle parsing quirks (especially around
 /// whitespace), and Text(String) doesn't parse markdown at all.
 ///
-/// Keeping line splits explicit means newlines and blank lines render
-/// the way the user expects — the parser doesn't get to decide that
-/// adjacent lines should collapse into a paragraph.
+/// Lines starting with `- ` or `* ` render as proper bulleted rows with a
+/// • marker and hanging indent so wrapped text aligns under the first
+/// character of the bullet.
 ///
 /// `.textSelection(.enabled)` is applied per-line so long-press-and-drag
 /// can grab a single sentence without selecting the whole card.
@@ -96,17 +96,35 @@ struct MarkdownBody: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(content.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(content.components(separatedBy: "\n").enumerated()), id: \.offset) { _, rawLine in
+                let line = rawLine.trimmingCharacters(in: .whitespaces)
                 if line.isEmpty {
-                    // Preserve blank lines as visible spacing
-                    Color.clear.frame(height: 8)
+                    Color.clear.frame(height: 6)
+                } else if let bullet = bulletText(line) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("•")
+                            .foregroundStyle(.secondary)
+                        Text(LocalizedStringKey(bullet))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 } else {
                     Text(LocalizedStringKey(line))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
+    }
+
+    /// Returns the body of a bullet line if `line` starts with a markdown
+    /// bullet marker (`- ` or `* `), otherwise nil.
+    private func bulletText(_ line: String) -> String? {
+        if line.hasPrefix("- ") { return String(line.dropFirst(2)) }
+        if line.hasPrefix("* ") { return String(line.dropFirst(2)) }
+        return nil
     }
 }

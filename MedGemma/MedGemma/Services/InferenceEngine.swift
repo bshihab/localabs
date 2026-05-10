@@ -36,6 +36,11 @@ final class InferenceEngine: ObservableObject {
 
     func selectModel(_ model: AvailableModel) {
         guard model != selectedModel else { return }
+
+        // Cancel any in-flight download for the model we're leaving so the
+        // new selection isn't competing with a now-orphaned download task.
+        cancelDownload()
+
         selectedModel = model
         UserDefaults.standard.set(model.rawValue, forKey: "medgemma_selected_model")
         llamaContext = nil
@@ -43,6 +48,15 @@ final class InferenceEngine: ObservableObject {
         loadingProgress = 0
         bytesWritten = 0
         bytesExpected = 0
+
+        // Auto-load the newly-selected model if its file is already on
+        // disk. Without this, switching back to a model that was previously
+        // downloaded showed the "Download" button as if it had vanished —
+        // the user had to kill the app to make `loadModelIfDownloaded()`
+        // run again on launch. Now we run it inline whenever the selection
+        // changes, so the green "loaded & ready" badge appears as soon as
+        // the model finishes loading into Metal.
+        Task { await loadModelIfDownloaded() }
     }
 
     /// Loads the model into Metal GPU memory if it's already on disk.
@@ -377,10 +391,14 @@ final class InferenceEngine: ObservableObject {
         4. MEDICAL GLOSSARY
         5. MEDICATION NOTES
 
-        Within each section, format the body using Markdown:
-        - **Bold** for medical terms, lab values, drug names, and important numbers.
-        - *Italic* sparingly, for tone or emphasis.
-        - Sparingly include emoji where it genuinely aids comprehension — e.g., ✅ for normal results, ⚠️ for values worth discussing with a doctor, 💊 in medication notes, 🥗 in dietary advice. Use at most 1–2 emoji per section. Never use emoji decoratively.
+        Within each section, write for a phone screen — short, scannable, easy to read. Specifically:
+
+        - Default to bullet points, not paragraphs. Each bullet should be a single short sentence (one line on a phone). Lines starting with `- ` will render as bullets.
+        - When you must use prose, keep paragraphs to 2 sentences max. No walls of text.
+        - PATIENT SUMMARY in particular should be 2–4 short bullets that capture the headline findings, not a paragraph.
+        - Use **bold** for lab values, drug names, medical terms, and important numbers.
+        - Use *italics* sparingly, only for tone or emphasis.
+        - Add emoji rarely and only when it genuinely aids comprehension (✅ normal, ⚠️ worth discussing, 💊 medications, 🥗 dietary). Max 1–2 per section. Never decorative.
 
         Do NOT wrap the section headers themselves in asterisks. Keep them as plain text on their own line so they parse cleanly.
         <end_of_turn>
