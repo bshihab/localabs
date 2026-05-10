@@ -497,22 +497,32 @@ final class InferenceEngine: ObservableObject {
         var collected = ""
         let stream = context.predict(prompt: prompt, maxTokens: 1000)
         for await piece in stream {
-            // Bail if the user backgrounded the app or the parent task got
-            // cancelled. We DON'T continue feeding the partial buffer back
-            // into llama.cpp — the Metal/GGML state may already be in a
-            // bad place from suspension, and the next call will reset
-            // cleanly via llama_memory_clear at the start of runPredict.
+            // Bail if the user backgrounded the app, manually cancelled
+            // from the toolbar, or the parent Task got cancelled. Preserve
+            // the OCR text in rawText so the dashboard can offer a Resume
+            // button that re-runs against the same source.
             if isInferenceCancelled || Task.isCancelled {
                 streamingText = ""
                 return StructuredReport(
-                    patientSummary: "Analysis was interrupted (the app was backgrounded). Tap Scan to try again.",
-                    rawText: collected
+                    patientSummary: "Analysis was interrupted. Tap Resume on the dashboard to continue.",
+                    rawText: extractedText
                 )
             }
             collected += piece
             streamingText = collected
         }
         streamingText = ""
+
+        // Empty output usually means llama_tokenize bailed because the
+        // prompt overflowed n_ctx (multi-page scans + system prompt +
+        // 1000-token output budget). Don't save a blank report — preserve
+        // the OCR text so the user can retry via Resume.
+        if collected.isEmpty {
+            return StructuredReport(
+                patientSummary: "Analysis didn't complete — your scan may be too long for MedGemma's context window. Tap Resume to retry, or use fewer pages.",
+                rawText: extractedText
+            )
+        }
 
         var parsed = StructuredReport.parse(from: collected)
         if parsed.rawText.isEmpty { parsed.rawText = collected }

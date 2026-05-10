@@ -31,10 +31,23 @@ struct DashboardView: View {
                     summaryCard
                         .padding(.horizontal)
 
+                    // Resume banner for reports where the model didn't
+                    // finish (cancelled by the user, interrupted by app
+                    // backgrounding, or the prompt overflowed n_ctx).
+                    // Tapping kicks off regenerateReport against the
+                    // saved OCR text; the live cards animate the same
+                    // way they do during a fresh scan.
+                    if let report = currentReport, report.isIncomplete {
+                        resumeBanner(for: report)
+                            .padding(.horizontal)
+                    }
+
                     // Pulled out of the AI Insights stack and moved up so
                     // it's the first action after the summary — the document
                     // viewer is where most users will spend their time.
-                    if let report = currentReport, report.imagePath != nil {
+                    // Hidden for incomplete reports (no useful content to
+                    // explore until they Resume).
+                    if let report = currentReport, report.imagePath != nil, !report.isIncomplete {
                         NavigationLink {
                             DocumentViewerView(report: report)
                         } label: {
@@ -44,7 +57,7 @@ struct DashboardView: View {
                         .padding(.horizontal)
                     }
 
-                    if let report = currentReport {
+                    if let report = currentReport, !report.isIncomplete {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("AI INSIGHTS")
                                 .font(.system(size: 13, weight: .semibold))
@@ -108,11 +121,10 @@ struct DashboardView: View {
                 Text("Empathetic Translation")
                     .font(.system(size: 20, weight: .bold))
                 Spacer()
-                if currentReport != nil {
-                    // Re-runs MedGemma on the saved OCR text using the
-                    // current prompt. Pre-existing reports written before
-                    // we updated the prompt for bullets/markdown stay as
-                    // walls of text otherwise.
+                // Hide the regenerate icon when the report is incomplete —
+                // the orange "Resume Analysis" banner above already
+                // surfaces that action much more prominently.
+                if let report = currentReport, !report.isIncomplete {
                     Button {
                         Task { await regenerate() }
                     } label: {
@@ -156,6 +168,102 @@ struct DashboardView: View {
         isRegenerating = true
         defer { isRegenerating = false }
         report = await engine.regenerateReport(from: existing)
+    }
+
+    /// Banner shown for reports where MedGemma's generation didn't
+    /// produce a normal output (cancelled, backgrounded, or the prompt
+    /// overflowed n_ctx). Sits between the summary card and the rest of
+    /// the dashboard, calls regenerateReport against the saved OCR text
+    /// when tapped. While in flight, swaps in a streaming-status view so
+    /// the user sees the section text filling in live, the same way the
+    /// fresh scan flow does.
+    private func resumeBanner(for incomplete: StructuredReport) -> some View {
+        Group {
+            if isRegenerating {
+                // Live progress while the resume is running. Shows the
+                // section cards filling in as MedGemma streams tokens.
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 14) {
+                        ProgressView()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Resuming Analysis")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.white)
+                            Text(engine.processingStatus.isEmpty
+                                 ? "MedGemma is regenerating your report…"
+                                 : engine.processingStatus)
+                                .font(.system(size: 13))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                    if !engine.streamingText.isEmpty {
+                        // Live preview — stripped down version of the
+                        // streaming text so the user sees it actually
+                        // generating something.
+                        Text(engine.streamingText)
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    LinearGradient(
+                        colors: [Color.orange, Color.orange.opacity(0.85)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .shadow(color: .orange.opacity(0.28), radius: 14, y: 6)
+            } else {
+                // Idle "tap to resume" state.
+                Button {
+                    Task { await regenerate() }
+                } label: {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.22))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Resume Analysis")
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text("MedGemma didn't finish — tap to retry against the saved scan")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.88))
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.orange, Color.orange.opacity(0.85)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .shadow(color: .orange.opacity(0.28), radius: 14, y: 6)
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     /// Prominent call-to-action that opens the interactive document viewer.

@@ -46,7 +46,13 @@ public final class LlamaContext: @unchecked Sendable {
         }
 
         var ctxParams = llama_context_default_params()
-        ctxParams.n_ctx = 2048
+        // 4096 is enough for multi-page lab reports without the prompt
+        // silently overflowing (which manifested as blank reports — the
+        // 2048 default was getting exceeded as soon as the user uploaded
+        // 2+ pages worth of OCR text plus our system prompt + output
+        // budget). 4096 roughly doubles KV cache memory but still fits
+        // comfortably alongside the 4B model on iPhones with 6GB+ RAM.
+        ctxParams.n_ctx = 4096
         ctxParams.n_threads = Int32(max(1, ProcessInfo.processInfo.processorCount - 1))
         ctxParams.n_threads_batch = ctxParams.n_threads
 
@@ -134,7 +140,15 @@ public final class LlamaContext: @unchecked Sendable {
             true,  // add_bos
             true   // parse_special — required for Gemma <start_of_turn> markers
         )
-        guard nPromptTokens > 0 else { return }
+        // llama_tokenize returns a negative number when the prompt would
+        // overflow n_ctx — we used to silently `return` here which made
+        // multi-page scans look like the model gave up. Log the failure
+        // so the upstream caller can detect "empty stream" and surface
+        // a clear error to the user.
+        guard nPromptTokens > 0 else {
+            print("[LlamaContext] Prompt tokenize failed (returned \(nPromptTokens), n_ctx=\(nCtx)). Most likely the prompt is too long.")
+            return
+        }
 
         // Decode the entire prompt in one batch to populate the KV cache.
         var promptBatch = llama_batch_get_one(&promptTokens, nPromptTokens)

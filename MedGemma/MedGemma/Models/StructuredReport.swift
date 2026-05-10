@@ -45,6 +45,25 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         return docs.appendingPathComponent("scans").appendingPathComponent(imagePath)
     }
 
+    /// True when the report's MedGemma generation didn't produce a normal
+    /// 5-section output. Detected by checking whether the patient summary
+    /// matches our specific failure / cancellation messages OR every
+    /// section is empty despite OCR text being present. Used by the
+    /// dashboard to surface a "Resume Analysis" call-to-action.
+    var isIncomplete: Bool {
+        let hasOCR = !rawText.isEmpty
+        let allSectionsEmpty = patientSummary.isEmpty
+            && doctorQuestions.isEmpty
+            && dietaryAdvice.isEmpty
+            && medicalGlossary.isEmpty
+            && medicationNotes.isEmpty
+        let hasFailureMarker = patientSummary.contains("interrupted")
+            || patientSummary.contains("didn't complete")
+            || patientSummary.contains("Analysis was")
+            || patientSummary.contains("Failed to extract")
+        return hasOCR && (allSectionsEmpty || hasFailureMarker)
+    }
+
     /// All page image URLs in document order. Empty if the report has no
     /// saved scans (e.g., weekly Apple Health review). Multi-page reports
     /// have one URL per page in chronological scan order.
