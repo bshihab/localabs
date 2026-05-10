@@ -75,19 +75,16 @@ struct SectionCard: View {
     }
 }
 
-/// Renders MedGemma's markdown output as proper formatted text. Splits on
-/// newlines and feeds each line through SwiftUI's LocalizedStringKey
-/// initializer, which is the most reliable way to get inline markdown
-/// (**bold**, *italic*, `code`) parsed in SwiftUI — the AttributedString
-/// markdown initializer has subtle parsing quirks (especially around
-/// whitespace), and Text(String) doesn't parse markdown at all.
+/// Renders MedGemma's markdown output as formatted text + bullets +
+/// tables. Splits the input into block-level chunks (paragraphs, bullet
+/// rows, blank lines, markdown tables) and renders each appropriately.
+/// Inline emphasis (**bold**, *italic*, `code`, links) inside any block
+/// is parsed via SwiftUI's LocalizedStringKey initializer, which is the
+/// most reliable inline-markdown path on iOS.
 ///
-/// Lines starting with `- ` or `* ` render as proper bulleted rows with a
-/// • marker and hanging indent so wrapped text aligns under the first
-/// character of the bullet.
-///
-/// `.textSelection(.enabled)` is applied per-line so long-press-and-drag
-/// can grab a single sentence without selecting the whole card.
+/// `.textSelection(.enabled)` is applied per-block so long-press-and-drag
+/// can grab a single sentence (or table cell) without grabbing the whole
+/// card.
 struct MarkdownBody: View {
     let content: String
 
@@ -97,34 +94,158 @@ struct MarkdownBody: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(content.components(separatedBy: "\n").enumerated()), id: \.offset) { _, rawLine in
-                let line = rawLine.trimmingCharacters(in: .whitespaces)
-                if line.isEmpty {
-                    Color.clear.frame(height: 6)
-                } else if let bullet = bulletText(line) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("•")
-                            .foregroundStyle(.secondary)
-                        Text(LocalizedStringKey(bullet))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                } else {
-                    Text(LocalizedStringKey(line))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            ForEach(blocks.indices, id: \.self) { idx in
+                blockView(for: blocks[idx])
             }
         }
     }
 
-    /// Returns the body of a bullet line if `line` starts with a markdown
-    /// bullet marker (`- ` or `* `), otherwise nil.
-    private func bulletText(_ line: String) -> String? {
-        if line.hasPrefix("- ") { return String(line.dropFirst(2)) }
-        if line.hasPrefix("* ") { return String(line.dropFirst(2)) }
-        return nil
+    @ViewBuilder
+    private func blockView(for block: Block) -> some View {
+        switch block {
+        case .blank:
+            Color.clear.frame(height: 6)
+
+        case .paragraph(let line):
+            Text(LocalizedStringKey(line))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .bullet(let body):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("•")
+                    .foregroundStyle(.secondary)
+                Text(LocalizedStringKey(body))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+        case .table(let rows):
+            // Horizontally scrollable so wide tables don't blow out the
+            // chat bubble / card width. First row is treated as the
+            // header (semibold + subtle blue tint).
+            ScrollView(.horizontal, showsIndicators: false) {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                    ForEach(rows.indices, id: \.self) { rIdx in
+                        GridRow {
+                            let isHeader = rIdx == 0
+                            ForEach(rows[rIdx].indices, id: \.self) { cIdx in
+                                Text(LocalizedStringKey(rows[rIdx][cIdx]))
+                                    .font(.system(size: 13))
+                                    .fontWeight(isHeader ? .semibold : .regular)
+                                    .textSelection(.enabled)
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 6)
+                                    .frame(minHeight: 24, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                            .fill(isHeader ? Color.blue.opacity(0.10) : Color.clear)
+                                    )
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private enum Block {
+        case blank
+        case paragraph(String)
+        case bullet(String)
+        case table([[String]])
+    }
+
+    /// Computed per-render — cheap (~µs for chat-message-sized inputs)
+    /// and avoids stashing parsed state that'd need invalidation when
+    /// `content` changes for streaming output.
+    private var blocks: [Block] {
+        parseBlocks(content)
+    }
+
+    private func parseBlocks(_ raw: String) -> [Block] {
+        var result: [Block] = []
+        let lines = raw.components(separatedBy: "\n").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        var i = 0
+        while i < lines.count {
+            let line = lines[i]
+            if line.isEmpty {
+                result.append(.blank)
+                i += 1
+                continue
+            }
+            // Markdown table block: consecutive lines starting AND ending
+            // with `|`. Collect them, parse as a table; if the structure
+            // doesn't look table-like, fall back to paragraph rendering
+            // for each line.
+            if line.hasPrefix("|") && line.hasSuffix("|") {
+                var tableLines: [String] = []
+                while i < lines.count {
+                    let l = lines[i]
+                    if l.hasPrefix("|") && l.hasSuffix("|") {
+                        tableLines.append(l)
+                        i += 1
+                    } else {
+                        break
+                    }
+                }
+                if let rows = parseMarkdownTable(tableLines) {
+                    result.append(.table(rows))
+                } else {
+                    for tl in tableLines {
+                        result.append(.paragraph(tl))
+                    }
+                }
+                continue
+            }
+            // Bullet line: `- foo` or `* foo`.
+            if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                result.append(.bullet(String(line.dropFirst(2))))
+                i += 1
+                continue
+            }
+            result.append(.paragraph(line))
+            i += 1
+        }
+        return result
+    }
+
+    /// Parses a contiguous block of pipe-delimited markdown table lines
+    /// into a rectangular `[[String]]` (rows of cells, all rows padded
+    /// to the same column count). Skips the divider line (e.g. `|---|---|`)
+    /// since it carries alignment info we don't render. Returns nil if
+    /// the lines don't look like a real table — the caller falls back to
+    /// rendering each line as a paragraph.
+    private func parseMarkdownTable(_ lines: [String]) -> [[String]]? {
+        guard lines.count >= 2 else { return nil }
+        var rows: [[String]] = []
+        for line in lines {
+            // A divider line is composed only of |, -, :, and spaces.
+            // Skip it when assembling row data.
+            let isDivider = line.allSatisfy { ch in
+                ch == "|" || ch == "-" || ch == ":" || ch == " "
+            } && line.contains("-")
+            if isDivider { continue }
+            let trimmed = line.trimmingCharacters(in: CharacterSet(charactersIn: "|"))
+            let cells = trimmed
+                .components(separatedBy: "|")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            rows.append(cells)
+        }
+        // Need at least header + 1 data row to call it a table.
+        guard rows.count >= 2 else { return nil }
+        // Pad shorter rows with empty cells so the Grid doesn't get a
+        // jagged shape.
+        let maxCols = rows.map(\.count).max() ?? 0
+        return rows.map { row -> [String] in
+            var r = row
+            while r.count < maxCols { r.append("") }
+            return r
+        }
     }
 }

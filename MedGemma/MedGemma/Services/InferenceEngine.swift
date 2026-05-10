@@ -646,7 +646,17 @@ final class InferenceEngine: ObservableObject {
         - Conditions: \(profile.medicalConditions.isEmpty ? "None reported" : profile.medicalConditions)
         - Medications: \(profile.medications.isEmpty ? "None reported" : profile.medications)
 
-        Provide clear, empathetic answers in 2-4 sentences. Use simple language. If the highlighted text contains a medical term, define it. If it's a lab value, explain whether it's normal and what it means.
+        Format your reply with care for readability:
+        - Use **bold** for medical terms, lab values, and important numbers.
+        - Use *italics* sparingly for tone or emphasis.
+        - When the answer compares multiple values or ranges (e.g. several lab markers and their normal ranges, or the user's value vs. typical reference values), format the comparison as a Markdown table:
+          | Test | Your Value | Normal Range |
+          |---|---|---|
+          | Glucose | 95 mg/dL | 70–100 mg/dL |
+        - Use bullet points (lines starting with `- `) for short lists.
+        - Add an emoji only when it genuinely aids comprehension (✅ normal, ⚠️ worth discussing, 💊 medications). Max 1–2 per reply.
+
+        Keep prose answers to 2–4 sentences. Use simple language. If the highlighted text contains a medical term, define it. If it's a lab value, explain whether it's normal and what it means.
         """
 
         var prompt = ""

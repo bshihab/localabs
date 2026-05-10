@@ -895,15 +895,14 @@ struct FollowUpChatView: View {
                     .padding(.top, 6)
             }
 
-            Text(message.content)
-                .textSelection(.enabled)
+            // MarkdownBody handles **bold**, *italic*, bullets (- ), and
+            // markdown tables (| col | col |) — same renderer the dashboard
+            // uses, so chat output formats consistently with the report
+            // sections instead of showing literal `**` characters.
+            MarkdownBody(message.content)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                // maxWidth without alignment caps wrapping at 280pt but lets
-                // the bubble shrink to fit short messages. The previous
-                // alignment parameter forced the bubble to a full 280pt and
-                // glued short text to one edge, leaving a big empty side.
-                .frame(maxWidth: 280)
+                .frame(maxWidth: 280, alignment: .leading)
                 .glassEffect(
                     message.role == .user
                         ? .regular.tint(.blue.opacity(0.85))
