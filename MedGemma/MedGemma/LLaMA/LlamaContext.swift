@@ -53,6 +53,16 @@ public final class LlamaContext: @unchecked Sendable {
         // budget). 4096 roughly doubles KV cache memory but still fits
         // comfortably alongside the 4B model on iPhones with 6GB+ RAM.
         ctxParams.n_ctx = 4096
+        // n_batch caps how many tokens can be submitted in a single
+        // llama_decode call. The default is 512, which causes
+        // GGML_ASSERT(n_tokens_all <= cparams.n_batch) to fire for
+        // multi-page prompts (a 2-photo lab report tokenizes to ~2200
+        // tokens, well past 512). Bumping to match n_ctx lets the entire
+        // prompt go through in one batch. Internal processing still
+        // happens in n_ubatch-sized chunks, so this doesn't blow up
+        // peak Metal memory — it just removes the artificial submission
+        // ceiling.
+        ctxParams.n_batch = 4096
         ctxParams.n_threads = Int32(max(1, ProcessInfo.processInfo.processorCount - 1))
         ctxParams.n_threads_batch = ctxParams.n_threads
 

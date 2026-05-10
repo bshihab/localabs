@@ -391,20 +391,15 @@ final class InferenceEngine: ObservableObject {
     /// "where was the cholesterol value?" type questions, and they
     /// disambiguate cases where the same value appears on multiple pages.
     /// Single-page input gets no marker.
-    /// Hard cap on OCR text length so the prompt fits comfortably inside
-    /// LlamaContext's 4096-token context with margin for the system
-    /// prompt (~875 tokens), profile + Apple Health + RAG context (~125
-    /// tokens), and the 1000-token output budget. We aim to leave ~1000
-    /// tokens of headroom so medical text (which tokenizes less
-    /// efficiently than the char/4 estimate) doesn't overrun. 4000 chars
-    /// ≈ 1000 tokens of OCR fits that budget cleanly.
-    ///
-    /// Tightened from 6000 → 4000 because user reports of multi-image
-    /// `ggml_abort` crashes suggested the previous limit was leaving
-    /// llama.cpp's Metal command buffer / KV cache too close to its
-    /// invariants under realistic medical-document tokenization.
+    /// Hard cap on OCR text length so the prompt fits inside LlamaContext's
+    /// 4096-token context window with margin for the system prompt + RAG
+    /// context + 1000-token output budget. Empirically the system prompt
+    /// + profile + Health + RAG comes to ~1000 tokens, leaving roughly
+    /// 2000 tokens (~7000–8000 chars depending on tokenization density)
+    /// for OCR. We use 7000 chars to give realistic medical-document
+    /// tokenization a margin without truncating most multi-page scans.
     private func truncateForContext(_ raw: String) -> String {
-        let maxChars = 4000
+        let maxChars = 7000
         guard raw.count > maxChars else { return raw }
         let cut = String(raw.prefix(maxChars))
         return cut + "\n\n[Note: OCR text was truncated to fit MedGemma's context window. If important details are missing, scan fewer pages or use a higher-resolution photo of the relevant section.]"
