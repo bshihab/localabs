@@ -32,7 +32,7 @@ struct OnboardingView: View {
                 .multilineTextAlignment(.center)
                 .padding(.bottom, 48)
 
-            featureRow(icon: "shield.checkmark.fill", color: .blue, title: "Total Privacy", subtitle: "Your medical data stays on your device. Zero information is sent to the cloud.")
+            featureRow(icon: "checkmark.shield.fill", color: .blue, title: "Total Privacy", subtitle: "Your medical data stays on your device. Zero information is sent to the cloud.")
             featureRow(icon: "bolt.fill", color: .orange, title: "On-Device Intelligence", subtitle: "Analyzes lab reports instantly using a local AI engine optimized for Apple Metal GPU.")
             featureRow(icon: "heart.fill", color: .red, title: "Health Integration", subtitle: "Cross-references your Apple Health vitals against your paper lab reports.")
 
