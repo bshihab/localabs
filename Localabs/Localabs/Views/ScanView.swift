@@ -215,12 +215,15 @@ struct ScanView: View {
 
     /// Triggered by Dashboard's Resume button — picks up the saved
     /// `pendingResumeReport`, re-runs Localabs against its OCR text, and
-    /// pushes a fresh Dashboard with the regenerated content. While the
-    /// regeneration is running, ScanView's body shows `processingView`
-    /// because `engine.isProcessing` flips true inside `regenerateReport`.
+    /// pushes a fresh Dashboard with the regenerated content. If a
+    /// Dashboard is already pushed on top of ScanView (the post-scan
+    /// path), pop it first so the user actually sees `processingView`
+    /// stream in. ContentView separately switches the tab to Scan when
+    /// Dashboard was the active tab, so this runs in both routes.
     private func handleResumeSignal() {
         guard let pending = engine.pendingResumeReport else { return }
         engine.pendingResumeReport = nil
+        navigateToDashboard = false
         Task {
             let regenerated = await engine.regenerateReport(from: pending)
             report = regenerated

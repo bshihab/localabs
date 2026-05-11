@@ -2,7 +2,6 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject var engine: InferenceEngine
-    @Environment(\.dismiss) private var dismiss
     var initialReport: StructuredReport?
     @State private var report: StructuredReport?
     @State private var healthMetrics: HealthKitService.HealthMetrics?
@@ -173,19 +172,17 @@ struct DashboardView: View {
 
     /// Banner shown for reports where Localabs's generation didn't
     /// produce a normal output (cancelled, backgrounded, or the prompt
-    /// overflowed n_ctx). Sits between the summary card and the rest of
-    /// the dashboard, calls regenerateReport against the saved OCR text
-    /// when tapped. While in flight, swaps in a streaming-status view so
-    /// the user sees the section text filling in live, the same way the
-    /// fresh scan flow does.
+    /// overflowed n_ctx). Tapping just flips `engine.pendingResumeReport`
+    /// — ContentView observes that to switch to the Scan tab (when the
+    /// user is on the Dashboard tab) and ScanView's onChange pops any
+    /// pushed dashboard and re-runs the analysis, so the user lands on
+    /// the live streaming cards in both routes. Don't use `dismiss()`
+    /// here: this view is a TabView root in one route and has its own
+    /// inner NavigationStack in the other, so `dismiss()` is a no-op
+    /// in both cases.
     private func resumeBanner(for incomplete: StructuredReport) -> some View {
-        // Tapping the banner pops the dashboard and signals ScanView to
-        // re-run the analysis there, so the user sees the live streaming
-        // cards fill in instead of staying on the dashboard with a small
-        // status banner.
         Button {
             engine.pendingResumeReport = incomplete
-            dismiss()
         } label: {
             HStack(spacing: 14) {
                 ZStack {
@@ -197,7 +194,7 @@ struct DashboardView: View {
                         .foregroundStyle(.white)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Resume Analysis")
+                    Text("Resume")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
                     Text("Localabs didn't finish — tap to retry against the saved scan")
