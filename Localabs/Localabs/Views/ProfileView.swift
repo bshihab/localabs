@@ -200,6 +200,9 @@ struct ProfileView: View {
     ///   1. Not yet requested → "Connect Apple Health" button
     ///   2. Requested + has data → green check + last-fetched values
     ///   3. Requested + no data → "Connected — no recent data found"
+    ///      With an "Open Settings" button: iOS won't re-show the
+    ///      permission sheet after a user declines, so the only path
+    ///      to grant access later is the Settings app deep-link.
     /// We can't reliably tell if the user *granted* read access (iOS hides
     /// that for privacy), so we infer from query results.
     private var appleHealthCard: some View {
@@ -238,11 +241,39 @@ struct ProfileView: View {
                 .disabled(isRequestingHealth)
             } else if let metrics = healthMetrics, metrics.isMockData == false {
                 healthMetricsGrid(metrics)
+                // Re-link to Settings even when data IS flowing, so the
+                // user can adjust which categories Localabs reads. Small
+                // tertiary link rather than a prominent button.
+                Button {
+                    openHealthSettings()
+                } label: {
+                    Label("Adjust permissions in Settings", systemImage: "gearshape.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
             } else if let metrics = healthMetrics, metrics.isMockData {
-                Text("Connected — but no recent data found in Apple Health. The app will use placeholder values until your data syncs.")
+                Text("No recent data found in Apple Health. If you previously declined the prompt, you can enable Localabs's access in Settings.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                // iOS won't re-show the HealthKit permission sheet after
+                // the user has dismissed it once (whether they granted
+                // or denied), so a second tap on "Connect Apple Health"
+                // is a no-op. The Settings deep-link is the only way for
+                // users who declined or partially granted to come back
+                // and enable the data types we read.
+                Button {
+                    openHealthSettings()
+                } label: {
+                    Label("Open Settings", systemImage: "arrow.up.right.square.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.glassProminent)
             } else {
                 ProgressView("Reading from Apple Health…")
                     .font(.system(size: 13))
@@ -293,6 +324,16 @@ struct ProfileView: View {
         _ = await HealthKitService.shared.requestAuthorization()
         hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
         healthMetrics = await HealthKitService.shared.getHealthMetrics()
+    }
+
+    /// Deep-links the user out to the iOS Settings app on Localabs's own
+    /// privacy page. iOS gates HealthKit permission to a one-time prompt,
+    /// so this is the only way a user who declined can re-grant access.
+    /// `UIApplication.openSettingsURLString` is the documented deep-link.
+    private func openHealthSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
     }
 
     private var knownConditionsCard: some View {
