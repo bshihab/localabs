@@ -3,10 +3,18 @@ import Foundation
 struct UserProfile: Codable {
     var age: String = ""
     var biologicalSex: String = ""
+    /// Free-form text when `biologicalSex == "Other"` — captures the
+    /// user's own description instead of just storing the literal word.
+    /// Empty otherwise.
+    var biologicalSexOther: String = ""
     var bloodType: String = ""
     var smoking: String = ""
     var alcohol: String = ""
     var familyHistory: String = ""
+    /// Free-form text when `familyHistory == "Other"` — lets the user
+    /// describe specifics ("Grandmother had breast cancer, dad had
+    /// stroke at 60", etc.) instead of just the literal "Other".
+    var familyHistoryOther: String = ""
     var medicalConditions: String = ""
     var medications: String = ""
     var onboardingComplete: Bool = false

@@ -172,11 +172,21 @@ struct ProfileView: View {
         }
     }
 
+    /// Shows the user's biological-sex value, preferring the free-form
+    /// `biologicalSexOther` when they picked "Other" so the row doesn't
+    /// just read "Other" with no context.
+    private var biologicalSexDisplay: String {
+        if profile.biologicalSex == "Other", !profile.biologicalSexOther.isEmpty {
+            return profile.biologicalSexOther
+        }
+        return profile.biologicalSex.isEmpty ? "Not set" : profile.biologicalSex
+    }
+
     private var coreInfoCard: some View {
         VStack(spacing: 0) {
             profileRow(label: "Age", value: profile.age.isEmpty ? "Not set" : profile.age)
             Divider().padding(.horizontal, 16)
-            profileRow(label: "Biological Sex", value: profile.biologicalSex.isEmpty ? "Not set" : profile.biologicalSex)
+            profileRow(label: "Biological Sex", value: biologicalSexDisplay)
             Divider().padding(.horizontal, 16)
             profileRow(label: "Blood Type", value: profile.bloodType.isEmpty ? "Not set" : profile.bloodType)
         }

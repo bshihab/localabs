@@ -75,6 +75,9 @@ struct OnboardingView: View {
                             }
                             .labelsHidden()
                         }
+                        if profile.biologicalSex == "Other" {
+                            otherTextRow(placeholder: "Describe…", text: $profile.biologicalSexOther)
+                        }
                         Divider().padding(.horizontal, 16)
                         labeledRow("Blood Type") {
                             Picker("", selection: $profile.bloodType) {
@@ -135,6 +138,12 @@ struct OnboardingView: View {
                                 Text("Other").tag("Other")
                             }
                             .labelsHidden()
+                        }
+                        if profile.familyHistory == "Other" {
+                            otherTextRow(
+                                placeholder: "e.g. Grandmother: breast cancer, Dad: stroke at 60…",
+                                text: $profile.familyHistoryOther
+                            )
                         }
                     }
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -252,6 +261,23 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
+    }
+
+    /// Free-form text input that appears under a picker when the user
+    /// picks "Other". Slightly indented so it visually attaches to the
+    /// row above. Multi-line so users can type something descriptive
+    /// rather than fitting on one line.
+    private func otherTextRow(placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text, axis: .vertical)
+            .lineLimit(1...4)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.primary.opacity(0.04))
+            )
+            .padding(.horizontal, 18)
+            .padding(.bottom, 14)
     }
 
     private func glassTextArea(label: String, placeholder: String, text: Binding<String>) -> some View {
