@@ -52,10 +52,18 @@ enum AvailableModel: String, CaseIterable, Identifiable, Codable {
         return docs.appendingPathComponent(filename)
     }
 
+    /// True only when the on-disk model file is at least 95% of the expected
+    /// download size — a partial / interrupted download easily passes the
+    /// old "size > 10 MB" check, then llama.cpp tries to load the corrupt
+    /// file and fails with "Failed to load model into memory" (which is
+    /// confusing because the user didn't expect to be re-trying a load).
+    /// The 95% threshold tolerates minor Hugging Face file-size variations
+    /// while still catching real partial downloads.
     var isDownloaded: Bool {
         guard let size = try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int else {
             return false
         }
-        return size > 10_000_000
+        let minimumComplete = Int64(Double(expectedSizeBytes) * 0.95)
+        return Int64(size) >= minimumComplete
     }
 }

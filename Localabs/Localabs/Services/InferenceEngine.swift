@@ -138,8 +138,13 @@ final class InferenceEngine: ObservableObject {
             self.isModelLoaded = true
             self.loadingProgress = 1.0
         } catch {
+            // The two realistic causes here are (a) corrupt/incomplete
+            // model file or (b) device ran out of memory while llama.cpp
+            // was loading tensors. We can't distinguish them perfectly,
+            // but the user can resolve both via the trash button +
+            // re-download or by closing other apps to free memory.
             print("[InferenceEngine] Failed to load model: \(error)")
-            self.downloadError = "Failed to load model into memory."
+            self.downloadError = "Couldn't load the model. The file may be incomplete (try Delete + Download again) or your device may be low on memory (close other apps and reopen Localabs)."
         }
     }
 
