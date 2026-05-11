@@ -10,11 +10,11 @@ struct UserProfile: Codable {
     var bloodType: String = ""
     var smoking: String = ""
     var alcohol: String = ""
+    /// Free-form text — captures relatives, conditions, ages of onset.
+    /// e.g. "Mom: breast cancer at 50, Dad: heart attack at 65". A
+    /// picker is too restrictive for the meaningful detail here
+    /// (maternal vs paternal side, multiple conditions per relative).
     var familyHistory: String = ""
-    /// Free-form text when `familyHistory == "Other"` — lets the user
-    /// describe specifics ("Grandmother had breast cancer, dad had
-    /// stroke at 60", etc.) instead of just the literal "Other".
-    var familyHistoryOther: String = ""
     var medicalConditions: String = ""
     var medications: String = ""
     var onboardingComplete: Bool = false

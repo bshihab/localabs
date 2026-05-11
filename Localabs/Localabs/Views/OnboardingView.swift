@@ -127,26 +127,20 @@ struct OnboardingView: View {
                             }
                             .labelsHidden()
                         }
-                        Divider().padding(.horizontal, 16)
-                        labeledRow("Family History") {
-                            Picker("", selection: $profile.familyHistory) {
-                                Text("Not Set").tag("")
-                                Text("None Known").tag("None Known")
-                                Text("Heart Disease").tag("Heart Disease")
-                                Text("Diabetes").tag("Diabetes")
-                                Text("Cancer").tag("Cancer")
-                                Text("Other").tag("Other")
-                            }
-                            .labelsHidden()
-                        }
-                        if profile.familyHistory == "Other" {
-                            otherTextRow(
-                                placeholder: "e.g. Grandmother: breast cancer, Dad: stroke at 60…",
-                                text: $profile.familyHistoryOther
-                            )
-                        }
                     }
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .padding(.horizontal)
+
+                    // Family history is free-form rather than a picker because
+                    // the meaningful detail (maternal vs paternal side, age of
+                    // onset, specific conditions per relative) doesn't fit a
+                    // dropdown. The text area matches Medical Conditions and
+                    // Medications below.
+                    glassTextArea(
+                        label: "FAMILY HISTORY",
+                        placeholder: "e.g. Mom: breast cancer at 50, Dad: heart attack at 65, Grandfather: type 2 diabetes",
+                        text: $profile.familyHistory
+                    )
                     .padding(.horizontal)
 
                     glassTextArea(label: "MEDICAL CONDITIONS",
