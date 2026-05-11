@@ -254,17 +254,30 @@ struct ProfileView: View {
                 .buttonStyle(.plain)
                 .padding(.top, 4)
             } else if let metrics = healthMetrics, metrics.isMockData {
-                Text("No recent data found in Apple Health. If you previously declined the prompt, you can enable Localabs's access in Settings.")
+                // No data flowing despite the request having been made.
+                // Two common causes: user tapped Don't Allow on the iOS
+                // sheet, or Localabs is reading types they haven't
+                // enabled yet. Either way, the fix is in Settings — iOS
+                // doesn't let apps re-trigger the permission sheet, but
+                // users can manage permissions manually under Settings →
+                // Health → Data Access & Devices → Localabs.
+                Text("No recent Apple Health data found.")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                Text("If you tapped Don't Allow, or want to enable more data types, you can manage permissions in Settings:")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // iOS won't re-show the HealthKit permission sheet after
-                // the user has dismissed it once (whether they granted
-                // or denied), so a second tap on "Connect Apple Health"
-                // is a no-op. The Settings deep-link is the only way for
-                // users who declined or partially granted to come back
-                // and enable the data types we read.
+                VStack(alignment: .leading, spacing: 5) {
+                    settingsStep(number: 1, text: "Open **Settings**")
+                    settingsStep(number: 2, text: "Tap **Health**")
+                    settingsStep(number: 3, text: "Tap **Data Access & Devices**")
+                    settingsStep(number: 4, text: "Tap **Localabs** and turn on the toggles")
+                }
+                .padding(.leading, 2)
+
                 Button {
                     openHealthSettings()
                 } label: {
@@ -274,6 +287,7 @@ struct ProfileView: View {
                         .padding(.vertical, 12)
                 }
                 .buttonStyle(.glassProminent)
+                .padding(.top, 2)
             } else {
                 ProgressView("Reading from Apple Health…")
                     .font(.system(size: 13))
@@ -330,9 +344,30 @@ struct ProfileView: View {
     /// privacy page. iOS gates HealthKit permission to a one-time prompt,
     /// so this is the only way a user who declined can re-grant access.
     /// `UIApplication.openSettingsURLString` is the documented deep-link.
+    /// Note: it lands on Settings → Localabs, not Settings → Health →
+    /// Data Access; Apple doesn't expose a public URL scheme for the
+    /// latter, which is why the in-app copy spells out the navigation
+    /// steps that come after the deep-link.
     private func openHealthSettings() {
         if let url = URL(string: UIApplication.openSettingsURLString) {
             UIApplication.shared.open(url)
+        }
+    }
+
+    /// One row in the "open Settings and do this" walkthrough. Renders
+    /// the number in a small filled circle, then the description with
+    /// `**markdown bold**` for the parts the user should look for.
+    private func settingsStep(number: Int, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("\(number)")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(Color.pink))
+            Text(LocalizedStringKey(text))
+                .font(.system(size: 13))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
