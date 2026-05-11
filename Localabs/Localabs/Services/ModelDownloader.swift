@@ -16,7 +16,7 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
     static let shared = ModelDownloader()
 
     /// Stable identifier so iOS can route relaunch events back to us.
-    private static let sessionIdentifier = "com.bilalshihab.MedGemma.modelDownloads"
+    private static let sessionIdentifier = "com.bilalshihab.Localabs.modelDownloads"
 
     struct Progress {
         let fractionCompleted: Double

@@ -27,7 +27,7 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             Spacer()
 
-            Text("Welcome to\nMedGemma")
+            Text("Welcome to\nLocalabs")
                 .font(.system(size: 34, weight: .bold))
                 .multilineTextAlignment(.center)
                 .padding(.bottom, 48)
@@ -173,8 +173,8 @@ struct OnboardingView: View {
                         .padding(.horizontal)
 
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("1. **100% On-Device:** MedGemma runs entirely on your phone's processor. Your health data is NEVER sent to the cloud.")
-                        Text("2. **Not a Doctor:** MedGemma is an experimental AI. It is not a substitute for professional medical advice, diagnosis, or treatment.")
+                        Text("1. **100% On-Device:** Localabs runs entirely on your phone's processor. Your health data is NEVER sent to the cloud.")
+                        Text("2. **Not a Doctor:** Localabs is an experimental AI tool. It is not a substitute for professional medical advice, diagnosis, or treatment.")
                     }
                     .font(.subheadline)
                     .padding(18)

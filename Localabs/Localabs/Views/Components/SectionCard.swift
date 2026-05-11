@@ -75,7 +75,7 @@ struct SectionCard: View {
     }
 }
 
-/// Renders MedGemma's markdown output as formatted text + bullets +
+/// Renders Localabs' markdown output as formatted text + bullets +
 /// tables. Splits the input into block-level chunks (paragraphs, bullet
 /// rows, blank lines, markdown tables) and renders each appropriately.
 /// Inline emphasis (**bold**, *italic*, `code`, links) inside any block

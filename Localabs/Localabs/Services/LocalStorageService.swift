@@ -2,14 +2,14 @@ import Foundation
 
 /// Manages local on-device history of AI translations using UserDefaults.
 /// Acts as the persistent "memory" for the AI — enabling longitudinal RAG
-/// (Retrieval-Augmented Generation) so MedGemma can reference past reports.
+/// (Retrieval-Augmented Generation) so Localabs can reference past reports.
 ///
 /// All data stays on the phone — nothing is uploaded to the cloud.
 @MainActor
 class LocalStorageService {
     
     static let shared = LocalStorageService()
-    private let storageKey = "medgemma_history_vault"
+    private let storageKey = "localabs_history_vault"
     private let maxRecords = 50  // Keep up to 50 past reports for rich longitudinal context
     
     // MARK: - Save & Retrieve
@@ -45,7 +45,7 @@ class LocalStorageService {
         return history
     }
     
-    /// Gets the most recent past translation to provide longitudinal context to MedGemma.
+    /// Gets the most recent past translation to provide longitudinal context to Localabs.
     func getMostRecentPastTranslation() -> String? {
         let history = getHistory()
         return history.first?.patientSummary
@@ -54,7 +54,7 @@ class LocalStorageService {
     // MARK: - RAG Context Builder
     
     /// Builds a longitudinal context string from past reports for the AI prompt.
-    /// This is the core of the "RAG" — it retrieves relevant past data so MedGemma
+    /// This is the core of the "RAG" — it retrieves relevant past data so Localabs
     /// can track trends, congratulate improvements, and flag regressions.
     func buildRAGContext(maxReports: Int = 3) -> String {
         let history = getHistory()

@@ -144,7 +144,7 @@ struct DashboardView: View {
                 }
             }
 
-            // Renders MedGemma's markdown (bold/italic/emoji) inline, line
+            // Renders Localabs's markdown (bold/italic/emoji) inline, line
             // by line so per-sentence selection works. Falls back to a
             // plain placeholder when no scan exists.
             if let report = currentReport {
@@ -153,7 +153,7 @@ struct DashboardView: View {
                     .foregroundStyle(.secondary)
                     .lineSpacing(4)
             } else {
-                Text("Your lab report has not been scanned yet. Once you scan a document, the local MedGemma AI will analyze it and provide a simple, easy-to-read summary here.")
+                Text("Your lab report has not been scanned yet. Once you scan a document, Localabs will analyze it on-device and provide a simple, easy-to-read summary here.")
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
                     .lineSpacing(4)
@@ -171,7 +171,7 @@ struct DashboardView: View {
         report = await engine.regenerateReport(from: existing)
     }
 
-    /// Banner shown for reports where MedGemma's generation didn't
+    /// Banner shown for reports where Localabs's generation didn't
     /// produce a normal output (cancelled, backgrounded, or the prompt
     /// overflowed n_ctx). Sits between the summary card and the rest of
     /// the dashboard, calls regenerateReport against the saved OCR text
@@ -200,7 +200,7 @@ struct DashboardView: View {
                     Text("Resume Analysis")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(.white)
-                    Text("MedGemma didn't finish — tap to retry against the saved scan")
+                    Text("Localabs didn't finish — tap to retry against the saved scan")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.88))
                         .multilineTextAlignment(.leading)

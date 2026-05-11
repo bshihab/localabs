@@ -20,7 +20,7 @@ final class InferenceEngine: ObservableObject {
     @Published var streamingText = ""
     /// 0.0–1.0 progress through the current analysis. Updated as each
     /// pipeline phase completes (OCR per page, save, Health fetch) and
-    /// then incrementally during MedGemma's token-streaming phase. The
+    /// then incrementally during Localabs's token-streaming phase. The
     /// UI binds a determinate ProgressView to this so the user sees an
     /// actual percentage instead of an indeterminate spinner.
     @Published var analysisProgress: Double = 0
@@ -28,7 +28,7 @@ final class InferenceEngine: ObservableObject {
     @Published var downloadError: String?
 
     @Published private(set) var selectedModel: AvailableModel = {
-        if let raw = UserDefaults.standard.string(forKey: "medgemma_selected_model"),
+        if let raw = UserDefaults.standard.string(forKey: "localabs_selected_model"),
            let model = AvailableModel(rawValue: raw) {
             return model
         }
@@ -81,7 +81,7 @@ final class InferenceEngine: ObservableObject {
     /// directly to the target pixel size — the full-resolution bitmap is
     /// never allocated. For 12MP iPhone photos this drops the in-memory
     /// footprint from ~36MB per image to ~4MB per image, which is what
-    /// keeps multi-photo scans from going OOM the moment MedGemma starts
+    /// keeps multi-photo scans from going OOM the moment Localabs starts
     /// allocating its prompt / KV cache buffers.
     ///
     /// Use this for any image that's about to be held in memory across
@@ -112,7 +112,7 @@ final class InferenceEngine: ObservableObject {
         cancelDownload()
 
         selectedModel = model
-        UserDefaults.standard.set(model.rawValue, forKey: "medgemma_selected_model")
+        UserDefaults.standard.set(model.rawValue, forKey: "localabs_selected_model")
         llamaContext = nil
         isModelLoaded = false
         loadingProgress = 0
@@ -214,11 +214,11 @@ final class InferenceEngine: ObservableObject {
 
         let content = UNMutableNotificationContent()
         content.title = "\(selectedModel.displayName) is ready"
-        content.body = "Open MedGemma to scan a lab report."
+        content.body = "Open Localabs to scan a lab report."
         content.sound = .default
 
         let request = UNNotificationRequest(
-            identifier: "medgemma-model-download-complete",
+            identifier: "localabs-model-download-complete",
             content: content,
             trigger: nil
         )
@@ -243,7 +243,7 @@ final class InferenceEngine: ObservableObject {
 
     // MARK: - Pipeline
 
-    /// Image → Apple VisionKit OCR → MedGemma → StructuredReport
+    /// Image → Apple VisionKit OCR → Localabs → StructuredReport
     /// Single-image convenience wrapper.
     func analyzeImage(_ image: UIImage) async -> StructuredReport {
         await analyzeImages([image])
@@ -251,7 +251,7 @@ final class InferenceEngine: ObservableObject {
 
     /// Multi-page entry point. Runs OCR on each image (or PDF page rendered
     /// to image), concatenates the extracted text with page markers so
-    /// MedGemma can reason about page boundaries, saves every image, and
+    /// Localabs can reason about page boundaries, saves every image, and
     /// returns a single StructuredReport with `imagePath` = page 1 and
     /// `additionalPagePaths` = pages 2…N.
     func analyzeImages(_ images: [UIImage]) async -> StructuredReport {
@@ -272,7 +272,7 @@ final class InferenceEngine: ObservableObject {
         // 4B model in RAM courts the same jetsam crash we just fixed.
         // Phases roughly map to fixed slices of the bar so the user sees
         // monotonic progress: OCR 0 → 0.20, save 0.22, Health 0.25, then
-        // MedGemma 0.25 → 0.95, then 1.0 once the report is saved.
+        // Localabs 0.25 → 0.95, then 1.0 once the report is saved.
         var pageTexts: [String] = []
         for (idx, image) in images.enumerated() {
             processingStatus = images.count == 1
@@ -303,7 +303,7 @@ final class InferenceEngine: ObservableObject {
         let healthMetrics = await HealthKitService.shared.getHealthMetrics()
         analysisProgress = 0.25
 
-        processingStatus = "MedGemma is analyzing your results…"
+        processingStatus = "Localabs is analyzing your results…"
         var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics, mode: .lab)
         report.imagePath = firstPath
         report.additionalPagePaths = extraPaths
@@ -316,7 +316,7 @@ final class InferenceEngine: ObservableObject {
 
     /// Picks up a PDF, renders each page to an image, extracts text (using
     /// the embedded PDF text where available, falling back to Vision OCR
-    /// per page), and runs the same MedGemma pipeline as `analyzeImages`.
+    /// per page), and runs the same Localabs pipeline as `analyzeImages`.
     /// The rendered page images are kept around so the document viewer
     /// can show what the user looked at.
     func analyzePDF(at url: URL) async -> StructuredReport {
@@ -359,7 +359,7 @@ final class InferenceEngine: ObservableObject {
             analysisProgress = 0.25
 
             let combinedText = truncateForContext(combinePageTexts(pdfTextByPage))
-            processingStatus = "MedGemma is analyzing your results…"
+            processingStatus = "Localabs is analyzing your results…"
             var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics, mode: .lab)
             report.imagePath = firstPath
             report.additionalPagePaths = extraPaths
@@ -387,7 +387,7 @@ final class InferenceEngine: ObservableObject {
     }
 
     /// Joins per-page text with explicit page markers. The markers help
-    /// MedGemma cite information by page when the user later asks
+    /// Localabs cite information by page when the user later asks
     /// "where was the cholesterol value?" type questions, and they
     /// disambiguate cases where the same value appears on multiple pages.
     /// Single-page input gets no marker.
@@ -402,7 +402,7 @@ final class InferenceEngine: ObservableObject {
         let maxChars = 7000
         guard raw.count > maxChars else { return raw }
         let cut = String(raw.prefix(maxChars))
-        return cut + "\n\n[Note: OCR text was truncated to fit MedGemma's context window. If important details are missing, scan fewer pages or use a higher-resolution photo of the relevant section.]"
+        return cut + "\n\n[Note: OCR text was truncated to fit Localabs's context window. If important details are missing, scan fewer pages or use a higher-resolution photo of the relevant section.]"
     }
 
     private func combinePageTexts(_ pages: [String]) -> String {
@@ -439,7 +439,7 @@ final class InferenceEngine: ObservableObject {
         return nil
     }
 
-    /// Re-runs MedGemma on a previously-saved report's raw OCR text. Used
+    /// Re-runs Localabs on a previously-saved report's raw OCR text. Used
     /// to refresh older reports against the current prompt (e.g., to give
     /// pre-markdown-prompt reports their bullet/bold/emoji formatting).
     /// Preserves the report's id, timestamp, and image paths so history
@@ -471,7 +471,7 @@ final class InferenceEngine: ObservableObject {
         let healthMetrics = await HealthKitService.shared.getHealthMetrics()
         analysisProgress = 0.25
 
-        processingStatus = "MedGemma is regenerating your report…"
+        processingStatus = "Localabs is regenerating your report…"
         var fresh = await runInference(
             extractedText: sourceText,
             healthMetrics: healthMetrics,
@@ -497,7 +497,7 @@ final class InferenceEngine: ObservableObject {
         processingStatus = "Reading Apple Health data…"
         let healthMetrics = await HealthKitService.shared.getHealthMetrics()
 
-        processingStatus = "MedGemma is reviewing your week…"
+        processingStatus = "Localabs is reviewing your week…"
         let report = await runInference(
             extractedText: "No physical lab report was scanned. Focus purely on evaluating the Apple Health context.",
             healthMetrics: healthMetrics,
@@ -560,7 +560,7 @@ final class InferenceEngine: ObservableObject {
 
         guard let context = llamaContext else {
             return StructuredReport(
-                patientSummary: "MedGemma is not loaded. Open Profile and download \(selectedModel.displayName) (\(selectedModel.humanSize)) to enable on-device analysis.",
+                patientSummary: "Localabs is not loaded. Open Profile and download \(selectedModel.displayName) (\(selectedModel.humanSize)) to enable on-device analysis.",
                 rawText: extractedText
             )
         }
@@ -572,7 +572,7 @@ final class InferenceEngine: ObservableObject {
         // Surface prompt size in the Xcode console — useful for diagnosing
         // tokenize-overflow / slow-decode complaints. Approximate token
         // count assumes ~4 chars/token for English text + medical jargon.
-        print("[InferenceEngine] Prompt: \(prompt.count) chars (~\(prompt.count / 4) tokens) before MedGemma run.")
+        print("[InferenceEngine] Prompt: \(prompt.count) chars (~\(prompt.count / 4) tokens) before Localabs run.")
         let stream = context.predict(prompt: prompt, maxTokens: maxTokens)
         for await piece in stream {
             // Bail if the user backgrounded the app, manually cancelled
@@ -601,7 +601,7 @@ final class InferenceEngine: ObservableObject {
         // the OCR text so the user can retry via Resume.
         if collected.isEmpty {
             return StructuredReport(
-                patientSummary: "Analysis didn't complete — your scan may be too long for MedGemma's context window. Tap Resume to retry, or use fewer pages.",
+                patientSummary: "Analysis didn't complete — your scan may be too long for Localabs's context window. Tap Resume to retry, or use fewer pages.",
                 rawText: extractedText
             )
         }
@@ -675,7 +675,7 @@ final class InferenceEngine: ObservableObject {
             let model = selectedModel
             let preview = selectedText.prefix(60)
             return AsyncStream { continuation in
-                continuation.yield("MedGemma isn't loaded yet. Download \(model.displayName) in Profile to get a real answer about “\(preview)…”.")
+                continuation.yield("Localabs isn't loaded yet. Download \(model.displayName) in Profile to get a real answer about “\(preview)…”.")
                 continuation.finish()
             }
         }

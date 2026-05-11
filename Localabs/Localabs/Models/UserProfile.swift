@@ -11,7 +11,7 @@ struct UserProfile: Codable {
     var medications: String = ""
     var onboardingComplete: Bool = false
 
-    private static let storageKey = "medgemma_user_profile"
+    private static let storageKey = "localabs_user_profile"
 
     static func load() -> UserProfile {
         guard

@@ -169,7 +169,7 @@ struct ScanView: View {
                                 .contentTransition(.numericText(value: engine.analysisProgress))
                         }
                         Text(engine.processingStatus.isEmpty
-                             ? "MedGemma is generating your report…"
+                             ? "Localabs is generating your report…"
                              : engine.processingStatus)
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
@@ -193,7 +193,7 @@ struct ScanView: View {
 
                 // Determinate progress bar — replaces the previous
                 // indeterminate spinner. Fills as each pipeline phase
-                // completes (OCR per page → save → Health → MedGemma
+                // completes (OCR per page → save → Health → Localabs
                 // streaming → final save).
                 ProgressView(value: engine.analysisProgress)
                     .tint(.blue)
@@ -206,7 +206,7 @@ struct ScanView: View {
             .padding(.top, 16)
             .padding(.bottom, 12)
 
-            // Cards fill in live as MedGemma streams each section.
+            // Cards fill in live as Localabs streams each section.
             LiveReportSectionsView(streamingText: engine.streamingText)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
@@ -214,7 +214,7 @@ struct ScanView: View {
     }
 
     /// Triggered by Dashboard's Resume button — picks up the saved
-    /// `pendingResumeReport`, re-runs MedGemma against its OCR text, and
+    /// `pendingResumeReport`, re-runs Localabs against its OCR text, and
     /// pushes a fresh Dashboard with the regenerated content. While the
     /// regeneration is running, ScanView's body shows `processingView`
     /// because `engine.isProcessing` flips true inside `regenerateReport`.
@@ -233,7 +233,7 @@ struct ScanView: View {
     /// the full-resolution bitmap never gets allocated), drops failures
     /// rather than aborting the whole batch, then funnels through
     /// analyzeImages. The downsampling is what fixed multi-photo scans
-    /// freezing the app the moment MedGemma started — five 12MP photos
+    /// freezing the app the moment Localabs started — five 12MP photos
     /// at full res were ~180MB of decoded bitmap held alongside the 4B
     /// model + KV cache, which pushed iPhones into memory-pressure
     /// suspension.
@@ -290,7 +290,7 @@ struct ScanView: View {
 
 // MARK: - Live-fill section cards
 
-/// Renders the five report sections as cards that fill in as MedGemma streams.
+/// Renders the five report sections as cards that fill in as Localabs streams.
 /// On every token, we re-parse the partial text via StructuredReport.parse —
 /// since the parser is header-anchored, partial input correctly attributes
 /// each chunk to its section. Whichever section currently has the latest
@@ -327,7 +327,7 @@ private struct LiveReportSectionsView: View {
                 }
             }
             .onChange(of: activeSection) { _, new in
-                // Keep the section MedGemma is currently writing in view —
+                // Keep the section Localabs is currently writing in view —
                 // user shouldn't have to scroll to see fresh content.
                 withAnimation(.easeInOut(duration: 0.45)) {
                     proxy.scrollTo(new, anchor: .top)
@@ -470,7 +470,7 @@ private struct LiveSectionCard: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Text("Waiting for MedGemma…")
+                    Text("Waiting for Localabs…")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary.opacity(0.55))
                 }

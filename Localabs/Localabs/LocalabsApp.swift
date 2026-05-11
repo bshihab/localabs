@@ -2,12 +2,12 @@ import SwiftUI
 import UIKit
 
 @main
-struct MedGemmaApp: App {
+struct LocalabsApp: App {
     /// AppDelegate adaptor — needed only so iOS can deliver
     /// background-URLSession relaunch events to us. Without this, a
     /// download finishing while the app is killed wouldn't get a chance
     /// to fire the model-ready notification.
-    @UIApplicationDelegateAdaptor(MedGemmaAppDelegate.self) private var appDelegate
+    @UIApplicationDelegateAdaptor(LocalabsAppDelegate.self) private var appDelegate
     @StateObject private var engine = InferenceEngine.shared
 
     var body: some Scene {
@@ -24,7 +24,7 @@ struct MedGemmaApp: App {
 /// Minimal AppDelegate. Its only job is to forward the
 /// background-URLSession relaunch handler to ModelDownloader so the
 /// shared session can complete event delivery and tell iOS we're done.
-final class MedGemmaAppDelegate: NSObject, UIApplicationDelegate {
+final class LocalabsAppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
         handleEventsForBackgroundURLSession identifier: String,

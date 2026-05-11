@@ -70,7 +70,7 @@ struct ProfileView: View {
                 .foregroundStyle(.blue)
                 .tracking(1.5)
 
-            Text("MedGemma runs entirely on your phone. Choose a model and download it once — no cloud, no account.")
+            Text("Localabs runs entirely on your phone. Choose a model and download it once — no cloud, no account.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineSpacing(2)
@@ -138,7 +138,7 @@ struct ProfileView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "bell.badge")
                         .font(.caption)
-                    Text("You'll get a notification when the download is done — feel free to switch apps or even close MedGemma.")
+                    Text("You'll get a notification when the download is done — feel free to switch apps or even close Localabs.")
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)
@@ -211,7 +211,7 @@ struct ProfileView: View {
             }
 
             if !hasRequestedHealth {
-                Text("Lets MedGemma factor your resting heart rate, sleep, and HRV into every report.")
+                Text("Lets Localabs factor your resting heart rate, sleep, and HRV into every report.")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -305,7 +305,7 @@ struct ProfileView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.blue)
                 .tracking(1.5)
-            Text("List your daily medications so MedGemma can cross-reference them against your lab results.")
+            Text("List your daily medications so Localabs can cross-reference them against your lab results.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .lineSpacing(2)

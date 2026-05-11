@@ -813,7 +813,7 @@ struct FollowUpChatView: View {
                 inputBar
             }
             .background(Color.clear)
-            .navigationTitle("Ask MedGemma")
+            .navigationTitle("Ask Localabs")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

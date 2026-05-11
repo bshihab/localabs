@@ -45,7 +45,7 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         return docs.appendingPathComponent("scans").appendingPathComponent(imagePath)
     }
 
-    /// True when the report's MedGemma generation didn't produce a normal
+    /// True when the report's AI generation didn't produce a normal
     /// 5-section output. Detected by checking whether the patient summary
     /// matches our specific failure / cancellation messages OR every
     /// section is empty despite OCR text being present. Used by the
