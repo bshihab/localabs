@@ -355,7 +355,11 @@ final class InferenceEngine: ObservableObject {
         LocalStorageService.shared.saveReport(report)
         if report.isIncomplete { pendingResumeReport = report }
         processingStatus = ""
-        analysisProgress = 1.0
+        // Only fill the bar when the run actually completed. On pause /
+        // mid-decode bail-out, leave it where it was — otherwise the
+        // bar slams to 100% the instant the user taps Pause and then
+        // jumps back down when they Resume, which reads as a glitch.
+        if !report.isIncomplete { analysisProgress = 1.0 }
         return report
     }
 
@@ -411,7 +415,7 @@ final class InferenceEngine: ObservableObject {
             LocalStorageService.shared.saveReport(report)
             if report.isIncomplete { pendingResumeReport = report }
             processingStatus = ""
-            analysisProgress = 1.0
+            if !report.isIncomplete { analysisProgress = 1.0 }
             return report
         }
 
@@ -510,12 +514,15 @@ final class InferenceEngine: ObservableObject {
 
         isInferenceCancelled = false
         isProcessing = true
-        analysisProgress = 0.20  // OCR was already done for the saved report
+        // Don't reset the bar — if this is a resume-from-pause the user
+        // will see it drop backwards. max() keeps it at the prior
+        // position until the new run's streaming catches up.
+        analysisProgress = max(analysisProgress, 0.20)
         defer { isProcessing = false }
 
         processingStatus = "Fetching Apple Health context…"
         let healthMetrics = await HealthKitService.shared.getHealthMetrics()
-        analysisProgress = 0.25
+        analysisProgress = max(analysisProgress, 0.25)
 
         processingStatus = "Localabs is regenerating your report…"
         var fresh = await runInference(
@@ -532,7 +539,7 @@ final class InferenceEngine: ObservableObject {
         LocalStorageService.shared.saveReport(fresh)
         if fresh.isIncomplete { pendingResumeReport = fresh }
         processingStatus = ""
-        analysisProgress = 1.0
+        if !fresh.isIncomplete { analysisProgress = 1.0 }
         return fresh
     }
 
@@ -640,7 +647,13 @@ final class InferenceEngine: ObservableObject {
             tokenCount += 1
             // Cap at 0.95 so the bar doesn't visibly hit 100% before save
             // completes — leaves the final bump for the post-loop write.
-            analysisProgress = min(0.25 + Double(tokenCount) / Double(maxTokens) * 0.70, 0.95)
+            // Also clamp with max() against the current progress so a
+            // resume-from-pause doesn't visibly walk the bar backwards:
+            // the new run restarts the LLM from token 0, but the bar
+            // stays at the user's prior position until streaming
+            // catches up.
+            let proposed = min(0.25 + Double(tokenCount) / Double(maxTokens) * 0.70, 0.95)
+            analysisProgress = max(analysisProgress, proposed)
         }
 
         // Empty output usually means llama_tokenize bailed because the
