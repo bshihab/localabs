@@ -6,8 +6,6 @@ Localabs is a private, on-device iOS app that scans physical lab reports and tra
 
 - **`/Localabs`** — the native iOS app (SwiftUI, Swift 6, iOS 26 deployment target). Project is generated via XcodeGen from `project.yml`.
 - **`/llama-binary`** — a local Swift package that exposes `llama.cpp` (the `b7484` xcframework from `ggml-org/llama.cpp`) as a target named `llama`. This bypasses `mattt/llama.swift`'s broken Swift wrapper that collided with macOS's case-insensitive filesystem. See commit history around `b585028` for the full story.
-- **`/gcp_backend`** — unused; the app is on-device only.
-- **`/mobile_app`** — old React Native scaffolding from an earlier prototype; not currently built.
 
 ## The AI model
 
