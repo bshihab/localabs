@@ -352,13 +352,17 @@ final class InferenceEngine: ObservableObject {
         report.imagePath = firstPath
         report.additionalPagePaths = extraPaths
 
-        LocalStorageService.shared.saveReport(report)
-        if report.isIncomplete { pendingResumeReport = report }
+        // Only persist if the run actually completed. A user-paused
+        // run stays in memory via pendingResumeReport so Resume can
+        // pick it up — but Discard then leaves no trace in History.
+        // The previous isIncomplete-based gate didn't catch pauses
+        // that happened after some sections had streamed, because the
+        // partial looked "complete" by the heuristic.
+        if !isInferenceCancelled {
+            LocalStorageService.shared.saveReport(report)
+        }
+        if isInferenceCancelled || report.isIncomplete { pendingResumeReport = report }
         processingStatus = ""
-        // Only fill the bar when the run actually completed. On pause /
-        // mid-decode bail-out, leave it where it was — otherwise the
-        // bar slams to 100% the instant the user taps Pause and then
-        // jumps back down when they Resume, which reads as a glitch.
         if !report.isIncomplete { analysisProgress = 1.0 }
         return report
     }
@@ -412,8 +416,10 @@ final class InferenceEngine: ObservableObject {
             var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics, mode: .lab)
             report.imagePath = firstPath
             report.additionalPagePaths = extraPaths
-            LocalStorageService.shared.saveReport(report)
-            if report.isIncomplete { pendingResumeReport = report }
+            if !isInferenceCancelled {
+                LocalStorageService.shared.saveReport(report)
+            }
+            if isInferenceCancelled || report.isIncomplete { pendingResumeReport = report }
             processingStatus = ""
             if !report.isIncomplete { analysisProgress = 1.0 }
             return report
@@ -536,8 +542,10 @@ final class InferenceEngine: ObservableObject {
         fresh.imagePath = existing.imagePath
         fresh.additionalPagePaths = existing.additionalPagePaths
 
-        LocalStorageService.shared.saveReport(fresh)
-        if fresh.isIncomplete { pendingResumeReport = fresh }
+        if !isInferenceCancelled {
+            LocalStorageService.shared.saveReport(fresh)
+        }
+        if isInferenceCancelled || fresh.isIncomplete { pendingResumeReport = fresh }
         processingStatus = ""
         if !fresh.isIncomplete { analysisProgress = 1.0 }
         return fresh
