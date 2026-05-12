@@ -245,9 +245,9 @@ struct ProfileView: View {
                 // user can adjust which categories Localabs reads. Small
                 // tertiary link rather than a prominent button.
                 Button {
-                    openHealthSettings()
+                    openHealthApp()
                 } label: {
-                    Label("Adjust permissions in Settings", systemImage: "gearshape.fill")
+                    Label("Adjust permissions in Health app", systemImage: "heart.fill")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
@@ -265,23 +265,23 @@ struct ProfileView: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
 
-                Text("If you tapped Don't Allow, or want to enable more data types, you can manage permissions in Settings:")
+                Text("If you tapped Don't Allow, or want to enable more data types, you can manage permissions in the Health app:")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 5) {
-                    settingsStep(number: 1, text: "Open **Settings**")
-                    settingsStep(number: 2, text: "Tap **Health**")
-                    settingsStep(number: 3, text: "Tap **Data Access & Devices**")
+                    settingsStep(number: 1, text: "Open the **Health** app")
+                    settingsStep(number: 2, text: "Tap your **profile picture** (top-right)")
+                    settingsStep(number: 3, text: "Scroll to **Privacy** and tap **Apps and Services**")
                     settingsStep(number: 4, text: "Tap **Localabs** and turn on the toggles")
                 }
                 .padding(.leading, 2)
 
                 Button {
-                    openHealthSettings()
+                    openHealthApp()
                 } label: {
-                    Label("Open Settings", systemImage: "arrow.up.right.square.fill")
+                    Label("Open Health App", systemImage: "heart.fill")
                         .font(.system(size: 16, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -340,16 +340,18 @@ struct ProfileView: View {
         healthMetrics = await HealthKitService.shared.getHealthMetrics()
     }
 
-    /// Deep-links the user out to the iOS Settings app on Localabs's own
-    /// privacy page. iOS gates HealthKit permission to a one-time prompt,
-    /// so this is the only way a user who declined can re-grant access.
-    /// `UIApplication.openSettingsURLString` is the documented deep-link.
-    /// Note: it lands on Settings → Localabs, not Settings → Health →
-    /// Data Access; Apple doesn't expose a public URL scheme for the
-    /// latter, which is why the in-app copy spells out the navigation
-    /// steps that come after the deep-link.
-    private func openHealthSettings() {
-        if let url = URL(string: UIApplication.openSettingsURLString) {
+    /// Opens the iOS Health app. iOS gates HealthKit permission to a
+    /// one-time prompt, so a user who declined has to re-grant access
+    /// from inside the Health app itself (Profile → Privacy → Apps →
+    /// Localabs). The Settings-app deep-link only lands on Localabs's
+    /// own privacy page, which doesn't expose the HealthKit toggles —
+    /// users kept getting stuck there. `x-apple-health://` is the
+    /// public Health-app URL scheme; `open()` doesn't require
+    /// LSApplicationQueriesSchemes (only `canOpenURL` does), so we
+    /// skip the canOpenURL probe and let iOS no-op silently on the
+    /// rare device that lacks Health.
+    private func openHealthApp() {
+        if let url = URL(string: "x-apple-health://") {
             UIApplication.shared.open(url)
         }
     }
