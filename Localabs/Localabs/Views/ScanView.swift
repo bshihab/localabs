@@ -240,7 +240,19 @@ struct ScanView: View {
                     .buttonStyle(.glassProminent)
 
                     Button(role: .destructive) {
+                        // Engine call deletes the stored incomplete
+                        // report + clears streamingText / isPaused /
+                        // pendingResumeReport. We also wipe ScanView's
+                        // local @State (the in-memory report + image
+                        // picker selections) so the user lands back on
+                        // a genuinely blank upload screen instead of
+                        // one carrying stale state from the discarded
+                        // run.
                         engine.discardPausedAnalysis()
+                        report = nil
+                        pickerItems = []
+                        selectedImage = nil
+                        navigateToDashboard = false
                     } label: {
                         Text("Discard analysis")
                             .font(.system(size: 13, weight: .medium))
