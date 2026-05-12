@@ -1,6 +1,5 @@
 import Foundation
 import UIKit
-import UserNotifications
 import PDFKit
 import ImageIO
 
@@ -173,7 +172,6 @@ final class InferenceEngine: ObservableObject {
         }
 
         downloadTask = Task { [weak self] in
-            await self?.requestNotificationPermissionIfNeeded()
             do {
                 try await downloader.download(from: model.downloadURL, to: model.localURL)
                 await MainActor.run {
@@ -182,7 +180,6 @@ final class InferenceEngine: ObservableObject {
                     self?.activeDownloader = nil
                 }
                 await self?.loadModelIfDownloaded()
-                await self?.scheduleModelReadyNotificationIfPermitted()
             } catch {
                 await MainActor.run {
                     guard let self else { return }
@@ -209,42 +206,6 @@ final class InferenceEngine: ObservableObject {
     /// download needs.
     private func setKeepScreenAwakeForDownload(_ keepAwake: Bool) {
         UIApplication.shared.isIdleTimerDisabled = keepAwake
-    }
-
-    // MARK: - Notifications
-
-    /// Asks for permission once. If the user has already decided (granted or
-    /// denied), this no-ops — iOS only shows the system prompt for `.notDetermined`.
-    private func requestNotificationPermissionIfNeeded() async {
-        let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
-        guard settings.authorizationStatus == .notDetermined else { return }
-        _ = try? await center.requestAuthorization(options: [.alert, .sound])
-    }
-
-    /// Fires a local banner the moment the model finishes loading into Metal.
-    /// iOS suppresses this in the foreground by default, which is what we want —
-    /// if the user is in-app the green "loaded & ready" badge already covers it.
-    /// They'll see the banner on the lock screen / notification center if they
-    /// switched away during the download.
-    private func scheduleModelReadyNotificationIfPermitted() async {
-        guard isModelLoaded else { return }
-        let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
-        guard settings.authorizationStatus == .authorized
-                || settings.authorizationStatus == .provisional else { return }
-
-        let content = UNMutableNotificationContent()
-        content.title = "\(selectedModel.displayName) is ready"
-        content.body = "Open Localabs to scan a lab report."
-        content.sound = .default
-
-        let request = UNNotificationRequest(
-            identifier: "localabs-model-download-complete",
-            content: content,
-            trigger: nil
-        )
-        try? await center.add(request)
     }
 
     func cancelDownload() {
