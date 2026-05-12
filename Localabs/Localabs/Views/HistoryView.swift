@@ -28,7 +28,7 @@ struct HistoryView: View {
             .toolbar {
                 if !reports.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button(editMode.isEditing ? "Done" : "Edit") {
+                        Button(editMode.isEditing ? "Done" : "Select") {
                             withAnimation {
                                 editMode = editMode.isEditing ? .inactive : .active
                                 if !editMode.isEditing { selection.removeAll() }
@@ -74,11 +74,19 @@ struct HistoryView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
+                        Button {
                             delete(report: report)
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
+                        // `.tint(.red)` paints the swipe-action
+                        // background red. `role: .destructive` would
+                        // also turn it red, but combined with
+                        // `allowsFullSwipe` SwiftUI's default
+                        // destructive role tints it a slightly muted
+                        // pink — explicit .tint(.red) gives the
+                        // saturated red the user asked for.
+                        .tint(.red)
                     }
                     .tag(report.id)
             }

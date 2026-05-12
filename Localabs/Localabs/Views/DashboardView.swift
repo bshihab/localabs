@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct DashboardView: View {
     @EnvironmentObject var engine: InferenceEngine
@@ -11,6 +12,8 @@ struct DashboardView: View {
     @State private var report: StructuredReport?
     @State private var healthMetrics: HealthKitService.HealthMetrics?
     @State private var isRegenerating = false
+    @State private var showShareSheet = false
+    @State private var shareItems: [Any] = []
 
     var body: some View {
         NavigationStack {
@@ -25,8 +28,8 @@ struct DashboardView: View {
                         HStack(spacing: 14) {
                             StatusBadge(
                                 label: "Status",
-                                value: currentReport != nil ? "Analyzed" : "Pending",
-                                color: currentReport != nil ? .green : .secondary
+                                value: statusValue,
+                                color: statusColor
                             )
                             StatusBadge(label: "Health Sync", value: "Active", color: .blue)
                         }
@@ -35,6 +38,18 @@ struct DashboardView: View {
 
                     summaryCard
                         .padding(.horizontal)
+
+                    // Prominent "Regenerate Translation" CTA — sits
+                    // between the summary card and Ask More, sized
+                    // slightly smaller than askMoreCTA so the visual
+                    // hierarchy puts the document viewer first. When
+                    // tapped it transforms in place into a progress
+                    // bar bound to engine.analysisProgress so the user
+                    // gets the same live feedback as a fresh analysis.
+                    if let report = currentReport, !report.isIncomplete {
+                        regenerateCTA(for: report)
+                            .padding(.horizontal)
+                    }
 
                     // Slim "analysis is paused" badge — visible only on
                     // the Dashboard *tab*, and only when an inference
@@ -115,6 +130,25 @@ struct DashboardView: View {
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
                 if report == nil { report = initialReport }
             }
+            // Share button only appears when Dashboard is showing a
+            // specific report (pushed from History or post-scan). The
+            // empty tab state has nothing to share, so we hide it.
+            .toolbar {
+                if let report = currentReport, !report.isIncomplete {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            shareItems = buildShareItems(for: report)
+                            showShareSheet = true
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .accessibilityLabel("Share translation")
+                    }
+                }
+            }
+            .sheet(isPresented: $showShareSheet) {
+                ShareSheet(items: shareItems)
+            }
         }
     }
 
@@ -122,33 +156,170 @@ struct DashboardView: View {
         report ?? initialReport
     }
 
+    // MARK: - Status badge
+
+    /// Reflects the *actual* state of the underlying analysis, not just
+    /// "do we have a report object." Pause/resume in particular needs
+    /// to surface as "Paused" rather than "Analyzed" — the report
+    /// object exists but the run never finished.
+    private var statusValue: String {
+        if engine.isPaused { return "Paused" }
+        if engine.isProcessing { return "Analyzing" }
+        if let report = currentReport {
+            return report.isIncomplete ? "Paused" : "Analyzed"
+        }
+        return "Pending"
+    }
+
+    private var statusColor: Color {
+        if engine.isPaused { return .orange }
+        if let report = currentReport, report.isIncomplete { return .orange }
+        if engine.isProcessing { return .blue }
+        if currentReport != nil { return .green }
+        return .secondary
+    }
+
+    // MARK: - Regenerate CTA
+
+    /// Sized roughly to match the askMoreCTA card so the two read as a
+    /// matched pair. Tints purple so it's visually distinct from the
+    /// blue askMoreCTA below. Tapping triggers the regeneration; while
+    /// in flight the card swaps to a determinate progress view bound
+    /// to engine.analysisProgress so the user sees the same live
+    /// feedback as a fresh scan instead of an opaque spinner.
+    private func regenerateCTA(for report: StructuredReport) -> some View {
+        Group {
+            if isRegenerating {
+                regenerateProgressCard
+            } else {
+                Button {
+                    Task { await regenerate() }
+                } label: {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.white.opacity(0.22))
+                                .frame(width: 44, height: 44)
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Regenerate Translation")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(.white)
+                            Text("Re-run Localabs against the same scan")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.88))
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.purple, Color.purple.opacity(0.82)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .shadow(color: Color.purple.opacity(0.28), radius: 12, y: 5)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// In-flight regenerate state — same shape/size as the resting
+    /// button so the layout doesn't reflow when tapped. Shows the
+    /// live percentage and the determinate progress bar bound to
+    /// engine.analysisProgress.
+    private var regenerateProgressCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(.purple.opacity(0.18))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.purple)
+                        .symbolEffect(.rotate, options: .repeat(.continuous))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Regenerating…")
+                        .font(.system(size: 17, weight: .bold))
+                    Text(engine.processingStatus.isEmpty
+                         ? "Re-running Localabs against the same scan"
+                         : engine.processingStatus)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Text("\(Int(engine.analysisProgress * 100))%")
+                    .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText(value: engine.analysisProgress))
+            }
+            ProgressView(value: engine.analysisProgress)
+                .tint(.purple)
+                .animation(.easeOut(duration: 0.25), value: engine.analysisProgress)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .glassEffect(.regular.tint(.purple.opacity(0.18)), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    // MARK: - Share
+
+    /// Bundles a single report's translation text + scan images for
+    /// the system share sheet. Mirrors the multi-report payload built
+    /// by HistoryView but for one report; recipients see the section
+    /// breakdown followed by the original scans as attachments.
+    private func buildShareItems(for report: StructuredReport) -> [Any] {
+        var items: [Any] = []
+        items.append(shareText(for: report))
+        for url in report.allImageURLs {
+            if let img = UIImage(contentsOfFile: url.path) {
+                items.append(img)
+            }
+        }
+        return items
+    }
+
+    private func shareText(for report: StructuredReport) -> String {
+        var lines: [String] = []
+        let df = DateFormatter()
+        df.dateStyle = .medium
+        df.timeStyle = .short
+        lines.append("Localabs Report — \(df.string(from: report.timestamp))")
+        lines.append("")
+        appendSection(&lines, title: "PATIENT SUMMARY", body: report.patientSummary)
+        appendSection(&lines, title: "QUESTIONS FOR YOUR DOCTOR", body: report.doctorQuestions)
+        appendSection(&lines, title: "TARGETED DIETARY ADVICE", body: report.dietaryAdvice)
+        appendSection(&lines, title: "MEDICAL GLOSSARY", body: report.medicalGlossary)
+        appendSection(&lines, title: "MEDICATION NOTES", body: report.medicationNotes)
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func appendSection(_ lines: inout [String], title: String, body: String) {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lines.append(title)
+        lines.append(trimmed)
+        lines.append("")
+    }
+
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Empathetic Translation")
-                    .font(.system(size: 20, weight: .bold))
-                Spacer()
-                // Hide the regenerate icon when the report is incomplete —
-                // the orange "Resume Analysis" banner above already
-                // surfaces that action much more prominently.
-                if let report = currentReport, !report.isIncomplete {
-                    Button {
-                        Task { await regenerate() }
-                    } label: {
-                        if isRegenerating {
-                            ProgressView().scaleEffect(0.85)
-                        } else {
-                            Image(systemName: "arrow.clockwise.circle.fill")
-                                .font(.system(size: 22))
-                                .foregroundStyle(.blue, .blue.opacity(0.18))
-                                .symbolRenderingMode(.hierarchical)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isRegenerating)
-                    .accessibilityLabel("Regenerate report")
-                }
-            }
+            Text("Empathetic Translation")
+                .font(.system(size: 20, weight: .bold))
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             // Renders Localabs's markdown (bold/italic/emoji) inline, line
             // by line so per-sentence selection works. Falls back to a

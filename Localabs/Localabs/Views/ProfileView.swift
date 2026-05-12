@@ -427,6 +427,8 @@ struct ProfileView: View {
                 confirmReset = true
             } label: {
                 Label("Reset App & Erase Data", systemImage: "trash")
+                    .font(.body.weight(.bold))
+                    .foregroundStyle(.red)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
