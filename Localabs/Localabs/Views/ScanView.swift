@@ -64,9 +64,6 @@ struct ScanView: View {
             .onChange(of: selectedImage) { _, newImage in
                 handleCameraImageChange(newImage)
             }
-            .onChange(of: engine.pendingResumeReport?.id) { _, _ in
-                handleResumeSignal()
-            }
             .navigationDestination(isPresented: $navigateToDashboard) {
                 if let report = report {
                     DashboardView(initialReport: report)
@@ -269,28 +266,6 @@ struct ScanView: View {
         return engine.processingStatus.isEmpty
             ? "Localabs is generating your report…"
             : engine.processingStatus
-    }
-
-    /// Triggered by Dashboard's Resume button — picks up the saved
-    /// `pendingResumeReport`, re-runs Localabs against its OCR text, and
-    /// pushes a fresh Dashboard with the regenerated content. If a
-    /// Dashboard is already pushed on top of ScanView (the post-scan
-    /// path), pop it first so the user actually sees `processingView`
-    /// stream in. ContentView separately switches the tab to Scan when
-    /// Dashboard was the active tab, so this runs in both routes.
-    private func handleResumeSignal() {
-        guard let pending = engine.pendingResumeReport else { return }
-        engine.pendingResumeReport = nil
-        navigateToDashboard = false
-        Task {
-            let regenerated = await engine.regenerateReport(from: pending)
-            report = regenerated
-            // Only push Dashboard if the resumed run actually finished.
-            // A re-pause stays on this screen with the partial output.
-            if !regenerated.isIncomplete && !engine.isPaused {
-                navigateToDashboard = true
-            }
-        }
     }
 
     /// Multi-photo path. Loads each picked PhotosPickerItem into a UIImage
