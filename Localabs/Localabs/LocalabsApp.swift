@@ -34,5 +34,9 @@ final class LocalabsAppDelegate: NSObject, UIApplicationDelegate {
         // from urlSessionDidFinishEvents(forBackgroundURLSession:) once
         // the session has flushed all pending events.
         ModelDownloader.shared.backgroundCompletionHandler = completionHandler
+        // Eagerly create the background URLSession so iOS can bind the
+        // pending events to its delegate — without this, iOS would have
+        // a session id with no live delegate to deliver to.
+        ModelDownloader.shared.ensureBackgroundSessionReady()
     }
 }
