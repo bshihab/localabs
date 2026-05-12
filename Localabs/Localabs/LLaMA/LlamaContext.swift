@@ -118,14 +118,36 @@ public final class LlamaContext: @unchecked Sendable {
     /// Each call resets the KV cache and sampler state, so calls are
     /// independent. Cancelling the consuming Task stops generation at the
     /// next loop iteration.
+    /// Tracks the in-flight `runPredict` task so a subsequent `predict()`
+    /// call can wait for it to fully exit before clearing KV state and
+    /// starting its own graph compute. Without this, a fast Pause →
+    /// Resume tap could land a new `llama_decode` on the Metal context
+    /// while the previous task's command buffer was still encoding,
+    /// tripping `MTLDebugCommandBuffer preCommit 'encoding in progress'`
+    /// and aborting. predict() is always called from the @MainActor
+    /// InferenceEngine, so this property is effectively main-isolated.
+    private var currentPredictTask: Task<Void, Never>?
+
     public func predict(prompt: String, maxTokens: Int = 1000) -> AsyncStream<String> {
-        AsyncStream { continuation in
+        // Snapshot the prior task synchronously inside predict() (on
+        // main) so the new detached task can await it without racing
+        // on the property itself.
+        let prior = currentPredictTask
+        return AsyncStream { continuation in
             let task = Task.detached(priority: .userInitiated) { [self] in
+                // Wait for any prior predict to drain — runPredict returns
+                // only after its last llama_decode has completed, which
+                // for the Metal backend means the command buffer has
+                // committed and the encoder is no longer open.
+                if let prior {
+                    _ = await prior.value
+                }
                 self.runPredict(prompt: prompt, maxTokens: maxTokens) { piece in
                     continuation.yield(piece)
                 }
                 continuation.finish()
             }
+            self.currentPredictTask = task
             continuation.onTermination = { _ in
                 task.cancel()
             }
