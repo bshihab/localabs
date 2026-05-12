@@ -136,9 +136,9 @@ struct ProfileView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack(spacing: 6) {
-                    Image(systemName: "bell.badge")
+                    Image(systemName: "iphone.gen3.radiowaves.left.and.right")
                         .font(.caption)
-                    Text("You'll get a notification when the download is done — feel free to switch apps or even close Localabs.")
+                    Text("Keep Localabs open for fastest download (~5–10 min on Wi-Fi). Backgrounding the app slows it down a lot — iOS throttles transfers from inactive apps.")
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)
