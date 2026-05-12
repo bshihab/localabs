@@ -153,6 +153,7 @@ final class InferenceEngine: ObservableObject {
         guard !isDownloading else { return }
         downloadError = nil
         isDownloading = true
+        setKeepScreenAwakeForDownload(true)
         loadingProgress = 0
         bytesWritten = 0
         bytesExpected = selectedModel.expectedSizeBytes
@@ -177,6 +178,7 @@ final class InferenceEngine: ObservableObject {
                 try await downloader.download(from: model.downloadURL, to: model.localURL)
                 await MainActor.run {
                     self?.isDownloading = false
+                    self?.setKeepScreenAwakeForDownload(false)
                     self?.activeDownloader = nil
                 }
                 await self?.loadModelIfDownloaded()
@@ -185,6 +187,7 @@ final class InferenceEngine: ObservableObject {
                 await MainActor.run {
                     guard let self else { return }
                     self.isDownloading = false
+                    self.setKeepScreenAwakeForDownload(false)
                     self.activeDownloader = nil
                     if (error as? URLError)?.code != .cancelled {
                         self.downloadError = error.localizedDescription
@@ -192,6 +195,20 @@ final class InferenceEngine: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Toggles the system idle timer while the model download is active.
+    /// When on, the screen won't auto-lock — which matters because the
+    /// foreground URLSession gets full bandwidth only while the app is
+    /// active. The moment the screen locks (or the user backgrounds), we
+    /// hand off to the throttled background session. Users staring at
+    /// the progress bar would otherwise watch their screen dim and slow
+    /// the download by 5-10x. iOS resets the flag automatically when the
+    /// app is backgrounded, but we still flip it off explicitly on
+    /// completion so we don't keep the screen awake any longer than the
+    /// download needs.
+    private func setKeepScreenAwakeForDownload(_ keepAwake: Bool) {
+        UIApplication.shared.isIdleTimerDisabled = keepAwake
     }
 
     // MARK: - Notifications
@@ -234,6 +251,7 @@ final class InferenceEngine: ObservableObject {
         activeDownloader?.cancel()
         downloadTask?.cancel()
         isDownloading = false
+        setKeepScreenAwakeForDownload(false)
         loadingProgress = 0
         bytesWritten = 0
     }
