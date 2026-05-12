@@ -216,7 +216,7 @@ struct ProfileView: View {
                 Spacer()
                 if isRequestingHealth {
                     ProgressView().scaleEffect(0.8)
-                } else if hasRequestedHealth, healthMetrics?.isMockData == false {
+                } else if hasRequestedHealth, let metrics = healthMetrics, !metrics.isEmpty {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 18))
                         .foregroundStyle(.green)
@@ -239,7 +239,7 @@ struct ProfileView: View {
                 }
                 .buttonStyle(.glassProminent)
                 .disabled(isRequestingHealth)
-            } else if let metrics = healthMetrics, metrics.isMockData == false {
+            } else if let metrics = healthMetrics, !metrics.isEmpty {
                 healthMetricsGrid(metrics)
                 // Re-link to Settings even when data IS flowing, so the
                 // user can adjust which categories Localabs reads. Small
@@ -253,14 +253,15 @@ struct ProfileView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 4)
-            } else if let metrics = healthMetrics, metrics.isMockData {
+            } else if let metrics = healthMetrics, metrics.isEmpty {
                 // No data flowing despite the request having been made.
                 // Two common causes: user tapped Don't Allow on the iOS
                 // sheet, or Localabs is reading types they haven't
-                // enabled yet. Either way, the fix is in Settings — iOS
-                // doesn't let apps re-trigger the permission sheet, but
-                // users can manage permissions manually under Settings →
-                // Health → Data Access & Devices → Localabs.
+                // enabled yet. Either way, the fix is in the Health app —
+                // iOS doesn't let apps re-trigger the permission sheet,
+                // but users can manage permissions manually under
+                // Health → Profile → Privacy → Apps and Services →
+                // Localabs.
                 Text("No recent Apple Health data found.")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)

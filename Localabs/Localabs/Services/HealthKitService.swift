@@ -28,7 +28,14 @@ class HealthKitService {
         var avgRestingHR: Double?
         var avgSleepHours: Double?
         var avgHRV: Double?
-        var isMockData: Bool = false
+
+        /// True when every metric is missing. Lets the UI render a
+        /// genuine empty state ("no Apple Health data yet") instead of
+        /// showing zeros — and lets InferenceEngine skip injecting a
+        /// useless Health section into the prompt.
+        var isEmpty: Bool {
+            avgRestingHR == nil && avgSleepHours == nil && avgHRV == nil
+        }
     }
 
     /// Requests read-only access to the health data types we need.
@@ -55,28 +62,27 @@ class HealthKitService {
     }
     
     /// Fetches the 30-day averages for resting HR, sleep, and HRV.
+    /// Returns `HealthMetrics` with whatever subset HealthKit could
+    /// produce — nil for missing/denied types. The UI handles the
+    /// all-nil empty state explicitly; we no longer fall back to
+    /// mock/demo values, because seeing fake "62 bpm / 7.2 hr / 42 ms"
+    /// confused users into thinking Health was working.
     func getHealthMetrics() async -> HealthMetrics {
         let calendar = Calendar.current
         let endDate = Date()
         guard let startDate = calendar.date(byAdding: .day, value: -30, to: endDate) else {
-            return HealthMetrics(isMockData: true)
+            return HealthMetrics()
         }
-        
+
         async let restingHR = fetchAverage(for: .restingHeartRate, unit: HKUnit(from: "count/min"), from: startDate, to: endDate)
         async let hrv = fetchAverage(for: .heartRateVariabilitySDNN, unit: HKUnit.secondUnit(with: .milli), from: startDate, to: endDate)
         async let sleep = fetchAverageSleep(from: startDate, to: endDate)
-        
-        let hr = await restingHR
-        let hrvVal = await hrv
-        let sleepVal = await sleep
-        
-        // If all values are nil, the user likely hasn't granted HealthKit access.
-        // Return mock data for development/demo purposes.
-        if hr == nil && hrvVal == nil && sleepVal == nil {
-            return HealthMetrics(avgRestingHR: 62, avgSleepHours: 7.2, avgHRV: 42, isMockData: true)
-        }
-        
-        return HealthMetrics(avgRestingHR: hr, avgSleepHours: sleepVal, avgHRV: hrvVal)
+
+        return HealthMetrics(
+            avgRestingHR: await restingHR,
+            avgSleepHours: await sleep,
+            avgHRV: await hrv
+        )
     }
     
     // MARK: - Private Helpers
