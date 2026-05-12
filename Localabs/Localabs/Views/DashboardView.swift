@@ -2,6 +2,11 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject var engine: InferenceEngine
+    /// Bound from ContentView when Dashboard is shown as a tab so the
+    /// "paused analysis" badge can switch the user back to Scan tab.
+    /// Nil when Dashboard is pushed onto a NavigationStack (post-scan,
+    /// History detail) — in those routes we don't show the badge.
+    var selectedTab: Binding<Int>?
     var initialReport: StructuredReport?
     @State private var report: StructuredReport?
     @State private var healthMetrics: HealthKitService.HealthMetrics?
@@ -31,14 +36,16 @@ struct DashboardView: View {
                     summaryCard
                         .padding(.horizontal)
 
-                    // Resume banner for reports where the model didn't
-                    // finish (cancelled by the user, interrupted by app
-                    // backgrounding, or the prompt overflowed n_ctx).
-                    // Tapping kicks off regenerateReport against the
-                    // saved OCR text; the live cards animate the same
-                    // way they do during a fresh scan.
-                    if let report = currentReport, report.isIncomplete {
-                        resumeBanner(for: report)
+                    // Slim "analysis is paused" badge — visible only on
+                    // the Dashboard *tab*, and only when an inference
+                    // is currently paused. Tapping switches to the
+                    // Scan tab where the live cards live, so the
+                    // user always has one obvious place to resume.
+                    // In pushed contexts (post-scan, History detail)
+                    // we hide this — those are dedicated views of one
+                    // report and a tab-switch hint there is confusing.
+                    if let tabBinding = selectedTab, engine.isPaused {
+                        pausedAnalysisBadge(switchTo: tabBinding)
                             .padding(.horizontal)
                     }
 
@@ -170,53 +177,34 @@ struct DashboardView: View {
         report = await engine.regenerateReport(from: existing)
     }
 
-    /// Banner shown for reports where Localabs's generation didn't
-    /// produce a normal output (cancelled, backgrounded, or the prompt
-    /// overflowed n_ctx). Tapping just flips `engine.pendingResumeReport`
-    /// — ContentView observes that to switch to the Scan tab (when the
-    /// user is on the Dashboard tab) and ScanView's onChange pops any
-    /// pushed dashboard and re-runs the analysis, so the user lands on
-    /// the live streaming cards in both routes. Don't use `dismiss()`
-    /// here: this view is a TabView root in one route and has its own
-    /// inner NavigationStack in the other, so `dismiss()` is a no-op
-    /// in both cases.
-    private func resumeBanner(for incomplete: StructuredReport) -> some View {
+    /// Slim, single-line hint that points the user back to the Scan
+    /// tab where the paused analysis is actually preserved. Replaces
+    /// the old big orange Resume banner — that banner caused two
+    /// problems: it implied the dashboard was the resume venue (it
+    /// wasn't — the streaming UI lives in ScanView), and it duplicated
+    /// the Dashboard tab whenever the post-scan auto-push landed on
+    /// top of an incomplete result.
+    private func pausedAnalysisBadge(switchTo selectedTab: Binding<Int>) -> some View {
         Button {
-            engine.pendingResumeReport = incomplete
+            selectedTab.wrappedValue = 0  // Scan tab
         } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.22))
-                        .frame(width: 48, height: 48)
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Resume")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-                    Text("Localabs didn't finish — tap to retry against the saved scan")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.88))
-                        .multilineTextAlignment(.leading)
-                }
+            HStack(spacing: 12) {
+                Image(systemName: "pause.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .symbolRenderingMode(.hierarchical)
+                Text("Analysis paused — open Scan tab to resume")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary)
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(
-                LinearGradient(
-                    colors: [Color.orange, Color.orange.opacity(0.85)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .shadow(color: .orange.opacity(0.28), radius: 14, y: 6)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular.tint(.orange.opacity(0.18)), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -271,19 +259,43 @@ struct DashboardView: View {
                 .foregroundStyle(.blue)
 
             if let metrics = healthMetrics {
-                HStack {
-                    MetricPill(value: "\(Int(metrics.avgRestingHR ?? 0))", unit: "bpm", label: "Resting HR")
-                    Spacer()
-                    MetricPill(value: String(format: "%.1f", metrics.avgSleepHours ?? 0), unit: "h", label: "Avg Sleep")
-                    Spacer()
-                    MetricPill(value: "\(Int(metrics.avgHRV ?? 0))", unit: "ms", label: "HRV")
-                }
-
-                if metrics.isMockData {
-                    Text("HealthKit data unavailable — showing demo values.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                if metrics.isEmpty {
+                    // Honest empty state — no demo numbers. Covers
+                    // both "user hasn't connected Apple Health" and
+                    // "connected but no recent data was found in the
+                    // 30-day window we query."
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No Apple Health data yet")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.primary)
+                        Text("Connect Apple Health in Profile to bring resting HR, HRV, and sleep into your reports.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } else {
+                    // Each pill renders an em-dash when its metric is
+                    // missing rather than zeroing out — keeps partial
+                    // permissions readable instead of misleading.
+                    HStack {
+                        MetricPill(
+                            value: metrics.avgRestingHR.map { "\(Int($0))" } ?? "—",
+                            unit: "bpm",
+                            label: "Resting HR"
+                        )
+                        Spacer()
+                        MetricPill(
+                            value: metrics.avgSleepHours.map { String(format: "%.1f", $0) } ?? "—",
+                            unit: "h",
+                            label: "Avg Sleep"
+                        )
+                        Spacer()
+                        MetricPill(
+                            value: metrics.avgHRV.map { "\(Int($0))" } ?? "—",
+                            unit: "ms",
+                            label: "HRV"
+                        )
+                    }
                 }
             } else {
                 ProgressView()

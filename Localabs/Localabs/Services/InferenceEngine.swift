@@ -25,6 +25,12 @@ final class InferenceEngine: ObservableObject {
     @Published var analysisProgress: Double = 0
     @Published var isDownloading = false
     @Published var downloadError: String?
+    /// True when the user (or the app-backgrounded observer) paused an
+    /// in-flight analysis. While true, ScanView keeps the live-cards UI
+    /// on screen — frozen at the last token — so the user can resume in
+    /// place instead of being shoved to a duplicate Dashboard. Flips
+    /// back to false when they tap Resume or Discard.
+    @Published var isPaused = false
 
     @Published private(set) var selectedModel: AvailableModel = {
         if let raw = UserDefaults.standard.string(forKey: "localabs_selected_model"),
@@ -57,23 +63,77 @@ final class InferenceEngine: ObservableObject {
 
     init() {
         // Listen for the app entering the background. Any inference that
-        // was running gets cancelled at the next safe checkpoint so the
-        // GPU state can settle. Otherwise iOS suspending us mid-decode
-        // can corrupt the Metal command buffer / KV cache, and the next
-        // ggml call crashes with `ggml_abort`.
+        // was running gets paused at the next safe checkpoint so the GPU
+        // state can settle — otherwise iOS suspending us mid-decode can
+        // corrupt the Metal command buffer / KV cache and the next ggml
+        // call crashes with `ggml_abort`. Flipping `isPaused` here (not
+        // just cancelling silently) gives the user a clear paused-state
+        // UI to come back to instead of looking like the analysis
+        // vanished.
         Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: UIApplication.didEnterBackgroundNotification) {
-                self?.cancelInference()
+                self?.pauseInference()
             }
         }
     }
 
-    /// Aborts any in-flight inference. Inference loops check this flag
-    /// between tokens and exit cleanly — the partial output gets parsed
-    /// and saved if there's enough of it, otherwise a "cancelled"
-    /// placeholder is returned.
-    func cancelInference() {
+    /// Stops the inference loop at the next safe checkpoint. Internal —
+    /// callers should use `pauseInference()` (preserves UI state for a
+    /// resume) or rely on the bg-observer path. The streaming loop
+    /// checks this between tokens and exits cleanly; the partial output
+    /// gets parsed and saved if there's enough of it.
+    private func cancelInference() {
         isInferenceCancelled = true
+    }
+
+    /// User-initiated pause. Stops the inference loop and flips the
+    /// `isPaused` UI flag so ScanView keeps the live cards on screen,
+    /// frozen at the last token, with a Resume button instead of an X.
+    /// The partial report still gets saved to LocalStorage by the
+    /// analyze path, so even if the user discards the in-memory state
+    /// they could in theory still find it in History.
+    func pauseInference() {
+        guard isProcessing else { return }
+        cancelInference()
+        isPaused = true
+    }
+
+    /// Picks up the most recent paused / incomplete report and re-runs
+    /// the LLM step against its saved OCR text. Mirrors the existing
+    /// `regenerateReport` call path; the only difference is that this
+    /// is the canonical entry point when the user is sitting on a
+    /// paused ScanView and taps Resume.
+    func resumeFromPaused() async {
+        isPaused = false
+        let incomplete: StructuredReport?
+        if let pending = pendingResumeReport {
+            incomplete = pending
+        } else {
+            // Fall back to the most recent stored report if it's
+            // incomplete — covers the case where the app restarted
+            // between pause and resume.
+            incomplete = LocalStorageService.shared.getHistory().first(where: { $0.isIncomplete })
+        }
+        guard let target = incomplete else { return }
+        pendingResumeReport = nil
+        _ = await regenerateReport(from: target)
+    }
+
+    /// Throws away the paused analysis — clears the live-cards state,
+    /// deletes the saved incomplete report from LocalStorage so it
+    /// doesn't reappear on the Dashboard tab or in History, and returns
+    /// ScanView to the upload state.
+    func discardPausedAnalysis() {
+        isPaused = false
+        streamingText = ""
+        analysisProgress = 0
+        processingStatus = ""
+        if let pending = pendingResumeReport {
+            LocalStorageService.shared.deleteReport(id: pending.id)
+        } else if let latest = LocalStorageService.shared.getHistory().first, latest.isIncomplete {
+            LocalStorageService.shared.deleteReport(id: latest.id)
+        }
+        pendingResumeReport = nil
     }
 
     /// Memory-efficient image downsampler. ImageIO's thumbnail API decodes
@@ -293,6 +353,7 @@ final class InferenceEngine: ObservableObject {
         report.additionalPagePaths = extraPaths
 
         LocalStorageService.shared.saveReport(report)
+        if report.isIncomplete { pendingResumeReport = report }
         processingStatus = ""
         analysisProgress = 1.0
         return report
@@ -348,6 +409,7 @@ final class InferenceEngine: ObservableObject {
             report.imagePath = firstPath
             report.additionalPagePaths = extraPaths
             LocalStorageService.shared.saveReport(report)
+            if report.isIncomplete { pendingResumeReport = report }
             processingStatus = ""
             analysisProgress = 1.0
             return report
@@ -468,6 +530,7 @@ final class InferenceEngine: ObservableObject {
         fresh.additionalPagePaths = existing.additionalPagePaths
 
         LocalStorageService.shared.saveReport(fresh)
+        if fresh.isIncomplete { pendingResumeReport = fresh }
         processingStatus = ""
         analysisProgress = 1.0
         return fresh
@@ -559,16 +622,18 @@ final class InferenceEngine: ObservableObject {
         print("[InferenceEngine] Prompt: \(prompt.count) chars (~\(prompt.count / 4) tokens) before Localabs run.")
         let stream = context.predict(prompt: prompt, maxTokens: maxTokens)
         for await piece in stream {
-            // Bail if the user backgrounded the app, manually cancelled
-            // from the toolbar, or the parent Task got cancelled. Preserve
-            // the OCR text in rawText so the dashboard can offer a Resume
-            // button that re-runs against the same source.
+            // Bail if the user paused (or the app got backgrounded /
+            // parent Task cancelled). Keep `streamingText` populated so
+            // ScanView's paused state can show whatever sections had
+            // streamed in already; preserve OCR text in rawText so the
+            // Resume button can re-run against the same source.
             if isInferenceCancelled || Task.isCancelled {
-                streamingText = ""
-                return StructuredReport(
-                    patientSummary: "Analysis was interrupted. Tap Resume on the dashboard to continue.",
-                    rawText: extractedText
-                )
+                var partial = StructuredReport.parse(from: collected)
+                partial.rawText = extractedText
+                if partial.patientSummary.isEmpty {
+                    partial.patientSummary = "Paused before any analysis was generated. Tap Resume to start the analysis."
+                }
+                return partial
             }
             collected += piece
             streamingText = collected
@@ -577,7 +642,6 @@ final class InferenceEngine: ObservableObject {
             // completes — leaves the final bump for the post-loop write.
             analysisProgress = min(0.25 + Double(tokenCount) / Double(maxTokens) * 0.70, 0.95)
         }
-        streamingText = ""
 
         // Empty output usually means llama_tokenize bailed because the
         // prompt overflowed n_ctx (multi-page scans + system prompt +

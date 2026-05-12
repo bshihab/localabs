@@ -18,7 +18,7 @@ struct ContentView: View {
                     }
                     .tag(0)
 
-                DashboardView()
+                DashboardView(selectedTab: $selectedTab)
                     .tabItem {
                         Label("Dashboard", systemImage: "heart.text.square")
                     }

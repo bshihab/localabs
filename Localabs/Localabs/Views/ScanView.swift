@@ -16,7 +16,12 @@ struct ScanView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                if engine.isProcessing {
+                // ScanView is the home of any in-flight or paused
+                // analysis. The processing view stays on screen for
+                // both running and paused states; only true idle
+                // (nothing in flight, nothing paused) flips back to
+                // the upload buttons.
+                if engine.isProcessing || engine.isPaused {
                     processingView
                         .transition(.opacity)
                 } else {
@@ -25,6 +30,7 @@ struct ScanView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: engine.isProcessing)
+            .animation(.easeInOut(duration: 0.3), value: engine.isPaused)
             .navigationTitle("")
             .fullScreenCover(isPresented: $showCamera) {
                 NativeCameraView(image: $selectedImage)
@@ -33,8 +39,11 @@ struct ScanView: View {
             .sheet(isPresented: $showPDFPicker) {
                 PDFDocumentPicker { url in
                     Task {
-                        report = await engine.analyzePDF(at: url)
-                        navigateToDashboard = true
+                        let result = await engine.analyzePDF(at: url)
+                        report = result
+                        if !result.isIncomplete && !engine.isPaused {
+                            navigateToDashboard = true
+                        }
                     }
                 }
                 .ignoresSafeArea()
@@ -157,8 +166,9 @@ struct ScanView: View {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text("Analyzing")
+                            Text(engine.isPaused ? "Paused" : "Analyzing")
                                 .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(engine.isPaused ? Color.orange : Color.primary)
                             Spacer()
                             // Live percentage tied to engine.analysisProgress.
                             // Using monospaced digits keeps it from twitching
@@ -168,35 +178,38 @@ struct ScanView: View {
                                 .foregroundStyle(.secondary)
                                 .contentTransition(.numericText(value: engine.analysisProgress))
                         }
-                        Text(engine.processingStatus.isEmpty
-                             ? "Localabs is generating your report…"
-                             : engine.processingStatus)
+                        Text(statusLine)
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
 
-                    // Manual cancel — calls into engine.cancelInference()
-                    // which flips the same flag the backgrounding observer
-                    // does, so the streaming loop bails at the next token.
-                    Button {
-                        engine.cancelInference()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(.secondary, .tertiary)
-                            .symbolRenderingMode(.hierarchical)
+                    // Pause toggle while running — flips engine.isPaused,
+                    // freezes the streaming cards in place, and swaps
+                    // the bottom CTAs to Resume + Discard. Hidden while
+                    // already paused (the action moves to the dedicated
+                    // bottom buttons).
+                    if !engine.isPaused {
+                        Button {
+                            engine.pauseInference()
+                        } label: {
+                            Image(systemName: "pause.circle.fill")
+                                .font(.system(size: 26))
+                                .foregroundStyle(.blue, .blue.opacity(0.18))
+                                .symbolRenderingMode(.hierarchical)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Pause analysis")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Cancel analysis")
                 }
 
                 // Determinate progress bar — replaces the previous
                 // indeterminate spinner. Fills as each pipeline phase
                 // completes (OCR per page → save → Health → Localabs
-                // streaming → final save).
+                // streaming → final save). Tints orange while paused so
+                // the frozen state reads at a glance.
                 ProgressView(value: engine.analysisProgress)
-                    .tint(.blue)
+                    .tint(engine.isPaused ? .orange : .blue)
                     .animation(.easeOut(duration: 0.25), value: engine.analysisProgress)
             }
             .padding(16)
@@ -207,10 +220,55 @@ struct ScanView: View {
             .padding(.bottom, 12)
 
             // Cards fill in live as Localabs streams each section.
+            // While paused, the cards stay populated with whatever
+            // streamed in before the pause — the user can still scroll
+            // through partial content.
             LiveReportSectionsView(streamingText: engine.streamingText)
                 .padding(.horizontal, 20)
+                .padding(.bottom, engine.isPaused ? 12 : 24)
+
+            // Resume + Discard pinned to the bottom of the paused
+            // screen. Resume is the prominent CTA; Discard is a small
+            // destructive link so accidental taps stay safe.
+            if engine.isPaused {
+                VStack(spacing: 10) {
+                    Button {
+                        Task { await engine.resumeFromPaused() }
+                    } label: {
+                        Label("Resume Analysis", systemImage: "play.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.glassProminent)
+
+                    Button(role: .destructive) {
+                        engine.discardPausedAnalysis()
+                    } label: {
+                        Text("Discard analysis")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.red.opacity(0.85))
+                    .padding(.bottom, 4)
+                }
+                .padding(.horizontal, 20)
                 .padding(.bottom, 24)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+    }
+
+    /// Subhead under the "Analyzing / Paused" header. Switches between
+    /// the live processingStatus, a generic running message, and a
+    /// paused-state hint so the user always knows what state we're in.
+    private var statusLine: String {
+        if engine.isPaused {
+            return "Tap Resume to continue, or Discard to start over."
+        }
+        return engine.processingStatus.isEmpty
+            ? "Localabs is generating your report…"
+            : engine.processingStatus
     }
 
     /// Triggered by Dashboard's Resume button — picks up the saved
@@ -227,7 +285,11 @@ struct ScanView: View {
         Task {
             let regenerated = await engine.regenerateReport(from: pending)
             report = regenerated
-            navigateToDashboard = true
+            // Only push Dashboard if the resumed run actually finished.
+            // A re-pause stays on this screen with the partial output.
+            if !regenerated.isIncomplete && !engine.isPaused {
+                navigateToDashboard = true
+            }
         }
     }
 
@@ -252,8 +314,15 @@ struct ScanView: View {
             }
             pickerItems = []
             if !images.isEmpty {
-                report = await engine.analyzeImages(images)
-                navigateToDashboard = true
+                let result = await engine.analyzeImages(images)
+                report = result
+                // Only push to Dashboard if the analysis actually
+                // finished. Incomplete / paused runs stay on ScanView
+                // so the user can resume in place; the duplicate
+                // pushed-dashboard was the whole problem we're fixing.
+                if !result.isIncomplete && !engine.isPaused {
+                    navigateToDashboard = true
+                }
             }
         }
     }
@@ -263,8 +332,11 @@ struct ScanView: View {
     private func handleCameraImageChange(_ newImage: UIImage?) {
         guard let image = newImage else { return }
         Task {
-            report = await engine.analyzeImages([image])
-            navigateToDashboard = true
+            let result = await engine.analyzeImages([image])
+            report = result
+            if !result.isIncomplete && !engine.isPaused {
+                navigateToDashboard = true
+            }
             selectedImage = nil
         }
     }
