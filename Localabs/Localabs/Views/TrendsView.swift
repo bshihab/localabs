@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UIKit
 
 /// Health trends home — the tab that replaces the old empty Dashboard.
 /// Pulls a `TrendsSnapshot` from HealthKitService on appear and again
@@ -55,6 +56,11 @@ struct TrendsView: View {
             .background(.background)
             .navigationTitle("")
             .task(id: rangeDays) {
+                // Pull the auth flag fresh every time the view appears
+                // or the range changes — Profile may have flipped it
+                // while we were away, and SwiftUI @State otherwise
+                // sticks to the value it had at first init.
+                hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
                 await refresh()
             }
         }
@@ -62,19 +68,26 @@ struct TrendsView: View {
 
     // MARK: - Range picker
 
-    /// One big glass pill with a single glass "thumb" that slides to
-    /// the active range. The whole track gets a subtle glass effect;
-    /// the thumb gets a tinted glass with matchedGeometryEffect, so
-    /// when the user taps a different option the thumb slides
-    /// smoothly between segments instead of snapping.
+    /// Native iOS 26 Liquid Glass pill. Outer track gets a `.regular`
+    /// glass via Color.clear-as-View (Apple's pattern — `.fill(.clear)`
+    /// on a Shape has no view content for the glass to refract).
+    /// `GlassEffectContainer` makes the thumb morph smoothly when the
+    /// user taps a different segment instead of cross-fading. The
+    /// active thumb uses `.interactive()` which gives the proper
+    /// press response Apple's own segmented controls use.
     private var rangePicker: some View {
-        HStack(spacing: 0) {
-            ForEach(ranges, id: \.days) { range in
-                rangeSegment(range)
+        GlassEffectContainer(spacing: 0) {
+            HStack(spacing: 0) {
+                ForEach(ranges, id: \.days) { range in
+                    rangeSegment(range)
+                }
             }
+            .padding(4)
+            .background(
+                Color.clear
+                    .glassEffect(.regular, in: Capsule())
+            )
         }
-        .padding(4)
-        .glassEffect(.regular, in: Capsule())
     }
 
     private func rangeSegment(_ range: (label: String, days: Int)) -> some View {
@@ -85,9 +98,12 @@ struct TrendsView: View {
             .padding(.vertical, 8)
             .background {
                 if rangeDays == range.days {
-                    Capsule()
-                        .fill(Color.clear)
-                        .glassEffect(.regular.tint(.blue.opacity(0.45)).interactive(), in: Capsule())
+                    // Color.clear IS a View — applying glassEffect to a
+                    // shape's .fill(.clear) has no view content to
+                    // refract, which is why the previous version
+                    // looked like a tinted shape rather than glass.
+                    Color.clear
+                        .glassEffect(.regular.tint(.blue.opacity(0.5)).interactive(), in: Capsule())
                         .matchedGeometryEffect(id: "rangeThumb", in: pickerThumb)
                 }
             }
@@ -256,17 +272,70 @@ struct TrendsView: View {
     }
 
     private var emptyDataHint: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("No Apple Health data yet")
-                .font(.system(size: 15, weight: .semibold))
-            Text("Once your iPhone or Apple Watch logs activity, sleep, or vitals, the data will appear here.")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("No Apple Health data yet")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("If you've already connected Apple Health, the individual data types may be turned off. Toggle them on in the Health app:")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                healthStep(number: 1, text: "Open the **Health** app")
+                healthStep(number: 2, text: "Tap your **profile picture** (top-right)")
+                healthStep(number: 3, text: "Scroll to **Privacy** and tap **Apps and Services**")
+                healthStep(number: 4, text: "Tap **Localabs** and turn on every toggle you want Localabs to read")
+            }
+            .padding(.leading, 2)
+
+            Button {
+                openHealthApp()
+            } label: {
+                Label("Open Health App", systemImage: "heart.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.glassProminent)
+
+            Button {
+                Task { await refresh() }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    /// Same numbered-step row pattern Profile uses for the Health
+    /// walkthrough, so the UX feels consistent across both empty
+    /// states. The text accepts `**markdown bold**`.
+    private func healthStep(number: Int, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("\(number)")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(Color.pink))
+            Text(LocalizedStringKey(text))
+                .font(.system(size: 13))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func openHealthApp() {
+        if let url = URL(string: "x-apple-health://") {
+            UIApplication.shared.open(url)
+        }
     }
 
     // MARK: - Loading + formatting
