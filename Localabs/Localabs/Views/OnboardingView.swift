@@ -283,7 +283,14 @@ struct OnboardingView: View {
             TextField(placeholder, text: text, axis: .vertical)
                 .lineLimit(3...6)
                 .padding(12)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                // Flat tonal fill rather than nested glass — the
+                // outer card is already a glass surface, and Apple's
+                // HIG calls out that stacking glass over glass
+                // over-blurs and reads as a single muddy plane.
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.secondary.opacity(0.08))
+                )
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)

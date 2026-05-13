@@ -117,7 +117,13 @@ struct ProfileView: View {
                 .buttonStyle(.glass)
             }
             .padding(12)
-            .glassEffect(.regular.tint(.green.opacity(0.12)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // Flat tonal fill — the parent card already provides the
+            // glass surface; stacking another glass here over-blurs
+            // and breaks Apple's "don't nest glass within glass" rule.
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.green.opacity(0.12))
+            )
         } else if engine.isDownloading {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -149,7 +155,10 @@ struct ProfileView: View {
                 .controlSize(.regular)
             }
             .padding(14)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+            )
         } else {
             VStack(spacing: 10) {
                 Button {
@@ -402,7 +411,10 @@ struct ProfileView: View {
             TextField("e.g. Lisinopril 10mg, Metformin 500mg…", text: $profile.medications, axis: .vertical)
                 .lineLimit(3...6)
                 .padding(12)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.secondary.opacity(0.08))
+                )
                 .onChange(of: profile.medications) { _, _ in
                     profile.save()
                 }
