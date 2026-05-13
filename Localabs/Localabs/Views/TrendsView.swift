@@ -13,6 +13,7 @@ struct TrendsView: View {
     @State private var rangeDays: Int = 30
     @State private var isLoading = false
     @State private var hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
+    @Namespace private var pickerThumb
 
     private let ranges: [(label: String, days: Int)] = [
         ("7d", 7),
@@ -36,12 +37,12 @@ struct TrendsView: View {
                         rangePicker
                             .padding(.horizontal)
 
-                        if let snapshot {
-                            renderedCards(for: snapshot)
-                        } else if isLoading {
+                        if isLoading && snapshot == nil {
                             ProgressView("Loading from Apple Health…")
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 40)
+                        } else if let snapshot, snapshotHasAnyData(snapshot) {
+                            renderedCards(for: snapshot)
                         } else {
                             emptyDataHint
                                 .padding(.horizontal)
@@ -61,41 +62,41 @@ struct TrendsView: View {
 
     // MARK: - Range picker
 
+    /// One big glass pill with a single glass "thumb" that slides to
+    /// the active range. The whole track gets a subtle glass effect;
+    /// the thumb gets a tinted glass with matchedGeometryEffect, so
+    /// when the user taps a different option the thumb slides
+    /// smoothly between segments instead of snapping.
     private var rangePicker: some View {
-        GlassEffectContainer(spacing: 6) {
-            HStack(spacing: 6) {
-                ForEach(ranges, id: \.days) { range in
-                    rangeButton(range)
-                }
+        HStack(spacing: 0) {
+            ForEach(ranges, id: \.days) { range in
+                rangeSegment(range)
             }
         }
+        .padding(4)
+        .glassEffect(.regular, in: Capsule())
     }
 
-    /// Conditional .buttonStyle application: SwiftUI's modifier API
-    /// can't pick between `.glass` and `.glassProminent` inline (the
-    /// generic gets fixed at compile time), so we branch the whole
-    /// button at the view level instead. The label is identical
-    /// either way.
-    @ViewBuilder
-    private func rangeButton(_ range: (label: String, days: Int)) -> some View {
-        if rangeDays == range.days {
-            Button {
-                rangeDays = range.days
-            } label: { rangeButtonLabel(range.label) }
-                .buttonStyle(.glassProminent)
-        } else {
-            Button {
-                rangeDays = range.days
-            } label: { rangeButtonLabel(range.label) }
-                .buttonStyle(.glass)
-        }
-    }
-
-    private func rangeButtonLabel(_ text: String) -> some View {
-        Text(text)
+    private func rangeSegment(_ range: (label: String, days: Int)) -> some View {
+        Text(range.label)
             .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(rangeDays == range.days ? Color.primary : Color.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
+            .background {
+                if rangeDays == range.days {
+                    Capsule()
+                        .fill(Color.clear)
+                        .glassEffect(.regular.tint(.blue.opacity(0.45)).interactive(), in: Capsule())
+                        .matchedGeometryEffect(id: "rangeThumb", in: pickerThumb)
+                }
+            }
+            .contentShape(Capsule())
+            .onTapGesture {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    rangeDays = range.days
+                }
+            }
     }
 
     // MARK: - Cards
@@ -270,11 +271,35 @@ struct TrendsView: View {
 
     // MARK: - Loading + formatting
 
+    /// Refresh fires on first appear AND every time the range changes.
+    /// We re-request authorization before fetching because the
+    /// Trends-tab readTypes set is larger than what Profile's
+    /// "Connect Apple Health" originally asked for — iOS only shows a
+    /// prompt for newly-added types, so existing approvals carry over.
+    /// This is what makes the screen "fill in" the first time the
+    /// user lands on it after the Trends tab was added.
     private func refresh() async {
         guard hasRequestedHealth else { return }
         isLoading = true
         defer { isLoading = false }
+        _ = await HealthKitService.shared.requestAuthorization()
         snapshot = await HealthKitService.shared.getTrends(rangeDays: rangeDays)
+    }
+
+    /// True when at least one metric in the snapshot has samples in
+    /// the current window. Drives the "fall back to emptyDataHint"
+    /// branch — without it, denied/empty users see a blank screen.
+    private func snapshotHasAnyData(_ s: HealthKitService.TrendsSnapshot) -> Bool {
+        let series: [HealthKitService.MetricSeries?] = [
+            s.steps, s.walkingRunningDistance, s.flightsClimbed, s.exerciseMinutes, s.activeEnergy,
+            s.walkingSpeed, s.walkingStepLength, s.walkingAsymmetry, s.walkingDoubleSupport, s.sixMinuteWalkDistance,
+            s.restingHR, s.hrv, s.vo2Max, s.walkingHR,
+            s.sleepHours,
+            s.systolicBP, s.diastolicBP, s.oxygenSaturation, s.respiratoryRate, s.bodyTemperature,
+            s.bodyMass, s.bodyMassIndex,
+            s.bloodGlucose, s.caffeine
+        ]
+        return series.contains { $0?.hasData == true }
     }
 
     private func format(_ value: Double) -> String {

@@ -84,7 +84,9 @@ class HealthKitService {
         var exerciseMinutes: MetricSeries?
         var activeEnergy: MetricSeries?
 
-        // Mobility (mostly phone; clinical-grade signals)
+        // Mobility (mostly phone; passive accelerometer-derived
+        // signals that correlate with clinical gait/fall-risk
+        // measures but are NOT FDA-cleared diagnostics)
         var walkingSpeed: MetricSeries?
         var walkingStepLength: MetricSeries?
         var walkingAsymmetry: MetricSeries?
