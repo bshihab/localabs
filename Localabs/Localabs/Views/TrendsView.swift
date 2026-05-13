@@ -68,42 +68,33 @@ struct TrendsView: View {
 
     // MARK: - Range picker
 
-    /// Native iOS 26 Liquid Glass pill. Outer track gets a `.regular`
-    /// glass via Color.clear-as-View (Apple's pattern — `.fill(.clear)`
-    /// on a Shape has no view content for the glass to refract).
-    /// `GlassEffectContainer` makes the thumb morph smoothly when the
-    /// user taps a different segment instead of cross-fading. The
-    /// active thumb uses `.interactive()` which gives the proper
-    /// press response Apple's own segmented controls use.
+    /// Native iOS 26 Liquid Glass pill, applied directly to the HStack
+    /// so the glass material is bounded to the picker's actual frame.
+    /// The previous attempt used `Color.clear.glassEffect(...)` inside
+    /// a GlassEffectContainer, which bled the refraction outward over
+    /// the surrounding content. The thumb is just a tinted Capsule —
+    /// nested glass-on-glass tends to over-blur and reads worse than
+    /// a flat tint against the glass track.
     private var rangePicker: some View {
-        GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 0) {
-                ForEach(ranges, id: \.days) { range in
-                    rangeSegment(range)
-                }
+        HStack(spacing: 0) {
+            ForEach(ranges, id: \.days) { range in
+                rangeSegment(range)
             }
-            .padding(4)
-            .background(
-                Color.clear
-                    .glassEffect(.regular, in: Capsule())
-            )
         }
+        .padding(4)
+        .glassEffect(.regular, in: Capsule())
     }
 
     private func rangeSegment(_ range: (label: String, days: Int)) -> some View {
         Text(range.label)
             .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(rangeDays == range.days ? Color.primary : Color.secondary)
+            .foregroundStyle(rangeDays == range.days ? Color.white : Color.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
             .background {
                 if rangeDays == range.days {
-                    // Color.clear IS a View — applying glassEffect to a
-                    // shape's .fill(.clear) has no view content to
-                    // refract, which is why the previous version
-                    // looked like a tinted shape rather than glass.
-                    Color.clear
-                        .glassEffect(.regular.tint(.blue.opacity(0.5)).interactive(), in: Capsule())
+                    Capsule()
+                        .fill(.blue.opacity(0.85))
                         .matchedGeometryEffect(id: "rangeThumb", in: pickerThumb)
                 }
             }
@@ -291,14 +282,32 @@ struct TrendsView: View {
             .padding(.leading, 2)
 
             Button {
-                openHealthApp()
+                Task {
+                    // Explicit re-request — fires iOS's prompt for any
+                    // data types not previously answered. Useful when
+                    // Localabs's readTypes set has grown since the
+                    // user first connected (the original Connect in
+                    // Profile may have asked for fewer types).
+                    _ = await HealthKitService.shared.requestAuthorization()
+                    await refresh()
+                }
             } label: {
-                Label("Open Health App", systemImage: "heart.fill")
+                Label("Re-request all permissions", systemImage: "heart.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
             }
             .buttonStyle(.glassProminent)
+
+            Button {
+                openHealthApp()
+            } label: {
+                Label("Open Health App", systemImage: "arrow.up.right.square")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.glass)
 
             Button {
                 Task { await refresh() }
