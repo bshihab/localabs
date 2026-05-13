@@ -14,7 +14,12 @@ struct TrendsView: View {
     @State private var rangeDays: Int = 30
     @State private var isLoading = false
     @State private var hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
-    @Namespace private var pickerThumb
+    /// Tracks whether requestAuthorization has run yet for this
+    /// instance of TrendsView. Without this, the .task(id: rangeDays)
+    /// would re-call requestAuthorization on every range change, and
+    /// iOS would flash an empty system sheet from the bottom (no new
+    /// types to ask about, so it presents and immediately dismisses).
+    @State private var hasRequestedThisSession = false
 
     private let ranges: [(label: String, days: Int)] = [
         ("7d", 7),
@@ -35,6 +40,9 @@ struct TrendsView: View {
                         notConnectedCard
                             .padding(.horizontal)
                     } else {
+                        contextHeader
+                            .padding(.horizontal)
+
                         rangePicker
                             .padding(.horizontal)
 
@@ -68,42 +76,80 @@ struct TrendsView: View {
 
     // MARK: - Range picker
 
-    /// Native iOS 26 Liquid Glass pill, applied directly to the HStack
-    /// so the glass material is bounded to the picker's actual frame.
-    /// The previous attempt used `Color.clear.glassEffect(...)` inside
-    /// a GlassEffectContainer, which bled the refraction outward over
-    /// the surrounding content. The thumb is just a tinted Capsule —
-    /// nested glass-on-glass tends to over-blur and reads worse than
-    /// a flat tint against the glass track.
+    /// Native Liquid Glass — same pattern Apple uses for the bottom
+    /// tab bar. Each segment is its own glass capsule via
+    /// `buttonStyle(.glass)` / `.glassProminent`. `GlassEffectContainer`
+    /// makes the inactive capsules morph as the active one shifts.
+    /// This is the system-vended treatment so it matches whatever
+    /// iOS does with the tab bar, including the active-tap
+    /// interactive feedback.
     private var rangePicker: some View {
-        HStack(spacing: 0) {
-            ForEach(ranges, id: \.days) { range in
-                rangeSegment(range)
-            }
-        }
-        .padding(4)
-        .glassEffect(.regular, in: Capsule())
-    }
-
-    private func rangeSegment(_ range: (label: String, days: Int)) -> some View {
-        Text(range.label)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(rangeDays == range.days ? Color.white : Color.secondary)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background {
-                if rangeDays == range.days {
-                    Capsule()
-                        .fill(.blue.opacity(0.85))
-                        .matchedGeometryEffect(id: "rangeThumb", in: pickerThumb)
+        GlassEffectContainer(spacing: 4) {
+            HStack(spacing: 4) {
+                ForEach(ranges, id: \.days) { range in
+                    rangeSegment(range)
                 }
             }
-            .contentShape(Capsule())
-            .onTapGesture {
+        }
+    }
+
+    /// `.buttonStyle` takes a concrete type that Swift's type system
+    /// can't switch on at the call site, so the active vs. inactive
+    /// branches need to be two distinct Buttons rather than one Button
+    /// with a conditional style. @ViewBuilder collapses them down.
+    @ViewBuilder
+    private func rangeSegment(_ range: (label: String, days: Int)) -> some View {
+        if rangeDays == range.days {
+            Button {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                     rangeDays = range.days
                 }
+            } label: { rangeLabel(range.label) }
+            .buttonStyle(.glassProminent)
+        } else {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    rangeDays = range.days
+                }
+            } label: { rangeLabel(range.label) }
+            .buttonStyle(.glass)
+        }
+    }
+
+    private func rangeLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 14, weight: .semibold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+    }
+
+    // MARK: - Context header
+
+    /// Sits above the range picker so users understand why the app is
+    /// pulling Health data at all — it isn't a wellness tracker for
+    /// its own sake, it's the contextual layer the lab-report
+    /// translation pipeline reads from when generating the empathetic
+    /// summary. Removing this leaves users wondering "what does my
+    /// step count have to do with my cholesterol panel?"
+    private var contextHeader: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.blue)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Context for every scan")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("Localabs reads these metrics from Apple Health and folds them into every lab-report translation — so your results are interpreted alongside your activity, sleep, and vitals from the past month.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     // MARK: - Cards
@@ -350,17 +396,19 @@ struct TrendsView: View {
     // MARK: - Loading + formatting
 
     /// Refresh fires on first appear AND every time the range changes.
-    /// We re-request authorization before fetching because the
-    /// Trends-tab readTypes set is larger than what Profile's
-    /// "Connect Apple Health" originally asked for — iOS only shows a
-    /// prompt for newly-added types, so existing approvals carry over.
-    /// This is what makes the screen "fill in" the first time the
-    /// user lands on it after the Trends tab was added.
+    /// We re-request authorization only once per view session — the
+    /// first range change after appear would otherwise re-trigger iOS
+    /// to briefly present a system sheet from the bottom (it has no
+    /// new types to ask about and immediately dismisses, looking like
+    /// a flashing blank pop-up).
     private func refresh() async {
         guard hasRequestedHealth else { return }
         isLoading = true
         defer { isLoading = false }
-        _ = await HealthKitService.shared.requestAuthorization()
+        if !hasRequestedThisSession {
+            _ = await HealthKitService.shared.requestAuthorization()
+            hasRequestedThisSession = true
+        }
         snapshot = await HealthKitService.shared.getTrends(rangeDays: rangeDays)
     }
 
