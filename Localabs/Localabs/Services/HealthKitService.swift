@@ -24,6 +24,12 @@ class HealthKitService {
         HKHealthStore.isHealthDataAvailable()
     }
 
+    // MARK: - Existing report-time metrics
+
+    /// Subset used by InferenceEngine when building the LLM prompt for a
+    /// lab analysis. Kept as a small flat struct because the report-time
+    /// pipeline only needs 30-day averages of the cardiac/recovery
+    /// dimension.
     struct HealthMetrics {
         var avgRestingHR: Double?
         var avgSleepHours: Double?
@@ -38,35 +44,11 @@ class HealthKitService {
         }
     }
 
-    /// Requests read-only access to the health data types we need.
-    /// Returns true if the auth flow completed (the user saw the sheet and
-    /// dismissed it) — NOT necessarily that they granted access. iOS hides
-    /// that distinction for privacy.
-    func requestAuthorization() async -> Bool {
-        guard HKHealthStore.isHealthDataAvailable() else { return false }
-
-        let typesToRead: Set<HKObjectType> = [
-            HKObjectType.quantityType(forIdentifier: .restingHeartRate)!,
-            HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
-            HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
-        ]
-
-        do {
-            try await healthStore.requestAuthorization(toShare: [], read: typesToRead)
-            UserDefaults.standard.set(true, forKey: hasRequestedKey)
-            return true
-        } catch {
-            print("[HealthKit] Authorization failed: \(error)")
-            return false
-        }
-    }
-    
-    /// Fetches the 30-day averages for resting HR, sleep, and HRV.
-    /// Returns `HealthMetrics` with whatever subset HealthKit could
-    /// produce — nil for missing/denied types. The UI handles the
-    /// all-nil empty state explicitly; we no longer fall back to
-    /// mock/demo values, because seeing fake "62 bpm / 7.2 hr / 42 ms"
-    /// confused users into thinking Health was working.
+    /// Fetches the 30-day averages for resting HR, sleep, and HRV — the
+    /// minimum set the LLM prompt has expected since v1. Returns a
+    /// HealthMetrics with whatever subset HealthKit could produce; nil
+    /// for missing/denied types. The UI handles the all-nil empty
+    /// state explicitly; we do not fall back to mock/demo values.
     func getHealthMetrics() async -> HealthMetrics {
         let calendar = Calendar.current
         let endDate = Date()
@@ -84,15 +66,223 @@ class HealthKitService {
             avgHRV: await hrv
         )
     }
-    
-    // MARK: - Private Helpers
-    
+
+    // MARK: - Trends tab metrics
+
+    /// Captures the full panel the Trends tab consumes — average,
+    /// daily series for sparklines, and unit metadata. nil entries mean
+    /// the user either doesn't have that data type populated (phone-
+    /// only users won't have HRV, for example) or denied access. The
+    /// view layer hides cards whose backing metrics are all nil.
+    struct TrendsSnapshot {
+        var rangeDays: Int
+
+        // Activity (phone alone produces all of these)
+        var steps: MetricSeries?
+        var walkingRunningDistance: MetricSeries?
+        var flightsClimbed: MetricSeries?
+        var exerciseMinutes: MetricSeries?
+        var activeEnergy: MetricSeries?
+
+        // Mobility (mostly phone; clinical-grade signals)
+        var walkingSpeed: MetricSeries?
+        var walkingStepLength: MetricSeries?
+        var walkingAsymmetry: MetricSeries?
+        var walkingDoubleSupport: MetricSeries?
+        var sixMinuteWalkDistance: MetricSeries?
+
+        // Cardio + recovery (Watch for HRV/VO2max; phone-only users see
+        // resting HR only if a paired device wrote samples)
+        var restingHR: MetricSeries?
+        var hrv: MetricSeries?
+        var vo2Max: MetricSeries?
+        var walkingHR: MetricSeries?
+
+        // Sleep — total hours per night
+        var sleepHours: MetricSeries?
+
+        // Vitals
+        var systolicBP: MetricSeries?
+        var diastolicBP: MetricSeries?
+        var oxygenSaturation: MetricSeries?
+        var respiratoryRate: MetricSeries?
+        var bodyTemperature: MetricSeries?
+
+        // Body
+        var bodyMass: MetricSeries?
+        var bodyMassIndex: MetricSeries?
+
+        // Logged / nutrition
+        var bloodGlucose: MetricSeries?
+        var caffeine: MetricSeries?
+    }
+
+    /// One metric's time series for the selected range. `average` is
+    /// what the card displays as the headline number; `daily` powers
+    /// the sparkline. `unit` is a display string (e.g. "bpm", "h",
+    /// "lb"); the actual unit conversion happens at fetch time.
+    struct MetricSeries {
+        var average: Double
+        var daily: [DailyValue]
+        var unit: String
+
+        /// Empty when HealthKit returned no samples in the window —
+        /// callers should treat this as "no data" and not render a card.
+        var hasData: Bool { !daily.isEmpty }
+    }
+
+    struct DailyValue: Identifiable {
+        var id: Date { date }
+        var date: Date
+        var value: Double
+    }
+
+    /// Fetches every metric the Trends tab knows about over the given
+    /// window. Concurrent so the wait time is bounded by the slowest
+    /// query, not the sum of them. Any individual fetch that returns
+    /// nil (denied / never logged) leaves the corresponding field nil
+    /// in the snapshot — Trends hides the matching card.
+    func getTrends(rangeDays: Int) async -> TrendsSnapshot {
+        let calendar = Calendar.current
+        let endDate = Date()
+        guard let startDate = calendar.date(byAdding: .day, value: -rangeDays, to: endDate) else {
+            return TrendsSnapshot(rangeDays: rangeDays)
+        }
+
+        // Activity
+        async let steps = fetchSumSeries(for: .stepCount, unit: .count(), unitLabel: "steps", from: startDate, to: endDate)
+        async let distance = fetchSumSeries(for: .distanceWalkingRunning, unit: HKUnit.mile(), unitLabel: "mi", from: startDate, to: endDate)
+        async let flights = fetchSumSeries(for: .flightsClimbed, unit: .count(), unitLabel: "flights", from: startDate, to: endDate)
+        async let exercise = fetchSumSeries(for: .appleExerciseTime, unit: .minute(), unitLabel: "min", from: startDate, to: endDate)
+        async let energy = fetchSumSeries(for: .activeEnergyBurned, unit: .kilocalorie(), unitLabel: "kcal", from: startDate, to: endDate)
+
+        // Mobility
+        async let walkSpeed = fetchAverageSeries(for: .walkingSpeed, unit: HKUnit(from: "mi/hr"), unitLabel: "mph", from: startDate, to: endDate)
+        async let stepLength = fetchAverageSeries(for: .walkingStepLength, unit: .inch(), unitLabel: "in", from: startDate, to: endDate)
+        async let asymmetry = fetchAverageSeries(for: .walkingAsymmetryPercentage, unit: .percent(), unitLabel: "%", from: startDate, to: endDate, multiplyBy: 100)
+        async let doubleSupport = fetchAverageSeries(for: .walkingDoubleSupportPercentage, unit: .percent(), unitLabel: "%", from: startDate, to: endDate, multiplyBy: 100)
+        async let sixMinWalk = fetchAverageSeries(for: .sixMinuteWalkTestDistance, unit: .meter(), unitLabel: "m", from: startDate, to: endDate)
+
+        // Cardio + recovery
+        async let restingHR = fetchAverageSeries(for: .restingHeartRate, unit: HKUnit(from: "count/min"), unitLabel: "bpm", from: startDate, to: endDate)
+        async let hrv = fetchAverageSeries(for: .heartRateVariabilitySDNN, unit: HKUnit.secondUnit(with: .milli), unitLabel: "ms", from: startDate, to: endDate)
+        async let vo2 = fetchAverageSeries(for: .vo2Max, unit: HKUnit(from: "ml/(kg*min)"), unitLabel: "ml/kg/min", from: startDate, to: endDate)
+        async let walkingHR = fetchAverageSeries(for: .walkingHeartRateAverage, unit: HKUnit(from: "count/min"), unitLabel: "bpm", from: startDate, to: endDate)
+
+        // Sleep
+        async let sleepSeries = fetchSleepSeries(from: startDate, to: endDate)
+
+        // Vitals
+        async let sbp = fetchAverageSeries(for: .bloodPressureSystolic, unit: .millimeterOfMercury(), unitLabel: "mmHg", from: startDate, to: endDate)
+        async let dbp = fetchAverageSeries(for: .bloodPressureDiastolic, unit: .millimeterOfMercury(), unitLabel: "mmHg", from: startDate, to: endDate)
+        async let spo2 = fetchAverageSeries(for: .oxygenSaturation, unit: .percent(), unitLabel: "%", from: startDate, to: endDate, multiplyBy: 100)
+        async let respRate = fetchAverageSeries(for: .respiratoryRate, unit: HKUnit(from: "count/min"), unitLabel: "br/min", from: startDate, to: endDate)
+        async let temp = fetchAverageSeries(for: .bodyTemperature, unit: .degreeFahrenheit(), unitLabel: "°F", from: startDate, to: endDate)
+
+        // Body
+        async let weight = fetchAverageSeries(for: .bodyMass, unit: .pound(), unitLabel: "lb", from: startDate, to: endDate)
+        async let bmi = fetchAverageSeries(for: .bodyMassIndex, unit: .count(), unitLabel: "BMI", from: startDate, to: endDate)
+
+        // Logged
+        async let glucose = fetchAverageSeries(for: .bloodGlucose, unit: HKUnit(from: "mg/dL"), unitLabel: "mg/dL", from: startDate, to: endDate)
+        async let caffeine = fetchSumSeries(for: .dietaryCaffeine, unit: HKUnit.gramUnit(with: .milli), unitLabel: "mg", from: startDate, to: endDate)
+
+        return TrendsSnapshot(
+            rangeDays: rangeDays,
+            steps: await steps,
+            walkingRunningDistance: await distance,
+            flightsClimbed: await flights,
+            exerciseMinutes: await exercise,
+            activeEnergy: await energy,
+            walkingSpeed: await walkSpeed,
+            walkingStepLength: await stepLength,
+            walkingAsymmetry: await asymmetry,
+            walkingDoubleSupport: await doubleSupport,
+            sixMinuteWalkDistance: await sixMinWalk,
+            restingHR: await restingHR,
+            hrv: await hrv,
+            vo2Max: await vo2,
+            walkingHR: await walkingHR,
+            sleepHours: await sleepSeries,
+            systolicBP: await sbp,
+            diastolicBP: await dbp,
+            oxygenSaturation: await spo2,
+            respiratoryRate: await respRate,
+            bodyTemperature: await temp,
+            bodyMass: await weight,
+            bodyMassIndex: await bmi,
+            bloodGlucose: await glucose,
+            caffeine: await caffeine
+        )
+    }
+
+    // MARK: - Authorization
+
+    /// Read access to every type the Trends tab + report pipeline can
+    /// consume. The system permission sheet shows one row per type;
+    /// users can deny anything individually and the Trends cards will
+    /// silently hide.
+    private var readTypes: Set<HKObjectType> {
+        var types: Set<HKObjectType> = []
+        let quantity: [HKQuantityTypeIdentifier] = [
+            .restingHeartRate,
+            .heartRateVariabilitySDNN,
+            .walkingHeartRateAverage,
+            .vo2Max,
+            .stepCount,
+            .distanceWalkingRunning,
+            .flightsClimbed,
+            .appleExerciseTime,
+            .activeEnergyBurned,
+            .walkingSpeed,
+            .walkingStepLength,
+            .walkingAsymmetryPercentage,
+            .walkingDoubleSupportPercentage,
+            .sixMinuteWalkTestDistance,
+            .bloodPressureSystolic,
+            .bloodPressureDiastolic,
+            .oxygenSaturation,
+            .respiratoryRate,
+            .bodyTemperature,
+            .bodyMass,
+            .bodyMassIndex,
+            .bloodGlucose,
+            .dietaryCaffeine
+        ]
+        for id in quantity {
+            if let t = HKQuantityType.quantityType(forIdentifier: id) { types.insert(t) }
+        }
+        if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
+            types.insert(sleep)
+        }
+        return types
+    }
+
+    /// Requests read-only access to the health data types we need.
+    /// Returns true if the auth flow completed (the user saw the sheet and
+    /// dismissed it) — NOT necessarily that they granted access. iOS hides
+    /// that distinction for privacy.
+    func requestAuthorization() async -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else { return false }
+
+        do {
+            try await healthStore.requestAuthorization(toShare: [], read: readTypes)
+            UserDefaults.standard.set(true, forKey: hasRequestedKey)
+            return true
+        } catch {
+            print("[HealthKit] Authorization failed: \(error)")
+            return false
+        }
+    }
+
+    // MARK: - Single-value averages (used by InferenceEngine)
+
     private func fetchAverage(for identifier: HKQuantityTypeIdentifier, unit: HKUnit, from startDate: Date, to endDate: Date) async -> Double? {
         guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else { return nil }
-        
+
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
         let options: HKStatisticsOptions = .discreteAverage
-        
+
         return await withCheckedContinuation { continuation in
             let query = HKStatisticsQuery(quantityType: quantityType, quantitySamplePredicate: predicate, options: options) { _, result, _ in
                 let value = result?.averageQuantity()?.doubleValue(for: unit)
@@ -101,23 +291,155 @@ class HealthKitService {
             healthStore.execute(query)
         }
     }
-    
+
     private func fetchAverageSleep(from startDate: Date, to endDate: Date) async -> Double? {
         guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return nil }
-        
+
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
-        
+
         return await withCheckedContinuation { continuation in
             let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, _ in
                 guard let samples = samples as? [HKCategorySample], !samples.isEmpty else {
                     continuation.resume(returning: nil)
                     return
                 }
-                
+
                 let totalSeconds = samples.reduce(0.0) { $0 + $1.endDate.timeIntervalSince($1.startDate) }
                 let totalDays = max(1, Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 1)
                 let avgHours = (totalSeconds / Double(totalDays)) / 3600.0
                 continuation.resume(returning: (avgHours * 10).rounded() / 10)
+            }
+            healthStore.execute(query)
+        }
+    }
+
+    // MARK: - Per-day time series (used by Trends)
+
+    /// Bucketed-by-day SUM aggregation. Right for cumulative counters
+    /// where the daily total is the meaningful headline (steps,
+    /// distance, exercise minutes, kcal, caffeine).
+    private func fetchSumSeries(
+        for identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        unitLabel: String,
+        from startDate: Date,
+        to endDate: Date
+    ) async -> MetricSeries? {
+        await fetchSeries(identifier: identifier, unit: unit, unitLabel: unitLabel, options: .cumulativeSum, from: startDate, to: endDate)
+    }
+
+    /// Bucketed-by-day AVERAGE aggregation. Right for measured values
+    /// where the daily mean is meaningful (HR, HRV, walking speed,
+    /// weight, BP, SpO2, etc.).
+    private func fetchAverageSeries(
+        for identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        unitLabel: String,
+        from startDate: Date,
+        to endDate: Date,
+        multiplyBy: Double = 1
+    ) async -> MetricSeries? {
+        await fetchSeries(identifier: identifier, unit: unit, unitLabel: unitLabel, options: .discreteAverage, from: startDate, to: endDate, multiplyBy: multiplyBy)
+    }
+
+    /// The actual statistics-collection plumbing. iOS gives us
+    /// `HKStatisticsCollectionQuery` which buckets samples into fixed
+    /// intervals — we ask for one bucket per calendar day.
+    private func fetchSeries(
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        unitLabel: String,
+        options: HKStatisticsOptions,
+        from startDate: Date,
+        to endDate: Date,
+        multiplyBy: Double = 1
+    ) async -> MetricSeries? {
+        guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else { return nil }
+
+        let calendar = Calendar.current
+        let anchor = calendar.startOfDay(for: startDate)
+        let interval = DateComponents(day: 1)
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsCollectionQuery(
+                quantityType: quantityType,
+                quantitySamplePredicate: predicate,
+                options: options,
+                anchorDate: anchor,
+                intervalComponents: interval
+            )
+            query.initialResultsHandler = { _, results, _ in
+                guard let results else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                var daily: [DailyValue] = []
+                results.enumerateStatistics(from: startDate, to: endDate) { stats, _ in
+                    let raw: Double?
+                    switch options {
+                    case .cumulativeSum:
+                        raw = stats.sumQuantity()?.doubleValue(for: unit)
+                    case .discreteAverage:
+                        raw = stats.averageQuantity()?.doubleValue(for: unit)
+                    default:
+                        raw = nil
+                    }
+                    if let value = raw {
+                        daily.append(DailyValue(date: stats.startDate, value: value * multiplyBy))
+                    }
+                }
+                guard !daily.isEmpty else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let avg = daily.map(\.value).reduce(0, +) / Double(daily.count)
+                continuation.resume(returning: MetricSeries(
+                    average: (avg * 10).rounded() / 10,
+                    daily: daily,
+                    unit: unitLabel
+                ))
+            }
+            healthStore.execute(query)
+        }
+    }
+
+    /// Sleep needs special handling because each sample is a (start,
+    /// end) range that can span midnight. We bucket by "sleep night"
+    /// using the end date — Apple's own convention for sleep cards.
+    private func fetchSleepSeries(from startDate: Date, to endDate: Date) async -> MetricSeries? {
+        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return nil }
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, _ in
+                guard let samples = samples as? [HKCategorySample], !samples.isEmpty else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let calendar = Calendar.current
+                var perDay: [Date: TimeInterval] = [:]
+                for sample in samples {
+                    // Apple convention: a night's sleep is attributed
+                    // to the *waking* day, not the day the user fell
+                    // asleep. End-date is what shows up in the Health
+                    // app's daily summary.
+                    let day = calendar.startOfDay(for: sample.endDate)
+                    perDay[day, default: 0] += sample.endDate.timeIntervalSince(sample.startDate)
+                }
+                let daily = perDay
+                    .map { DailyValue(date: $0.key, value: $0.value / 3600.0) }
+                    .sorted { $0.date < $1.date }
+                guard !daily.isEmpty else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let avg = daily.map(\.value).reduce(0, +) / Double(daily.count)
+                continuation.resume(returning: MetricSeries(
+                    average: (avg * 10).rounded() / 10,
+                    daily: daily,
+                    unit: "h"
+                ))
             }
             healthStore.execute(query)
         }

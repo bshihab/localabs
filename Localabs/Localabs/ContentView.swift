@@ -18,9 +18,14 @@ struct ContentView: View {
                     }
                     .tag(0)
 
-                DashboardView(selectedTab: $selectedTab)
+                // Replaces the old empty Dashboard tab — that tab had
+                // no real content under the new pause/resume design.
+                // Trends gives the slot a genuine job: phone + Watch
+                // health metrics over 7/30/90 days, the same pipeline
+                // Localabs already pulls into the lab-report prompt.
+                TrendsView()
                     .tabItem {
-                        Label("Dashboard", systemImage: "heart.text.square")
+                        Label("Trends", systemImage: "chart.line.uptrend.xyaxis")
                     }
                     .tag(1)
 
@@ -37,9 +42,9 @@ struct ContentView: View {
                     .tag(3)
             }
             .tint(.blue)
-            // When a Resume banner is tapped anywhere, the dashboard sets
-            // engine.pendingResumeReport. Jump the user to the Scan tab so
-            // ScanView's own onChange picks it up and shows live streaming.
+            // When a paused analysis exists, jump the user to the Scan
+            // tab so they see the live cards / Resume CTA rather than
+            // sitting on Trends or History wondering where it went.
             .onChange(of: engine.pendingResumeReport?.id) { _, newID in
                 if newID != nil { selectedTab = 0 }
             }
