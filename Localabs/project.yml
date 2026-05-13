@@ -38,22 +38,27 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Localabs accesses your photo library so you can select existing photos of lab reports."
         INFOPLIST_KEY_NSHealthShareUsageDescription: "Localabs reads your Apple Health data to provide personalized context alongside your lab report analysis."
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: "Localabs does not write any data to Apple Health."
-    # HealthKit entitlement is gated behind a paid Apple Developer Program
-    # membership. Free Personal Teams can't sign a provisioning profile that
-    # includes it, which blocks device builds. Once the paid membership is
-    # active, restore the `properties:` block under entitlements:
+    # HealthKit entitlement. The `properties:` block makes XcodeGen
+    # *write* the key into the entitlements file AND wire
+    # CODE_SIGN_ENTITLEMENTS so the signer actually sees it. Without
+    # `properties:`, the file may exist on disk with the key but never
+    # get applied at code-sign time — runtime then errors with
+    # "Missing com.apple.developer.healthkit entitlement" even though
+    # the file looks correct.
     #
-    #   entitlements:
-    #     path: Localabs/Localabs.entitlements
-    #     properties:
-    #       com.apple.developer.healthkit: true
+    # Requires:
+    #   - Paid Apple Developer Program membership (free Personal Team
+    #     can't sign a profile that includes HealthKit).
+    #   - The HealthKit capability enabled on the App ID in the Apple
+    #     Developer portal — or, easier, add the capability via Xcode's
+    #     Signing & Capabilities tab once and Xcode auto-updates the
+    #     profile.
     #
     # Do NOT add `com.apple.developer.healthkit.access` — that's the
     # Clinical Records / Verifiable Health Records capability, a separate
     # gate requiring per-app Apple approval. We only read HKQuantityType
-    # (resting HR, HRV, sleep), which the basic entitlement covers.
-    #
-    # In the meantime: the HealthKitService code still loads, falls back to
-    # mock data when authorization fails, and the build runs everywhere.
+    # / HKCategoryType, which the basic entitlement covers.
     entitlements:
       path: Localabs/Localabs.entitlements
+      properties:
+        com.apple.developer.healthkit: true
