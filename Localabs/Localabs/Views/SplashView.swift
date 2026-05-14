@@ -20,27 +20,18 @@ struct SplashView: View {
 
     var body: some View {
         ZStack {
-            // Background — soft gradient so the splash doesn't look
-            // like a flat sticker. Same color family as the rest of
-            // the app's accent palette (blue → pink) so the
-            // transition into ContentView's blue accents feels
-            // continuous.
-            LinearGradient(
-                colors: [
-                    Color(uiColor: .systemBackground),
-                    Color.pink.opacity(0.08),
-                    Color.blue.opacity(0.06)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            // Pure white ground — matches Option C's brand spec.
+            // System background means dark-mode users get dark
+            // (which is fine; the logo's blue chip + white heart
+            // still read clearly).
+            Color(uiColor: .systemBackground)
+                .ignoresSafeArea()
 
             VStack(spacing: 24) {
                 LocalabsLogo()
-                    .scaleEffect(heartScale * (pulse ? 1.06 : 1.0))
+                    .scaleEffect(heartScale * (pulse ? 1.04 : 1.0))
                     .opacity(heartOpacity)
-                    .shadow(color: .pink.opacity(0.35), radius: 22, y: 10)
+                    .shadow(color: Color.blue.opacity(0.18), radius: 24, y: 10)
 
                 Text("Localabs")
                     .font(.system(size: 32, weight: .bold, design: .rounded))
@@ -65,50 +56,132 @@ struct SplashView: View {
                 pulse = true
             }
             // Zoom into the heart + fade to clear. Timing: settle ~1.2s,
-            // then 0.6s of aggressive zoom + cross-fade. Total ~1.8s.
+            // then 0.7s of aggressive zoom + cross-fade. The 12x scale
+            // is high enough that the white heart (~42% of the logo)
+            // grows past the screen width before the fade-out finishes,
+            // so the visible field is mostly white at peak zoom — the
+            // intended "fly into the heart" effect rather than "shrink
+            // the chip toward you".
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                withAnimation(.easeIn(duration: 0.6)) {
-                    zoomScale = 6.0
+                withAnimation(.easeIn(duration: 0.7)) {
+                    zoomScale = 12.0
                     contentOpacity = 0
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.75) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.85) {
                 onComplete()
             }
         }
     }
 }
 
-/// Placeholder logo — a stylized heart with a bold "L" centered on
-/// top. Drawn entirely in SwiftUI so it scales cleanly through the
-/// zoom animation (no raster artifacts at 6x scale). Swap this view
-/// for an `Image("Logo")` reading from Assets.xcassets once a real
-/// asset lands.
+/// Localabs · Option C logo, drawn entirely in SwiftUI so it stays
+/// crisp through the 12× zoom animation. Layout matches the brand
+/// spec: blue-gradient rounded-square "chip", a clean white heart
+/// centered inside, 5 rectangular pins on each of the four sides
+/// extending outward, and faint horizontal/vertical trace strokes
+/// inside the chip that feed in from each pin.
 struct LocalabsLogo: View {
     var size: CGFloat = 140
 
+    // Colors picked to match the PDF: a slightly cool, saturated
+    // blue gradient running TL → BR, with a darker shade for pins
+    // and traces.
+    private let chipGradient = LinearGradient(
+        colors: [
+            Color(red: 0.32, green: 0.60, blue: 1.00),
+            Color(red: 0.07, green: 0.36, blue: 0.92)
+        ],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+    private let pinColor = Color(red: 0.10, green: 0.38, blue: 0.92)
+    private let traceColor = Color.white.opacity(0.22)
+
     var body: some View {
+        let s = size
+        let cornerRadius = s * 0.22
+        let pinW = s * 0.045
+        let pinH = s * 0.08
+        let pinSpacing = s * 0.155      // gap between pin centers
+        let pinOuter = s * 0.5 + pinH * 0.45  // distance from origin to pin's outer edge
+        let traceLen = s * 0.16
+        let traceInset = s * 0.5 - traceLen / 2
+        let traceThickness = pinW * 0.55
+        let heartSize = s * 0.42
+
         ZStack {
+            // Pins — 5 per side, drawn before the chip so the chip's
+            // rounded corner gently overlaps each pin's inner edge.
+            ForEach(-2...2, id: \.self) { i in
+                let lateral = CGFloat(i) * pinSpacing
+                // Top
+                Rectangle()
+                    .fill(pinColor)
+                    .frame(width: pinW, height: pinH)
+                    .offset(x: lateral, y: -pinOuter)
+                // Bottom
+                Rectangle()
+                    .fill(pinColor)
+                    .frame(width: pinW, height: pinH)
+                    .offset(x: lateral, y: pinOuter)
+                // Left (rotated 90°: width/height swap)
+                Rectangle()
+                    .fill(pinColor)
+                    .frame(width: pinH, height: pinW)
+                    .offset(x: -pinOuter, y: lateral)
+                // Right
+                Rectangle()
+                    .fill(pinColor)
+                    .frame(width: pinH, height: pinW)
+                    .offset(x: pinOuter, y: lateral)
+            }
+
+            // Chip body
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(chipGradient)
+                .frame(width: s, height: s)
+
+            // Trace strokes — thin lines feeding from each pin into
+            // the chip interior. Drawn ON TOP of the chip so they're
+            // visible against the blue gradient.
+            ForEach(-2...2, id: \.self) { i in
+                let lateral = CGFloat(i) * pinSpacing
+                // Top trace (vertical, just inside top edge)
+                Rectangle()
+                    .fill(traceColor)
+                    .frame(width: traceThickness, height: traceLen)
+                    .offset(x: lateral, y: -traceInset)
+                // Bottom trace
+                Rectangle()
+                    .fill(traceColor)
+                    .frame(width: traceThickness, height: traceLen)
+                    .offset(x: lateral, y: traceInset)
+                // Left trace (horizontal, just inside left edge)
+                Rectangle()
+                    .fill(traceColor)
+                    .frame(width: traceLen, height: traceThickness)
+                    .offset(x: -traceInset, y: lateral)
+                // Right trace
+                Rectangle()
+                    .fill(traceColor)
+                    .frame(width: traceLen, height: traceThickness)
+                    .offset(x: traceInset, y: lateral)
+            }
+
+            // The heart — white fill, centered. SF Symbol heart.fill
+            // sits slightly below its geometric bounding box, so a
+            // tiny upward nudge makes it look optically centered
+            // inside the chip.
             Image(systemName: "heart.fill")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Color.red, Color.pink],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: size, height: size)
-
-            // The "L" sits slightly above center because SF heart's
-            // visual center is below the geometric center (the dip
-            // at the top pulls the eye downward).
-            Text("L")
-                .font(.system(size: size * 0.45, weight: .heavy, design: .rounded))
                 .foregroundStyle(.white)
-                .offset(y: -size * 0.04)
-                .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                .frame(width: heartSize, height: heartSize)
+                .offset(y: -heartSize * 0.04)
         }
+        // Logo bounds include the pins, so the splash centers the
+        // whole composition (chip + pins) rather than just the chip.
+        .frame(width: s + pinH * 2, height: s + pinH * 2)
     }
 }
