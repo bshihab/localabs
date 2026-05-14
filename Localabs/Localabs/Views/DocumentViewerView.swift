@@ -976,12 +976,19 @@ struct FollowUpChatView: View {
         messages.append(aiMessage)
 
         Task {
+            // Pull Apple Health metrics so the chat model has the
+            // same context the analysis pipeline used. Without this
+            // the user gets "I don't have access to your personal
+            // information" answers even though the report's analysis
+            // factored their HR / HRV / sleep / activity.
+            let healthMetrics = await HealthKitService.shared.getHealthMetrics()
             let stream = engine.askFollowUp(
                 question: question,
                 history: history,
                 selectedText: selectedText,
                 reportContext: fullReportContext,
-                ocrText: ocrText
+                ocrText: ocrText,
+                healthMetrics: healthMetrics
             )
             var receivedFirstPiece = false
             for await piece in stream {

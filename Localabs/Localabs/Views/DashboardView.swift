@@ -10,13 +10,12 @@ struct DashboardView: View {
     var selectedTab: Binding<Int>?
     var initialReport: StructuredReport?
     @State private var report: StructuredReport?
+    /// Same struct InferenceEngine reads when building the analysis
+    /// prompt — surfacing it here keeps the dashboard's "what
+    /// Apple Health informed this analysis" card honest. The card
+    /// shows exactly what the AI saw, no more no less.
     @State private var healthMetrics: HealthKitService.HealthMetrics?
     @State private var isRegenerating = false
-    /// Averages over a 7-day window centered on the report's
-    /// timestamp — surfaces the user's broader health state at the
-    /// time they scanned this report. Only fetched when a specific
-    /// report is being viewed (push mode), not on the empty tab.
-    @State private var reportTimeMetrics: HealthKitService.ReportTimeMetrics?
     @State private var showShareSheet = false
     @State private var shareItems: [Any] = []
 
@@ -56,16 +55,13 @@ struct DashboardView: View {
                             .padding(.horizontal)
                     }
 
-                    // Apple Health snapshot at the time this report
-                    // was scanned — only shown for specific reports
-                    // (push mode), since the empty tab state has no
-                    // meaningful "around when" to query. Helps users
-                    // see "what was my baseline when these labs
-                    // happened" without flipping to the Trends tab.
-                    if initialReport != nil,
-                       let metrics = reportTimeMetrics,
-                       !metrics.isEmpty {
-                        reportTimeMetricsCard(metrics)
+                    // Apple Health used to inform this analysis —
+                    // shows exactly the metrics InferenceEngine read
+                    // when building the prompt. Hidden when the user
+                    // has no Health data at all, since an empty card
+                    // would just clutter the screen.
+                    if let metrics = healthMetrics, !metrics.isEmpty {
+                        healthUsedInAnalysisCard(metrics)
                             .padding(.horizontal)
                     }
 
@@ -137,9 +133,7 @@ struct DashboardView: View {
                         .padding(.horizontal)
                     }
 
-                    healthMetricsCard
-                        .padding(.horizontal)
-                        .padding(.bottom, 100)
+                    Spacer(minLength: 100)
                 }
             }
             .scrollContentBackground(.hidden)
@@ -147,9 +141,6 @@ struct DashboardView: View {
             .task {
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
                 if report == nil { report = initialReport }
-                if let pushed = initialReport {
-                    reportTimeMetrics = await HealthKitService.shared.getMetricsAround(date: pushed.timestamp)
-                }
             }
             // Share button only appears when Dashboard is showing a
             // specific report (pushed from History or post-scan). The
@@ -202,44 +193,53 @@ struct DashboardView: View {
 
     // MARK: - Report-time Apple Health snapshot
 
-    /// 7-day averages centered on the report's timestamp — shown only
-    /// when this Dashboard is rendering a specific scanned report
-    /// (push from Scan or History). Anchors the user's lab values in
-    /// their broader health state at the time, which is the whole
-    /// point of pulling HealthKit data into the translation pipeline.
-    private func reportTimeMetricsCard(_ metrics: HealthKitService.ReportTimeMetrics) -> some View {
+    /// "Apple Health used in this analysis" card. Shows the exact
+    /// metrics InferenceEngine read when building the prompt — same
+    /// struct, same averages — so the user can see at a glance what
+    /// informed the empathetic translation. Cells are skipped when
+    /// the underlying metric is nil, so phone-only users (no Watch)
+    /// just see steps + walking + exercise without "—" filler.
+    private func healthUsedInAnalysisCard(_ metrics: HealthKitService.HealthMetrics) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "heart.text.square.fill")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.pink)
-                Text("YOUR HEALTH AT TIME OF SCAN")
+                Text("APPLE HEALTH USED IN THIS ANALYSIS")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .tracking(1.4)
             }
 
-            Text("7-day averages around \(timestampLabel())")
+            Text("Localabs folded these 30-day averages from Apple Health into the report's interpretation. Metrics you haven't logged or granted access to are skipped.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            // Two-column grid of whichever metrics had data. Each
-            // cell falls back to "—" when nil rather than zeroing out.
             LazyVGrid(columns: [
                 GridItem(.flexible(), spacing: 12),
                 GridItem(.flexible(), spacing: 12)
             ], spacing: 12) {
-                if let v = metrics.restingHR {
+                if let v = metrics.avgRestingHR {
                     snapshotPill(label: "Resting HR", value: "\(Int(v))", unit: "bpm", tint: .red)
                 }
-                if let v = metrics.hrv {
+                if let v = metrics.avgHRV {
                     snapshotPill(label: "HRV", value: "\(Int(v))", unit: "ms", tint: .red)
                 }
-                if let v = metrics.sleepHours {
+                if let v = metrics.avgSleepHours {
                     snapshotPill(label: "Avg Sleep", value: String(format: "%.1f", v), unit: "h", tint: .purple)
                 }
-                if let v = metrics.steps {
+                if let v = metrics.avgSteps {
                     snapshotPill(label: "Avg Steps", value: "\(Int(v))", unit: "/day", tint: .blue)
+                }
+                if let v = metrics.avgWalkingDistanceMiles {
+                    snapshotPill(label: "Avg Walk", value: String(format: "%.2f", v), unit: "mi/day", tint: .blue)
+                }
+                if let v = metrics.avgWalkingSpeedMPH {
+                    snapshotPill(label: "Walk Speed", value: String(format: "%.2f", v), unit: "mph", tint: .indigo)
+                }
+                if let v = metrics.avgExerciseMinutes {
+                    snapshotPill(label: "Exercise", value: "\(Int(v))", unit: "min/day", tint: .green)
                 }
             }
         }
@@ -270,13 +270,6 @@ struct DashboardView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.secondary.opacity(0.08))
         )
-    }
-
-    private func timestampLabel() -> String {
-        guard let report = initialReport else { return "today" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        return formatter.string(from: report.timestamp)
     }
 
     // MARK: - Regenerate CTA
@@ -523,60 +516,6 @@ struct DashboardView: View {
         .shadow(color: Color.blue.opacity(0.28), radius: 14, y: 6)
     }
 
-    private var healthMetricsCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Apple Health")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.blue)
-
-            if let metrics = healthMetrics {
-                if metrics.isEmpty {
-                    // Honest empty state — no demo numbers. Covers
-                    // both "user hasn't connected Apple Health" and
-                    // "connected but no recent data was found in the
-                    // 30-day window we query."
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("No Apple Health data yet")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Text("Connect Apple Health in Profile to bring resting HR, HRV, and sleep into your reports.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                } else {
-                    // Each pill renders an em-dash when its metric is
-                    // missing rather than zeroing out — keeps partial
-                    // permissions readable instead of misleading.
-                    HStack {
-                        MetricPill(
-                            value: metrics.avgRestingHR.map { "\(Int($0))" } ?? "—",
-                            unit: "bpm",
-                            label: "Resting HR"
-                        )
-                        Spacer()
-                        MetricPill(
-                            value: metrics.avgSleepHours.map { String(format: "%.1f", $0) } ?? "—",
-                            unit: "h",
-                            label: "Avg Sleep"
-                        )
-                        Spacer()
-                        MetricPill(
-                            value: metrics.avgHRV.map { "\(Int($0))" } ?? "—",
-                            unit: "ms",
-                            label: "HRV"
-                        )
-                    }
-                }
-            } else {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-    }
 }
 
 // MARK: - Sub-components

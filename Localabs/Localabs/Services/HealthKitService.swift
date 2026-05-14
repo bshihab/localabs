@@ -26,14 +26,21 @@ class HealthKitService {
 
     // MARK: - Existing report-time metrics
 
-    /// Subset used by InferenceEngine when building the LLM prompt for a
-    /// lab analysis. Kept as a small flat struct because the report-time
-    /// pipeline only needs 30-day averages of the cardiac/recovery
-    /// dimension.
+    /// 30-day averages folded into the LLM prompt for both the
+    /// lab-report analysis AND the post-analysis follow-up chat.
+    /// Expanded from the original (HR / HRV / sleep) to also cover
+    /// activity + walking metrics so phone-only users get genuine
+    /// context (steps + walking speed land for almost everyone with
+    /// an iPhone). Every field is optional — nil means "no data" and
+    /// the prompt + UI handle that gracefully.
     struct HealthMetrics {
         var avgRestingHR: Double?
         var avgSleepHours: Double?
         var avgHRV: Double?
+        var avgSteps: Double?
+        var avgWalkingDistanceMiles: Double?
+        var avgWalkingSpeedMPH: Double?
+        var avgExerciseMinutes: Double?
 
         /// True when every metric is missing. Lets the UI render a
         /// genuine empty state ("no Apple Health data yet") instead of
@@ -41,6 +48,8 @@ class HealthKitService {
         /// useless Health section into the prompt.
         var isEmpty: Bool {
             avgRestingHR == nil && avgSleepHours == nil && avgHRV == nil
+                && avgSteps == nil && avgWalkingDistanceMiles == nil
+                && avgWalkingSpeedMPH == nil && avgExerciseMinutes == nil
         }
     }
 
@@ -59,12 +68,40 @@ class HealthKitService {
         async let restingHR = fetchAverage(for: .restingHeartRate, unit: HKUnit(from: "count/min"), from: startDate, to: endDate)
         async let hrv = fetchAverage(for: .heartRateVariabilitySDNN, unit: HKUnit.secondUnit(with: .milli), from: startDate, to: endDate)
         async let sleep = fetchAverageSleep(from: startDate, to: endDate)
+        async let steps = fetchDailyAverageSum(for: .stepCount, unit: .count(), from: startDate, to: endDate)
+        async let walkingDistance = fetchDailyAverageSum(for: .distanceWalkingRunning, unit: .mile(), from: startDate, to: endDate)
+        async let walkingSpeed = fetchAverage(for: .walkingSpeed, unit: HKUnit(from: "mi/hr"), from: startDate, to: endDate)
+        async let exerciseMinutes = fetchDailyAverageSum(for: .appleExerciseTime, unit: .minute(), from: startDate, to: endDate)
 
         return HealthMetrics(
             avgRestingHR: await restingHR,
             avgSleepHours: await sleep,
-            avgHRV: await hrv
+            avgHRV: await hrv,
+            avgSteps: await steps,
+            avgWalkingDistanceMiles: await walkingDistance,
+            avgWalkingSpeedMPH: await walkingSpeed,
+            avgExerciseMinutes: await exerciseMinutes
         )
+    }
+
+    /// For cumulative-sum types (steps, distance, exercise minutes),
+    /// computes the **daily** average by dividing the window's sum by
+    /// the number of days. `fetchAverage` with discrete-average would
+    /// be wrong for counters that accumulate inside a day.
+    private func fetchDailyAverageSum(for identifier: HKQuantityTypeIdentifier, unit: HKUnit, from startDate: Date, to endDate: Date) async -> Double? {
+        guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else { return nil }
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(quantityType: quantityType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
+                guard let sum = result?.sumQuantity()?.doubleValue(for: unit) else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let days = max(1, Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 30)
+                continuation.resume(returning: (sum / Double(days) * 10).rounded() / 10)
+            }
+            healthStore.execute(query)
+        }
     }
 
     // MARK: - Trends tab metrics
@@ -223,70 +260,6 @@ class HealthKitService {
             bloodGlucose: await glucose,
             caffeine: await caffeine
         )
-    }
-
-    // MARK: - Report-time snapshot
-
-    /// 7-day averages centered on `date` — used by DashboardView to
-    /// show the user's resting HR / HRV / sleep / steps *at the time*
-    /// they scanned a lab report. Anchors the report in their broader
-    /// health state. Returns nil for any metric the user hasn't
-    /// authorized or doesn't have data for around that window.
-    struct ReportTimeMetrics {
-        var restingHR: Double?
-        var hrv: Double?
-        var sleepHours: Double?
-        var steps: Double?
-
-        var isEmpty: Bool {
-            restingHR == nil && hrv == nil && sleepHours == nil && steps == nil
-        }
-    }
-
-    func getMetricsAround(date: Date) async -> ReportTimeMetrics {
-        let calendar = Calendar.current
-        // 7-day window centered on the report date. If the report is
-        // recent (less than 3 days old) the window will overlap with
-        // "now" — that's fine, we just want the user's typical state
-        // around when they got the panel back.
-        guard
-            let start = calendar.date(byAdding: .day, value: -7, to: date),
-            let end = calendar.date(byAdding: .day, value: 1, to: date)
-        else {
-            return ReportTimeMetrics()
-        }
-
-        async let restingHR = fetchAverage(for: .restingHeartRate, unit: HKUnit(from: "count/min"), from: start, to: end)
-        async let hrv = fetchAverage(for: .heartRateVariabilitySDNN, unit: HKUnit.secondUnit(with: .milli), from: start, to: end)
-        async let sleep = fetchAverageSleep(from: start, to: end)
-        async let steps = fetchStepsSum(from: start, to: end)
-
-        return ReportTimeMetrics(
-            restingHR: await restingHR,
-            hrv: await hrv,
-            sleepHours: await sleep,
-            steps: await steps
-        )
-    }
-
-    /// Discrete sum over the window — only used by ReportTimeMetrics
-    /// for the steps figure. The Trends path uses HKStatisticsCollectionQuery
-    /// for per-day buckets, but here we just want the daily average
-    /// for an at-a-glance card.
-    private func fetchStepsSum(from startDate: Date, to endDate: Date) async -> Double? {
-        guard let stepsType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return nil }
-        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
-        return await withCheckedContinuation { continuation in
-            let query = HKStatisticsQuery(quantityType: stepsType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
-                guard let sum = result?.sumQuantity()?.doubleValue(for: .count()) else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let days = max(1, Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 7)
-                continuation.resume(returning: (sum / Double(days)).rounded())
-            }
-            healthStore.execute(query)
-        }
     }
 
     // MARK: - Authorization

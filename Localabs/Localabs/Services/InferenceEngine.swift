@@ -593,7 +593,11 @@ final class InferenceEngine: ObservableObject {
         - Current Daily Medications: \(profile.medications.isEmpty ? "None reported" : profile.medications)
         - Resting HR (30-day avg): \(healthMetrics.avgRestingHR.map { "\($0) bpm" } ?? "Unknown")
         - Sleep (30-day avg): \(healthMetrics.avgSleepHours.map { "\($0) hours" } ?? "Unknown")
-        - HRV (30-day avg): \(healthMetrics.avgHRV.map { "\($0) ms" } ?? "Unknown")\(ragContext)
+        - HRV (30-day avg): \(healthMetrics.avgHRV.map { "\($0) ms" } ?? "Unknown")
+        - Daily steps (30-day avg): \(healthMetrics.avgSteps.map { String(format: "%.0f", $0) } ?? "Unknown")
+        - Daily walking/running distance (30-day avg): \(healthMetrics.avgWalkingDistanceMiles.map { String(format: "%.2f mi", $0) } ?? "Unknown")
+        - Walking speed (30-day avg): \(healthMetrics.avgWalkingSpeedMPH.map { String(format: "%.2f mph", $0) } ?? "Unknown")
+        - Daily exercise minutes (30-day avg): \(healthMetrics.avgExerciseMinutes.map { String(format: "%.0f min", $0) } ?? "Unknown")\(ragContext)
 
         Lab Report OCR Text:
         "\(extractedText)"
@@ -698,7 +702,8 @@ final class InferenceEngine: ObservableObject {
         history: [ChatTurn] = [],
         selectedText: String,
         reportContext: String,
-        ocrText: String
+        ocrText: String,
+        healthMetrics: HealthKitService.HealthMetrics
     ) -> AsyncStream<String> {
         let profile = UserProfile.load()
 
@@ -714,6 +719,15 @@ final class InferenceEngine: ObservableObject {
         User's medical context:
         - Conditions: \(profile.medicalConditions.isEmpty ? "None reported" : profile.medicalConditions)
         - Medications: \(profile.medications.isEmpty ? "None reported" : profile.medications)
+
+        User's recent Apple Health data (30-day averages — use only if relevant to the question):
+        - Resting HR: \(healthMetrics.avgRestingHR.map { "\($0) bpm" } ?? "Unknown")
+        - Sleep: \(healthMetrics.avgSleepHours.map { "\($0) hours" } ?? "Unknown")
+        - HRV: \(healthMetrics.avgHRV.map { "\($0) ms" } ?? "Unknown")
+        - Daily steps: \(healthMetrics.avgSteps.map { String(format: "%.0f", $0) } ?? "Unknown")
+        - Daily walking distance: \(healthMetrics.avgWalkingDistanceMiles.map { String(format: "%.2f mi", $0) } ?? "Unknown")
+        - Walking speed: \(healthMetrics.avgWalkingSpeedMPH.map { String(format: "%.2f mph", $0) } ?? "Unknown")
+        - Daily exercise minutes: \(healthMetrics.avgExerciseMinutes.map { String(format: "%.0f min", $0) } ?? "Unknown")
 
         Format your reply with care for readability:
         - Use **bold** for medical terms, lab values, and important numbers.
