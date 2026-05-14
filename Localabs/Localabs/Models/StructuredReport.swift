@@ -52,16 +52,25 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     /// dashboard to surface a "Resume Analysis" call-to-action.
     var isIncomplete: Bool {
         let hasOCR = !rawText.isEmpty
-        let allSectionsEmpty = patientSummary.isEmpty
-            && doctorQuestions.isEmpty
-            && dietaryAdvice.isEmpty
-            && medicalGlossary.isEmpty
-            && medicationNotes.isEmpty
+        // The Localabs prompt instructs the model to always produce
+        // all five sections in order. Any missing section overwhelmingly
+        // means generation was interrupted mid-stream — pause, app
+        // backgrounded, or n_ctx overflow. A legit report on any
+        // scanned lab panel produces at least placeholder text for
+        // every section (the AI will say "Not applicable" rather than
+        // emit nothing). So "any section empty" is the most reliable
+        // truncation signal we have without adding an explicit flag.
+        let anySectionEmpty = patientSummary.isEmpty
+            || doctorQuestions.isEmpty
+            || dietaryAdvice.isEmpty
+            || medicalGlossary.isEmpty
+            || medicationNotes.isEmpty
         let hasFailureMarker = patientSummary.contains("interrupted")
             || patientSummary.contains("didn't complete")
             || patientSummary.contains("Analysis was")
+            || patientSummary.contains("Paused before")
             || patientSummary.contains("Failed to extract")
-        return hasOCR && (allSectionsEmpty || hasFailureMarker)
+        return hasOCR && (anySectionEmpty || hasFailureMarker)
     }
 
     /// All page image URLs in document order. Empty if the report has no

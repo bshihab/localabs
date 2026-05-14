@@ -18,6 +18,11 @@ struct DashboardView: View {
     @State private var isRegenerating = false
     @State private var showShareSheet = false
     @State private var shareItems: [Any] = []
+    /// Confirmation gate for the Regenerate Translation CTA — replacing
+    /// the existing translation is destructive (the original sections
+    /// are overwritten with the new run's output), so the user gets a
+    /// chance to back out before kicking off the LLM.
+    @State private var showRegenConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -26,6 +31,18 @@ struct DashboardView: View {
             } else {
                 dashboardContent
             }
+        }
+        .confirmationDialog(
+            "Regenerate translation?",
+            isPresented: $showRegenConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Regenerate", role: .destructive) {
+                Task { await regenerate() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This permanently replaces the current translation. The original sections can't be recovered.")
         }
     }
 
@@ -349,7 +366,7 @@ struct DashboardView: View {
                 regenerateProgressCard
             } else {
                 Button {
-                    Task { await regenerate() }
+                    showRegenConfirm = true
                 } label: {
                     HStack(spacing: 14) {
                         ZStack {
