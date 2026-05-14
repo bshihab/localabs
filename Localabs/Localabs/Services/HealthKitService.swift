@@ -3,8 +3,15 @@ import HealthKit
 
 /// Reads historical health metrics from Apple Health (HealthKit).
 /// All data stays on-device — nothing is uploaded.
-@MainActor
-class HealthKitService {
+///
+/// Intentionally NOT `@MainActor`. HKHealthStore is thread-safe and
+/// HK query completion handlers fire on a private background queue
+/// — marking this @MainActor forced every result-processing loop
+/// (enumerating up to ~60 daily buckets × ~24 metrics for a Trends
+/// fetch) to hop back to main, which produced a multi-second freeze
+/// when the Trends tab first appeared. Letting these run wherever
+/// the callee schedules them keeps the UI thread free.
+class HealthKitService: @unchecked Sendable {
 
     static let shared = HealthKitService()
     private let healthStore = HKHealthStore()

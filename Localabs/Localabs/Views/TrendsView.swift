@@ -14,12 +14,6 @@ struct TrendsView: View {
     @State private var rangeDays: Int = 30
     @State private var isLoading = false
     @State private var hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
-    /// Tracks whether requestAuthorization has run yet for this
-    /// instance of TrendsView. Without this, the .task(id: rangeDays)
-    /// would re-call requestAuthorization on every range change, and
-    /// iOS would flash an empty system sheet from the bottom (no new
-    /// types to ask about, so it presents and immediately dismisses).
-    @State private var hasRequestedThisSession = false
     /// The metric the user just tapped — drives the detail sheet.
     /// Nil means no sheet open. Wrapped in an Identifiable struct so
     /// SwiftUI's .sheet(item:) can present it.
@@ -553,19 +547,18 @@ struct TrendsView: View {
     // MARK: - Loading + formatting
 
     /// Refresh fires on first appear AND every time the range changes.
-    /// We re-request authorization only once per view session — the
-    /// first range change after appear would otherwise re-trigger iOS
-    /// to briefly present a system sheet from the bottom (it has no
-    /// new types to ask about and immediately dismisses, looking like
-    /// a flashing blank pop-up).
+    /// We deliberately DON'T call requestAuthorization here. iOS would
+    /// briefly present + dismiss the system permission sheet on every
+    /// tab-switch back to Trends because SwiftUI's TabView sometimes
+    /// unmounts inactive tabs (resetting our hasRequestedThisSession
+    /// @State guard), and iOS shows the auth UI even when nothing
+    /// new is pending. The empty-state's "Re-request all permissions"
+    /// button is the manual entry point if a user needs to grant
+    /// additional types after the initial Profile connect.
     private func refresh() async {
         guard hasRequestedHealth else { return }
         isLoading = true
         defer { isLoading = false }
-        if !hasRequestedThisSession {
-            _ = await HealthKitService.shared.requestAuthorization()
-            hasRequestedThisSession = true
-        }
         snapshot = await HealthKitService.shared.getTrends(rangeDays: rangeDays)
     }
 
