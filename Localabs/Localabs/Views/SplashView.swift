@@ -11,9 +11,11 @@ struct SplashView: View {
     /// flip its state to dismiss the splash and reveal ContentView.
     var onComplete: () -> Void
 
-    @State private var heartScale: CGFloat = 0.85
-    @State private var heartOpacity: Double = 0
-    @State private var labelOpacity: Double = 0
+    // Start everything visible at full size so the user sees the
+    // logo immediately. The fade-in version of this view depended on
+    // onAppear running animations during first render, which on iOS
+    // sometimes gets dropped (the system optimizes away animations
+    // for the very first frame, so opacity 0 → 1 sticks at 0).
     @State private var zoomScale: CGFloat = 1.0
     @State private var contentOpacity: Double = 1.0
     @State private var pulse: Bool = false
@@ -21,54 +23,40 @@ struct SplashView: View {
     var body: some View {
         ZStack {
             // Pure white ground — matches Option C's brand spec.
-            // System background means dark-mode users get dark
-            // (which is fine; the logo's blue chip + white heart
-            // still read clearly).
-            Color(uiColor: .systemBackground)
+            // Hardcoded white (not systemBackground) so it stays
+            // white even in dark mode, where the brand asset reads
+            // best against light.
+            Color.white
                 .ignoresSafeArea()
 
             VStack(spacing: 24) {
                 LocalabsLogo()
-                    .scaleEffect(heartScale * (pulse ? 1.04 : 1.0))
-                    .opacity(heartOpacity)
+                    .scaleEffect(pulse ? 1.04 : 1.0)
                     .shadow(color: Color.blue.opacity(0.18), radius: 24, y: 10)
 
                 Text("Localabs")
                     .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
-                    .opacity(labelOpacity)
             }
             .scaleEffect(zoomScale)
             .opacity(contentOpacity)
         }
         .onAppear {
-            // Fade in the heart + wordmark
-            withAnimation(.easeOut(duration: 0.45)) {
-                heartScale = 1.0
-                heartOpacity = 1.0
-            }
-            withAnimation(.easeOut(duration: 0.6).delay(0.25)) {
-                labelOpacity = 1.0
-            }
             // Subtle continuous heartbeat pulse — gives the static
             // logo a sense of life during the brief settle period.
-            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true).delay(0.6)) {
+            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
                 pulse = true
             }
-            // Zoom into the heart + fade to clear. Timing: settle ~1.2s,
-            // then 0.7s of aggressive zoom + cross-fade. The 12x scale
-            // is high enough that the white heart (~42% of the logo)
-            // grows past the screen width before the fade-out finishes,
-            // so the visible field is mostly white at peak zoom — the
-            // intended "fly into the heart" effect rather than "shrink
-            // the chip toward you".
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            // Zoom into the heart + fade to clear. Total runtime
+            // ~2.3s so the user definitely registers the logo even
+            // on a fast-cold-launch device.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 withAnimation(.easeIn(duration: 0.7)) {
                     zoomScale = 12.0
                     contentOpacity = 0
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.85) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.15) {
                 onComplete()
             }
         }
