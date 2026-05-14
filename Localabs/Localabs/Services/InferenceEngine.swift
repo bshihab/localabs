@@ -116,7 +116,10 @@ final class InferenceEngine: ObservableObject {
         }
         guard let target = incomplete else { return }
         pendingResumeReport = nil
-        _ = await regenerateReport(from: target)
+        // Resume-from-pause keeps the existing progress position
+        // (set during the prior streaming) so the bar doesn't
+        // visibly walk backwards while the new run ramps up.
+        _ = await regenerateReport(from: target, freshStart: false)
     }
 
     /// Throws away the paused analysis — clears the live-cards state,
@@ -500,7 +503,12 @@ final class InferenceEngine: ObservableObject {
     /// pre-markdown-prompt reports their bullet/bold/emoji formatting).
     /// Preserves the report's id, timestamp, and image paths so history
     /// stays continuous.
-    func regenerateReport(from existing: StructuredReport) async -> StructuredReport {
+    /// `freshStart: true` (the default — user tapped Regenerate on
+    /// Dashboard) resets analysisProgress to 0 so the bar fills from
+    /// empty. `freshStart: false` (resume-from-pause via
+    /// resumeFromPaused) keeps the prior position so the bar doesn't
+    /// visibly walk backwards while the new run ramps up.
+    func regenerateReport(from existing: StructuredReport, freshStart: Bool = true) async -> StructuredReport {
         // Use rawText if it was saved (post-prompt-update reports), or fall
         // back to a concatenation of the legacy section bodies for very
         // old reports where rawText was empty.
@@ -520,9 +528,15 @@ final class InferenceEngine: ObservableObject {
 
         isInferenceCancelled = false
         isProcessing = true
-        // Don't reset the bar — if this is a resume-from-pause the user
-        // will see it drop backwards. max() keeps it at the prior
-        // position until the new run's streaming catches up.
+        // Fresh regens (from the Dashboard CTA) zero the bar so it
+        // visibly fills from 0%. Without this, a previous completed
+        // run leaves analysisProgress at 1.0 and the max() lines
+        // below pin it there for the whole regen — bar shows 100%
+        // from the start.
+        if freshStart {
+            analysisProgress = 0
+            streamingText = ""
+        }
         analysisProgress = max(analysisProgress, 0.20)
         defer { isProcessing = false }
 
