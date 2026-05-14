@@ -9,14 +9,29 @@ struct LocalabsApp: App {
     /// to fire the model-ready notification.
     @UIApplicationDelegateAdaptor(LocalabsAppDelegate.self) private var appDelegate
     @StateObject private var engine = InferenceEngine.shared
+    /// Controls the splash → ContentView handoff. The splash plays its
+    /// own zoom animation and calls back when done; we cross-fade
+    /// ContentView in here so the visual transition isn't abrupt.
+    @State private var showSplash: Bool = true
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(engine)
-                .task {
-                    await engine.loadModelIfDownloaded()
+            ZStack {
+                ContentView()
+                    .environmentObject(engine)
+                    .task {
+                        await engine.loadModelIfDownloaded()
+                    }
+
+                if showSplash {
+                    SplashView {
+                        withAnimation(.easeOut(duration: 0.35)) {
+                            showSplash = false
+                        }
+                    }
+                    .transition(.opacity)
                 }
+            }
         }
     }
 }
