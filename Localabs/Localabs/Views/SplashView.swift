@@ -23,11 +23,11 @@ struct SplashView: View {
 
     var body: some View {
         ZStack {
-            // Pure white ground — matches Option C's brand spec.
-            // Hardcoded white (not systemBackground) so it stays
-            // white even in dark mode, where the brand asset reads
-            // best against light.
-            Color.white
+            // Background respects the user's theme — light mode
+            // gets the brand-spec white, dark mode gets the system
+            // dark background. The chip + white heart read well on
+            // both.
+            Color(uiColor: .systemBackground)
                 .ignoresSafeArea()
 
             // Logo lives at the *exact* screen center via ZStack
@@ -37,14 +37,9 @@ struct SplashView: View {
             // the logo's center sat ABOVE screen center — and the
             // zoom scaled from that off-center anchor, making the
             // zoom feel slightly to the side of the heart.
-            LocalabsLogo()
-                .scaleEffect(pulseScale * zoomScale, anchor: .center)
+            LocalabsLogo(heartScale: pulseScale)
+                .scaleEffect(zoomScale, anchor: .center)
                 .shadow(color: Color.blue.opacity(0.18), radius: 24, y: 10)
-                // Flatten the entire logo into a single Metal
-                // texture so the zoom scales one bitmap instead
-                // of re-rasterizing 40+ vector subviews (chip,
-                // 20 pins, 20 trace strokes, heart) every frame.
-                .drawingGroup()
                 .opacity(contentOpacity)
 
             Text("Localabs")
@@ -64,12 +59,16 @@ struct SplashView: View {
         // Discrete pulses with shrinking cycle times. Format:
         // (startSec, peakScale, halfCycleSec). The pulse cycles up
         // to peakScale then back to 1.0 over 2 × halfCycleSec.
+        // Pulse peaks tuned for HEART-only scaling (chip + pins stay
+        // still). At the same numerical scales the visible pulse is
+        // smaller than when the whole logo scaled together, so the
+        // peaks ramp higher here for the same perceived effect.
         let beats: [(start: Double, peak: CGFloat, half: Double)] = [
-            (0.05, 1.06, 0.30),  // ~60bpm
-            (0.65, 1.07, 0.22),  // ~85bpm
-            (1.09, 1.08, 0.16),  // ~120bpm
-            (1.41, 1.10, 0.11),  // ~170bpm
-            (1.63, 1.12, 0.08)   // ~250bpm — racing
+            (0.05, 1.10, 0.30),  // ~60bpm
+            (0.65, 1.13, 0.22),  // ~85bpm
+            (1.09, 1.17, 0.16),  // ~120bpm
+            (1.41, 1.22, 0.11),  // ~170bpm
+            (1.63, 1.28, 0.08)   // ~250bpm — racing
         ]
         for beat in beats {
             DispatchQueue.main.asyncAfter(deadline: .now() + beat.start) {
@@ -123,6 +122,10 @@ struct SplashView: View {
 /// inside the chip that feed in from each pin.
 struct LocalabsLogo: View {
     var size: CGFloat = 140
+    /// Scale applied to just the heart, so the splash can pulse the
+    /// heart by itself while the chip + pins stay still. Default 1.0
+    /// (no pulse) for non-animated use.
+    var heartScale: CGFloat = 1.0
 
     // Colors picked to match the PDF: a slightly cool, saturated
     // blue gradient running TL → BR, with a darker shade for pins
@@ -159,65 +162,75 @@ struct LocalabsLogo: View {
         let heartSize = s * 0.42
 
         ZStack {
-            // Pins — 5 per side, drawn before the chip so the chip's
-            // rounded corner gently overlaps each pin's inner edge.
-            ForEach(-2...2, id: \.self) { i in
-                let lateral = CGFloat(i) * pinSpacing
-                // Top
-                Rectangle()
-                    .fill(pinColor)
-                    .frame(width: pinW, height: pinH)
-                    .offset(x: lateral, y: -pinOuter)
-                // Bottom
-                Rectangle()
-                    .fill(pinColor)
-                    .frame(width: pinW, height: pinH)
-                    .offset(x: lateral, y: pinOuter)
-                // Left (rotated 90°: width/height swap)
-                Rectangle()
-                    .fill(pinColor)
-                    .frame(width: pinH, height: pinW)
-                    .offset(x: -pinOuter, y: lateral)
-                // Right
-                Rectangle()
-                    .fill(pinColor)
-                    .frame(width: pinH, height: pinW)
-                    .offset(x: pinOuter, y: lateral)
+            // Static chip + pins + traces — wrapped in their own
+            // ZStack and flattened with drawingGroup so the chip
+            // body never re-rasterizes during the splash animations.
+            // Only the heart (the sibling below) animates.
+            ZStack {
+                // Pins — 5 per side, drawn before the chip so the
+                // chip's rounded corner gently overlaps each pin's
+                // inner edge.
+                ForEach(-2...2, id: \.self) { i in
+                    let lateral = CGFloat(i) * pinSpacing
+                    // Top
+                    Rectangle()
+                        .fill(pinColor)
+                        .frame(width: pinW, height: pinH)
+                        .offset(x: lateral, y: -pinOuter)
+                    // Bottom
+                    Rectangle()
+                        .fill(pinColor)
+                        .frame(width: pinW, height: pinH)
+                        .offset(x: lateral, y: pinOuter)
+                    // Left (rotated 90°: width/height swap)
+                    Rectangle()
+                        .fill(pinColor)
+                        .frame(width: pinH, height: pinW)
+                        .offset(x: -pinOuter, y: lateral)
+                    // Right
+                    Rectangle()
+                        .fill(pinColor)
+                        .frame(width: pinH, height: pinW)
+                        .offset(x: pinOuter, y: lateral)
+                }
+
+                // Chip body
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(chipGradient)
+                    .frame(width: s, height: s)
+
+                // Trace strokes — thin lines feeding from each pin
+                // into the chip interior. Drawn ON TOP of the chip
+                // so they're visible against the blue gradient.
+                ForEach(-2...2, id: \.self) { i in
+                    let lateral = CGFloat(i) * pinSpacing
+                    // Top trace (vertical, just inside top edge)
+                    Rectangle()
+                        .fill(traceColor)
+                        .frame(width: traceThickness, height: traceLen)
+                        .offset(x: lateral, y: -traceInset)
+                    // Bottom trace
+                    Rectangle()
+                        .fill(traceColor)
+                        .frame(width: traceThickness, height: traceLen)
+                        .offset(x: lateral, y: traceInset)
+                    // Left trace (horizontal, just inside left edge)
+                    Rectangle()
+                        .fill(traceColor)
+                        .frame(width: traceLen, height: traceThickness)
+                        .offset(x: -traceInset, y: lateral)
+                    // Right trace
+                    Rectangle()
+                        .fill(traceColor)
+                        .frame(width: traceLen, height: traceThickness)
+                        .offset(x: traceInset, y: lateral)
+                }
             }
+            .drawingGroup()
 
-            // Chip body
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(chipGradient)
-                .frame(width: s, height: s)
-
-            // Trace strokes — thin lines feeding from each pin into
-            // the chip interior. Drawn ON TOP of the chip so they're
-            // visible against the blue gradient.
-            ForEach(-2...2, id: \.self) { i in
-                let lateral = CGFloat(i) * pinSpacing
-                // Top trace (vertical, just inside top edge)
-                Rectangle()
-                    .fill(traceColor)
-                    .frame(width: traceThickness, height: traceLen)
-                    .offset(x: lateral, y: -traceInset)
-                // Bottom trace
-                Rectangle()
-                    .fill(traceColor)
-                    .frame(width: traceThickness, height: traceLen)
-                    .offset(x: lateral, y: traceInset)
-                // Left trace (horizontal, just inside left edge)
-                Rectangle()
-                    .fill(traceColor)
-                    .frame(width: traceLen, height: traceThickness)
-                    .offset(x: -traceInset, y: lateral)
-                // Right trace
-                Rectangle()
-                    .fill(traceColor)
-                    .frame(width: traceLen, height: traceThickness)
-                    .offset(x: traceInset, y: lateral)
-            }
-
-            // The heart — white fill, centered. SF Symbol heart.fill
+            // The heart — white fill, centered. Scaled by heartScale
+            // so the splash can pulse the heart by itself while the
+            // chip + pins above stay still. SF Symbol heart.fill
             // sits slightly below its geometric bounding box, so a
             // tiny upward nudge makes it look optically centered
             // inside the chip.
@@ -227,6 +240,7 @@ struct LocalabsLogo: View {
                 .foregroundStyle(.white)
                 .frame(width: heartSize, height: heartSize)
                 .offset(y: -heartSize * 0.04)
+                .scaleEffect(heartScale, anchor: .center)
         }
         // Logo bounds include the pins, so the splash centers the
         // whole composition (chip + pins) rather than just the chip.
