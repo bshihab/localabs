@@ -116,10 +116,17 @@ final class InferenceEngine: ObservableObject {
         }
         guard let target = incomplete else { return }
         pendingResumeReport = nil
-        // Resume-from-pause keeps the existing progress position
-        // (set during the prior streaming) so the bar doesn't
-        // visibly walk backwards while the new run ramps up.
-        _ = await regenerateReport(from: target, freshStart: false)
+        // streamingText still holds whatever tokens were collected
+        // before the pause — pass it through so the model continues
+        // from there rather than restarting from token 0. Empty
+        // string means we paused before any tokens streamed; let
+        // regenerate run from scratch in that case.
+        let partial = streamingText.isEmpty ? nil : streamingText
+        _ = await regenerateReport(
+            from: target,
+            freshStart: false,
+            continueFromPartial: partial
+        )
     }
 
     /// Throws away the paused analysis — clears the live-cards state,
@@ -508,7 +515,12 @@ final class InferenceEngine: ObservableObject {
     /// empty. `freshStart: false` (resume-from-pause via
     /// resumeFromPaused) keeps the prior position so the bar doesn't
     /// visibly walk backwards while the new run ramps up.
-    func regenerateReport(from existing: StructuredReport, freshStart: Bool = true) async -> StructuredReport {
+    ///
+    /// `continueFromPartial`, when non-nil, threads the partial LLM
+    /// output the user paused mid-stream into the prompt so the model
+    /// continues from there rather than re-emitting the same opening
+    /// tokens. Currently used only by the resume-from-pause path.
+    func regenerateReport(from existing: StructuredReport, freshStart: Bool = true, continueFromPartial: String? = nil) async -> StructuredReport {
         // Use rawText if it was saved (post-prompt-update reports), or fall
         // back to a concatenation of the legacy section bodies for very
         // old reports where rawText was empty.
@@ -548,7 +560,8 @@ final class InferenceEngine: ObservableObject {
         var fresh = await runInference(
             extractedText: sourceText,
             healthMetrics: healthMetrics,
-            mode: .lab
+            mode: .lab,
+            continueFromPartial: continueFromPartial
         )
         // Preserve continuity with the existing record.
         fresh.id = existing.id
@@ -589,7 +602,12 @@ final class InferenceEngine: ObservableObject {
 
     enum AnalysisMode { case lab, weekly }
 
-    private func runInference(extractedText: String, healthMetrics: HealthKitService.HealthMetrics, mode: AnalysisMode) async -> StructuredReport {
+    /// `continueFromPartial`, when non-nil, primes the prompt with
+    /// the partial model output the user paused mid-stream. The
+    /// model picks up generating tokens *after* the partial instead
+    /// of restarting from scratch — that's what makes Resume feel
+    /// like continuation rather than a fresh re-run.
+    private func runInference(extractedText: String, healthMetrics: HealthKitService.HealthMetrics, mode: AnalysisMode, continueFromPartial: String? = nil) async -> StructuredReport {
         let profile = UserProfile.load()
         let ragContext = LocalStorageService.shared.buildRAGContext(maxReports: 3)
 
@@ -645,15 +663,31 @@ final class InferenceEngine: ObservableObject {
             )
         }
 
-        streamingText = ""
-        var collected = ""
+        // Resume-from-pause path: append the partial response the
+        // model produced before being interrupted so it continues
+        // generating where it left off instead of starting over. The
+        // model treats the prompt as everything-so-far and emits the
+        // *next* token from there. The streamed UI keeps the partial
+        // text visible during the continuation, so the user sees one
+        // smooth stream rather than the cards resetting.
+        let promptWithPartial: String
+        var collected: String
+        if let partial = continueFromPartial, !partial.isEmpty {
+            promptWithPartial = prompt + partial
+            collected = partial
+            streamingText = partial
+        } else {
+            promptWithPartial = prompt
+            collected = ""
+            streamingText = ""
+        }
         let maxTokens = 1000
         var tokenCount = 0
         // Surface prompt size in the Xcode console — useful for diagnosing
         // tokenize-overflow / slow-decode complaints. Approximate token
         // count assumes ~4 chars/token for English text + medical jargon.
-        print("[InferenceEngine] Prompt: \(prompt.count) chars (~\(prompt.count / 4) tokens) before Localabs run.")
-        let stream = context.predict(prompt: prompt, maxTokens: maxTokens)
+        print("[InferenceEngine] Prompt: \(promptWithPartial.count) chars (~\(promptWithPartial.count / 4) tokens) before Localabs run.")
+        let stream = context.predict(prompt: promptWithPartial, maxTokens: maxTokens)
         for await piece in stream {
             // Bail if the user paused (or the app got backgrounded /
             // parent Task cancelled). Keep `streamingText` populated so

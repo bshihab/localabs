@@ -160,6 +160,22 @@ public final class LlamaContext: @unchecked Sendable {
         llama_memory_clear(llama_get_memory(context), true)
         llama_sampler_reset(sampler)
 
+        // Re-seed the dist sampler with a fresh value each run. The chain
+        // was originally built with `llama_sampler_init_dist(LLAMA_DEFAULT_SEED)`
+        // — a constant. Combined with temperature 0.4 (low but non-zero),
+        // that produced byte-identical output on every regeneration of the
+        // same prompt, so users reasonably said "is regenerate actually
+        // doing anything?". Removing the tail-most sampler (the dist one)
+        // and re-adding it with a random seed gives genuine variation
+        // across runs while keeping the rest of the chain (penalties /
+        // top-k / top-p / temp) intact.
+        let chainLen = llama_sampler_chain_n(sampler)
+        if chainLen > 0 {
+            _ = llama_sampler_chain_remove(sampler, chainLen - 1)
+        }
+        let seed = UInt32.random(in: 0...UInt32.max)
+        llama_sampler_chain_add(sampler, llama_sampler_init_dist(seed))
+
         let promptCStr = Array(prompt.utf8CString)
         let nCtx = Int32(llama_n_ctx(context))
         var promptTokens = [llama_token](repeating: 0, count: Int(nCtx))
