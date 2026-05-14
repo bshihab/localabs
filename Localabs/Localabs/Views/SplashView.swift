@@ -18,7 +18,7 @@ struct SplashView: View {
     // for the very first frame, so opacity 0 → 1 sticks at 0).
     @State private var zoomScale: CGFloat = 1.0
     @State private var contentOpacity: Double = 1.0
-    @State private var pulse: Bool = false
+    @State private var pulseScale: CGFloat = 1.0
     @State private var wordmarkOpacity: Double = 1.0
 
     var body: some View {
@@ -30,60 +30,87 @@ struct SplashView: View {
             Color.white
                 .ignoresSafeArea()
 
-            VStack(spacing: 24) {
-                LocalabsLogo()
-                    .scaleEffect(pulse ? 1.04 : 1.0)
-                    .shadow(color: Color.blue.opacity(0.18), radius: 24, y: 10)
-                    // Flatten the entire logo into a single Metal
-                    // texture so the zoom scales one bitmap instead
-                    // of re-rasterizing 40+ vector subviews (chip,
-                    // 20 pins, 20 trace strokes, heart) every frame.
-                    // The difference between "vector scale at 60fps"
-                    // and "texture scale at 120fps ProMotion" is the
-                    // difference between choppy and butter-smooth.
-                    .drawingGroup()
+            // Logo lives at the *exact* screen center via ZStack
+            // layout — the wordmark below is positioned with
+            // .offset, NOT as a VStack sibling. Old layout used a
+            // VStack which centered the (logo + wordmark) pair, so
+            // the logo's center sat ABOVE screen center — and the
+            // zoom scaled from that off-center anchor, making the
+            // zoom feel slightly to the side of the heart.
+            LocalabsLogo()
+                .scaleEffect(pulseScale * zoomScale, anchor: .center)
+                .shadow(color: Color.blue.opacity(0.18), radius: 24, y: 10)
+                // Flatten the entire logo into a single Metal
+                // texture so the zoom scales one bitmap instead
+                // of re-rasterizing 40+ vector subviews (chip,
+                // 20 pins, 20 trace strokes, heart) every frame.
+                .drawingGroup()
+                .opacity(contentOpacity)
 
-                Text("Localabs")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-                    .opacity(wordmarkOpacity)
-            }
-            .scaleEffect(zoomScale, anchor: .center)
-            .opacity(contentOpacity)
+            Text("Localabs")
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .opacity(wordmarkOpacity)
+                .offset(y: 140)
         }
-        .onAppear {
-            // Heartbeat pulse from the moment the splash appears
-            // through the start of the zoom.
-            withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-            // 1.0s settle — user registers the logo and a couple
-            // pulse cycles.
-            // Then the zoom: aggressive easeIn for the "flying in"
-            // feel. Wordmark fades out as the zoom begins so it
-            // doesn't dominate the frame as it scales massively.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    wordmarkOpacity = 0
+        .onAppear { runSequence() }
+    }
+
+    /// Accelerating heartbeat → zoom sequence. Each pulse is shorter
+    /// than the last, so the user perceives the heart speeding up
+    /// just before the camera flies into it. The final beats overlap
+    /// the start of the zoom for a single-motion feel.
+    private func runSequence() {
+        // Discrete pulses with shrinking cycle times. Format:
+        // (startSec, peakScale, halfCycleSec). The pulse cycles up
+        // to peakScale then back to 1.0 over 2 × halfCycleSec.
+        let beats: [(start: Double, peak: CGFloat, half: Double)] = [
+            (0.05, 1.06, 0.30),  // ~60bpm
+            (0.65, 1.07, 0.22),  // ~85bpm
+            (1.09, 1.08, 0.16),  // ~120bpm
+            (1.41, 1.10, 0.11),  // ~170bpm
+            (1.63, 1.12, 0.08)   // ~250bpm — racing
+        ]
+        for beat in beats {
+            DispatchQueue.main.asyncAfter(deadline: .now() + beat.start) {
+                withAnimation(.easeOut(duration: beat.half)) {
+                    pulseScale = beat.peak
                 }
-                withAnimation(.easeIn(duration: 0.65)) {
-                    zoomScale = 22.0
+                DispatchQueue.main.asyncAfter(deadline: .now() + beat.half) {
+                    withAnimation(.easeIn(duration: beat.half)) {
+                        pulseScale = 1.0
+                    }
                 }
             }
-            // The fade-out kicks in only AFTER the zoom has done
-            // most of its work — at that point the white heart
-            // fills the entire screen, so fading the splash reveals
-            // ContentView underneath cleanly. Doing zoom + fade in
-            // parallel was what made the previous version read as
-            // a cross-fade instead of a zoom.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    contentOpacity = 0
-                }
+        }
+
+        // Wordmark out at the moment the racing pulse hits, so the
+        // wordmark doesn't visually scale alongside the logo.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.55) {
+            withAnimation(.easeOut(duration: 0.2)) {
+                wordmarkOpacity = 0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.75) {
-                onComplete()
+        }
+
+        // Zoom flies in right as the last pulse peaks — the rising
+        // pulse seamlessly hands off to the scale-up so it reads as
+        // one continuous motion (faster + faster + WHOOSH).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.79) {
+            withAnimation(.easeIn(duration: 0.6)) {
+                zoomScale = 22.0
             }
+        }
+
+        // Opacity fade kicks in only after the zoom has nearly
+        // completed — at that point the white heart fills the
+        // screen, so fading reveals ContentView underneath cleanly.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.24) {
+            withAnimation(.easeOut(duration: 0.18)) {
+                contentOpacity = 0
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.42) {
+            onComplete()
         }
     }
 }
@@ -117,7 +144,15 @@ struct LocalabsLogo: View {
         let pinW = s * 0.045
         let pinH = s * 0.08
         let pinSpacing = s * 0.155      // gap between pin centers
-        let pinOuter = s * 0.5 + pinH * 0.45  // distance from origin to pin's outer edge
+        // pinOuter = distance from logo origin to pin's CENTER along
+        // the perpendicular axis. The previous 0.45 multiplier left
+        // the pin's inner edge just barely overlapping the chip's
+        // straight edge, but at the rounded corners the chip's curve
+        // pulled away from y=±s/2 and a thin white sliver opened
+        // between pin and chip. 0.30 deepens the pin's overlap into
+        // the chip body so the chip covers the inner edge even at
+        // the corners.
+        let pinOuter = s * 0.5 + pinH * 0.30
         let traceLen = s * 0.16
         let traceInset = s * 0.5 - traceLen / 2
         let traceThickness = pinW * 0.55
