@@ -69,10 +69,13 @@ enum HealthInsights {
     /// Bundles the status logic with a human-readable explanation
     /// the detail sheet renders. Two strings: a one-liner for the
     /// "typical range" badge, and a paragraph of context.
-    struct ClinicalContext {
+    /// `Sendable` (with `@Sendable` on `interpret`) so the static
+    /// constants below pass Swift 6 strict-concurrency — these are
+    /// pure-function lookups, no shared mutable state.
+    struct ClinicalContext: Sendable {
         let typicalRangeLabel: String
         let explanation: String
-        let interpret: (Double) -> Status
+        let interpret: @Sendable (Double) -> Status
     }
 
     // MARK: - Cardio + recovery
