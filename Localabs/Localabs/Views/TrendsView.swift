@@ -20,6 +20,17 @@ struct TrendsView: View {
     /// iOS would flash an empty system sheet from the bottom (no new
     /// types to ask about, so it presents and immediately dismisses).
     @State private var hasRequestedThisSession = false
+    /// The metric the user just tapped — drives the detail sheet.
+    /// Nil means no sheet open. Wrapped in an Identifiable struct so
+    /// SwiftUI's .sheet(item:) can present it.
+    @State private var presentedMetric: PresentedMetric?
+
+    struct PresentedMetric: Identifiable {
+        var id: String { label }
+        let label: String
+        let series: HealthKitService.MetricSeries
+        let tint: Color
+    }
 
     private let ranges: [(label: String, days: Int)] = [
         ("7d", 7),
@@ -70,6 +81,14 @@ struct TrendsView: View {
                 // sticks to the value it had at first init.
                 hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
                 await refresh()
+            }
+            .sheet(item: $presentedMetric) { metric in
+                MetricDetailView(
+                    label: metric.label,
+                    series: metric.series,
+                    tint: metric.tint,
+                    rangeDays: rangeDays
+                )
             }
         }
     }
@@ -196,6 +215,11 @@ struct TrendsView: View {
         ]
 
         VStack(alignment: .leading, spacing: 18) {
+            // Auto-generated insights — pulled from any section's
+            // metrics that have data. Shown above the grid so notable
+            // changes catch the eye before the user starts scrolling.
+            insightsSection(allEntries: activity + mobility + cardio + sleep + vitals + body + logged)
+
             section(title: "ACTIVITY", icon: "figure.walk", tint: .blue, metrics: activity)
             section(title: "MOBILITY", icon: "figure.walk.motion", tint: .indigo, metrics: mobility)
             section(title: "CARDIO & RECOVERY", icon: "heart.fill", tint: .red, metrics: cardio)
@@ -205,6 +229,83 @@ struct TrendsView: View {
             section(title: "LOGGED", icon: "pencil.line", tint: .green, metrics: logged)
         }
         .padding(.horizontal)
+    }
+
+    /// Top-of-grid block of computed insights. Each card is a tappable
+    /// shortcut that opens the matching metric's detail sheet.
+    @ViewBuilder
+    private func insightsSection(allEntries: [(String, HealthKitService.MetricSeries?)]) -> some View {
+        let withData = allEntries.compactMap { entry -> (label: String, series: HealthKitService.MetricSeries, context: HealthInsights.ClinicalContext?)? in
+            guard let s = entry.1, s.hasData else { return nil }
+            return (entry.0, s, HealthInsights.clinicalContext(for: entry.0))
+        }
+        let insights = HealthInsights.computeInsights(from: withData, maxInsights: 3)
+        if !insights.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.yellow)
+                    Text("WHAT'S NOTABLE")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .tracking(1.5)
+                }
+                .padding(.horizontal, 4)
+
+                VStack(spacing: 8) {
+                    ForEach(insights) { insight in
+                        insightRow(insight, entries: withData)
+                    }
+                }
+            }
+        }
+    }
+
+    private func insightRow(
+        _ insight: HealthInsights.Insight,
+        entries: [(label: String, series: HealthKitService.MetricSeries, context: HealthInsights.ClinicalContext?)]
+    ) -> some View {
+        Button {
+            // Find the matching metric's series + tint and open the
+            // detail sheet so "Tell me more" feels connected to the
+            // grid below rather than ending in a dead-end card.
+            guard
+                let label = insight.metricLabel,
+                let entry = entries.first(where: { $0.label == label })
+            else { return }
+            presentedMetric = PresentedMetric(
+                label: entry.label,
+                series: entry.series,
+                tint: insight.tint
+            )
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: insight.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(insight.tint)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(insight.headline)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                    Text(insight.detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular.tint(insight.tint.opacity(0.18)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     /// One section ("ACTIVITY", "MOBILITY", ...). Hides itself when
@@ -245,46 +346,102 @@ struct TrendsView: View {
     }
 
     private func metricCard(label: String, series: HealthKitService.MetricSeries, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(label)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+        let context = HealthInsights.clinicalContext(for: label)
+        let status = context?.interpret(series.average) ?? .unknown
+        let delta = deltaString(for: series)
 
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text(format(series.average))
-                    .font(.system(size: 22, weight: .bold).monospacedDigit())
-                    .foregroundStyle(.primary)
-                Text(series.unit)
-                    .font(.system(size: 11, weight: .semibold))
+        return Button {
+            presentedMetric = PresentedMetric(label: label, series: series, tint: tint)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
-            }
+                    .lineLimit(1)
 
-            Chart(series.daily) { day in
-                AreaMark(
-                    x: .value("Date", day.date),
-                    y: .value(label, day.value)
-                )
-                .foregroundStyle(LinearGradient(
-                    colors: [tint.opacity(0.55), tint.opacity(0.05)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ))
-                LineMark(
-                    x: .value("Date", day.date),
-                    y: .value(label, day.value)
-                )
-                .foregroundStyle(tint)
-                .lineStyle(StrokeStyle(lineWidth: 1.5))
+                HStack(alignment: .lastTextBaseline, spacing: 4) {
+                    Text(format(series.average))
+                        .font(.system(size: 22, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.primary)
+                    Text(series.unit)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                // Delta vs prior period — only shown when the prior
+                // window had data. Color-coded by direction so the
+                // eye picks up "going up" vs "going down" at a glance.
+                if let delta {
+                    HStack(spacing: 4) {
+                        Image(systemName: delta.direction > 0 ? "arrow.up" : "arrow.down")
+                            .font(.system(size: 9, weight: .bold))
+                        Text(delta.text)
+                            .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    }
+                    .foregroundStyle(delta.tint)
+                }
+
+                Chart(series.daily) { day in
+                    AreaMark(
+                        x: .value("Date", day.date),
+                        y: .value(label, day.value)
+                    )
+                    .foregroundStyle(LinearGradient(
+                        colors: [tint.opacity(0.55), tint.opacity(0.05)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
+                    LineMark(
+                        x: .value("Date", day.date),
+                        y: .value(label, day.value)
+                    )
+                    .foregroundStyle(tint)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .chartLegend(.hidden)
+                .frame(height: 38)
+
+                // Status bar at the bottom of each card — green
+                // (typical), orange (borderline), red (outside typical),
+                // or hidden if we have no clinical reference for this
+                // metric. Honest: these are population norms, not a
+                // personalized diagnosis (spelled out in the detail
+                // sheet).
+                if status != .unknown {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(status.color)
+                            .frame(width: 6, height: 6)
+                        Text(status.label)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(status.color)
+                    }
+                }
             }
-            .chartXAxis(.hidden)
-            .chartYAxis(.hidden)
-            .chartLegend(.hidden)
-            .frame(height: 38)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .buttonStyle(.plain)
+    }
+
+    /// Builds the "↑ 4% vs prior" copy. Returns nil if the prior
+    /// window had no data (so we omit the line entirely instead of
+    /// showing "—" or "0%"). Direction-aware so we can color the
+    /// arrow even if the user doesn't read the text.
+    private func deltaString(for series: HealthKitService.MetricSeries) -> (text: String, direction: Int, tint: Color)? {
+        guard let prior = series.previousAverage, prior > 0 else { return nil }
+        let change = (series.average - prior) / prior
+        let pct = Int((change * 100).rounded())
+        if pct == 0 { return nil }
+        // Direction tint: ambivalent metrics like weight don't have a
+        // universal "up = bad" rule, so we use neutral blue for "up"
+        // and orange for "down" — viewers can interpret per their own
+        // goals. We don't try to be clever here.
+        let tint: Color = change > 0 ? .blue : .orange
+        return ("\(abs(pct))% vs prior period", change > 0 ? 1 : -1, tint)
     }
 
     // MARK: - Empty / disconnected states
@@ -439,3 +596,183 @@ struct TrendsView: View {
     }
 }
 
+// MARK: - Metric detail sheet
+
+/// Sheet shown when the user taps any metric card on the Trends tab.
+/// Surfaces a full-size chart, the status interpretation, a clinical
+/// context paragraph, and a delta-vs-prior line. The "Ask Localabs"
+/// CTA at the bottom is wired up in a follow-up commit.
+struct MetricDetailView: View {
+    let label: String
+    let series: HealthKitService.MetricSeries
+    let tint: Color
+    let rangeDays: Int
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    headlineCard
+                    chartCard
+                    if let context = HealthInsights.clinicalContext(for: label) {
+                        contextCard(context)
+                    }
+                    caveatCard
+                }
+                .padding()
+                .padding(.bottom, 60)
+            }
+            .scrollContentBackground(.hidden)
+            .background(.background)
+            .navigationTitle(label)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var headlineCard: some View {
+        let context = HealthInsights.clinicalContext(for: label)
+        let status = context?.interpret(series.average) ?? .unknown
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                Text(format(series.average))
+                    .font(.system(size: 44, weight: .bold).monospacedDigit())
+                    .foregroundStyle(.primary)
+                Text(series.unit)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Text("Average over the last \(rangeDays) days")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                if status != .unknown {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(status.color)
+                            .frame(width: 8, height: 8)
+                        Text(status.label)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(status.color)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule().fill(status.color.opacity(0.12))
+                    )
+                }
+
+                if let prior = series.previousAverage, prior > 0 {
+                    let change = (series.average - prior) / prior
+                    let pct = Int((change * 100).rounded())
+                    if pct != 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: change > 0 ? "arrow.up" : "arrow.down")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("\(abs(pct))% vs prior")
+                                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                        }
+                        .foregroundStyle(change > 0 ? Color.blue : Color.orange)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private var chartCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Last \(rangeDays) days")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Chart(series.daily) { day in
+                AreaMark(
+                    x: .value("Date", day.date),
+                    y: .value(label, day.value)
+                )
+                .foregroundStyle(LinearGradient(
+                    colors: [tint.opacity(0.45), tint.opacity(0.05)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
+                LineMark(
+                    x: .value("Date", day.date),
+                    y: .value(label, day.value)
+                )
+                .foregroundStyle(tint)
+                .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { _ in
+                    AxisGridLine()
+                    AxisValueLabel()
+                }
+            }
+            .frame(height: 220)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private func contextCard(_ context: HealthInsights.ClinicalContext) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("TYPICAL RANGE")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.2)
+                Spacer()
+                Text(context.typicalRangeLabel)
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.primary)
+            }
+            Divider()
+            Text(context.explanation)
+                .font(.system(size: 14))
+                .foregroundStyle(.primary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    /// Honest caveat that's invisible elsewhere — this is a wellness
+    /// view of Apple Health data, not a clinical diagnostic.
+    private var caveatCard: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+            Text("These ranges are population norms from published research, not personalized medical advice. Discuss persistent changes with your doctor.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 6)
+    }
+
+    private func format(_ value: Double) -> String {
+        if value >= 100 { return String(format: "%.0f", value) }
+        if value >= 10  { return String(format: "%.1f", value) }
+        return String(format: "%.2f", value)
+    }
+}

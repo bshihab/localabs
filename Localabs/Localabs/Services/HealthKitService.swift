@@ -123,10 +123,14 @@ class HealthKitService {
     /// what the card displays as the headline number; `daily` powers
     /// the sparkline. `unit` is a display string (e.g. "bpm", "h",
     /// "lb"); the actual unit conversion happens at fetch time.
+    /// `previousAverage` is the same metric's average over the prior
+    /// same-sized window — used for the "↑ X% vs prior" delta line
+    /// on the card.
     struct MetricSeries {
         var average: Double
         var daily: [DailyValue]
         var unit: String
+        var previousAverage: Double?
 
         /// Empty when HealthKit returned no samples in the window —
         /// callers should treat this as "no data" and not render a card.
@@ -147,47 +151,50 @@ class HealthKitService {
     func getTrends(rangeDays: Int) async -> TrendsSnapshot {
         let calendar = Calendar.current
         let endDate = Date()
-        guard let startDate = calendar.date(byAdding: .day, value: -rangeDays, to: endDate) else {
+        guard
+            let startDate = calendar.date(byAdding: .day, value: -rangeDays, to: endDate),
+            let priorStart = calendar.date(byAdding: .day, value: -rangeDays * 2, to: endDate)
+        else {
             return TrendsSnapshot(rangeDays: rangeDays)
         }
 
         // Activity
-        async let steps = fetchSumSeries(for: .stepCount, unit: .count(), unitLabel: "steps", from: startDate, to: endDate)
-        async let distance = fetchSumSeries(for: .distanceWalkingRunning, unit: HKUnit.mile(), unitLabel: "mi", from: startDate, to: endDate)
-        async let flights = fetchSumSeries(for: .flightsClimbed, unit: .count(), unitLabel: "flights", from: startDate, to: endDate)
-        async let exercise = fetchSumSeries(for: .appleExerciseTime, unit: .minute(), unitLabel: "min", from: startDate, to: endDate)
-        async let energy = fetchSumSeries(for: .activeEnergyBurned, unit: .kilocalorie(), unitLabel: "kcal", from: startDate, to: endDate)
+        async let steps = fetchSumSeries(for: .stepCount, unit: .count(), unitLabel: "steps", from: startDate, to: endDate, priorStart: priorStart)
+        async let distance = fetchSumSeries(for: .distanceWalkingRunning, unit: HKUnit.mile(), unitLabel: "mi", from: startDate, to: endDate, priorStart: priorStart)
+        async let flights = fetchSumSeries(for: .flightsClimbed, unit: .count(), unitLabel: "flights", from: startDate, to: endDate, priorStart: priorStart)
+        async let exercise = fetchSumSeries(for: .appleExerciseTime, unit: .minute(), unitLabel: "min", from: startDate, to: endDate, priorStart: priorStart)
+        async let energy = fetchSumSeries(for: .activeEnergyBurned, unit: .kilocalorie(), unitLabel: "kcal", from: startDate, to: endDate, priorStart: priorStart)
 
         // Mobility
-        async let walkSpeed = fetchAverageSeries(for: .walkingSpeed, unit: HKUnit(from: "mi/hr"), unitLabel: "mph", from: startDate, to: endDate)
-        async let stepLength = fetchAverageSeries(for: .walkingStepLength, unit: .inch(), unitLabel: "in", from: startDate, to: endDate)
-        async let asymmetry = fetchAverageSeries(for: .walkingAsymmetryPercentage, unit: .percent(), unitLabel: "%", from: startDate, to: endDate, multiplyBy: 100)
-        async let doubleSupport = fetchAverageSeries(for: .walkingDoubleSupportPercentage, unit: .percent(), unitLabel: "%", from: startDate, to: endDate, multiplyBy: 100)
-        async let sixMinWalk = fetchAverageSeries(for: .sixMinuteWalkTestDistance, unit: .meter(), unitLabel: "m", from: startDate, to: endDate)
+        async let walkSpeed = fetchAverageSeries(for: .walkingSpeed, unit: HKUnit(from: "mi/hr"), unitLabel: "mph", from: startDate, to: endDate, priorStart: priorStart)
+        async let stepLength = fetchAverageSeries(for: .walkingStepLength, unit: .inch(), unitLabel: "in", from: startDate, to: endDate, priorStart: priorStart)
+        async let asymmetry = fetchAverageSeries(for: .walkingAsymmetryPercentage, unit: .percent(), unitLabel: "%", from: startDate, to: endDate, priorStart: priorStart, multiplyBy: 100)
+        async let doubleSupport = fetchAverageSeries(for: .walkingDoubleSupportPercentage, unit: .percent(), unitLabel: "%", from: startDate, to: endDate, priorStart: priorStart, multiplyBy: 100)
+        async let sixMinWalk = fetchAverageSeries(for: .sixMinuteWalkTestDistance, unit: .meter(), unitLabel: "m", from: startDate, to: endDate, priorStart: priorStart)
 
         // Cardio + recovery
-        async let restingHR = fetchAverageSeries(for: .restingHeartRate, unit: HKUnit(from: "count/min"), unitLabel: "bpm", from: startDate, to: endDate)
-        async let hrv = fetchAverageSeries(for: .heartRateVariabilitySDNN, unit: HKUnit.secondUnit(with: .milli), unitLabel: "ms", from: startDate, to: endDate)
-        async let vo2 = fetchAverageSeries(for: .vo2Max, unit: HKUnit(from: "ml/(kg*min)"), unitLabel: "ml/kg/min", from: startDate, to: endDate)
-        async let walkingHR = fetchAverageSeries(for: .walkingHeartRateAverage, unit: HKUnit(from: "count/min"), unitLabel: "bpm", from: startDate, to: endDate)
+        async let restingHR = fetchAverageSeries(for: .restingHeartRate, unit: HKUnit(from: "count/min"), unitLabel: "bpm", from: startDate, to: endDate, priorStart: priorStart)
+        async let hrv = fetchAverageSeries(for: .heartRateVariabilitySDNN, unit: HKUnit.secondUnit(with: .milli), unitLabel: "ms", from: startDate, to: endDate, priorStart: priorStart)
+        async let vo2 = fetchAverageSeries(for: .vo2Max, unit: HKUnit(from: "ml/(kg*min)"), unitLabel: "ml/kg/min", from: startDate, to: endDate, priorStart: priorStart)
+        async let walkingHR = fetchAverageSeries(for: .walkingHeartRateAverage, unit: HKUnit(from: "count/min"), unitLabel: "bpm", from: startDate, to: endDate, priorStart: priorStart)
 
         // Sleep
-        async let sleepSeries = fetchSleepSeries(from: startDate, to: endDate)
+        async let sleepSeries = fetchSleepSeries(from: startDate, to: endDate, priorStart: priorStart)
 
         // Vitals
-        async let sbp = fetchAverageSeries(for: .bloodPressureSystolic, unit: .millimeterOfMercury(), unitLabel: "mmHg", from: startDate, to: endDate)
-        async let dbp = fetchAverageSeries(for: .bloodPressureDiastolic, unit: .millimeterOfMercury(), unitLabel: "mmHg", from: startDate, to: endDate)
-        async let spo2 = fetchAverageSeries(for: .oxygenSaturation, unit: .percent(), unitLabel: "%", from: startDate, to: endDate, multiplyBy: 100)
-        async let respRate = fetchAverageSeries(for: .respiratoryRate, unit: HKUnit(from: "count/min"), unitLabel: "br/min", from: startDate, to: endDate)
-        async let temp = fetchAverageSeries(for: .bodyTemperature, unit: .degreeFahrenheit(), unitLabel: "°F", from: startDate, to: endDate)
+        async let sbp = fetchAverageSeries(for: .bloodPressureSystolic, unit: .millimeterOfMercury(), unitLabel: "mmHg", from: startDate, to: endDate, priorStart: priorStart)
+        async let dbp = fetchAverageSeries(for: .bloodPressureDiastolic, unit: .millimeterOfMercury(), unitLabel: "mmHg", from: startDate, to: endDate, priorStart: priorStart)
+        async let spo2 = fetchAverageSeries(for: .oxygenSaturation, unit: .percent(), unitLabel: "%", from: startDate, to: endDate, priorStart: priorStart, multiplyBy: 100)
+        async let respRate = fetchAverageSeries(for: .respiratoryRate, unit: HKUnit(from: "count/min"), unitLabel: "br/min", from: startDate, to: endDate, priorStart: priorStart)
+        async let temp = fetchAverageSeries(for: .bodyTemperature, unit: .degreeFahrenheit(), unitLabel: "°F", from: startDate, to: endDate, priorStart: priorStart)
 
         // Body
-        async let weight = fetchAverageSeries(for: .bodyMass, unit: .pound(), unitLabel: "lb", from: startDate, to: endDate)
-        async let bmi = fetchAverageSeries(for: .bodyMassIndex, unit: .count(), unitLabel: "BMI", from: startDate, to: endDate)
+        async let weight = fetchAverageSeries(for: .bodyMass, unit: .pound(), unitLabel: "lb", from: startDate, to: endDate, priorStart: priorStart)
+        async let bmi = fetchAverageSeries(for: .bodyMassIndex, unit: .count(), unitLabel: "BMI", from: startDate, to: endDate, priorStart: priorStart)
 
         // Logged
-        async let glucose = fetchAverageSeries(for: .bloodGlucose, unit: HKUnit(from: "mg/dL"), unitLabel: "mg/dL", from: startDate, to: endDate)
-        async let caffeine = fetchSumSeries(for: .dietaryCaffeine, unit: HKUnit.gramUnit(with: .milli), unitLabel: "mg", from: startDate, to: endDate)
+        async let glucose = fetchAverageSeries(for: .bloodGlucose, unit: HKUnit(from: "mg/dL"), unitLabel: "mg/dL", from: startDate, to: endDate, priorStart: priorStart)
+        async let caffeine = fetchSumSeries(for: .dietaryCaffeine, unit: HKUnit.gramUnit(with: .milli), unitLabel: "mg", from: startDate, to: endDate, priorStart: priorStart)
 
         return TrendsSnapshot(
             rangeDays: rangeDays,
@@ -216,6 +223,70 @@ class HealthKitService {
             bloodGlucose: await glucose,
             caffeine: await caffeine
         )
+    }
+
+    // MARK: - Report-time snapshot
+
+    /// 7-day averages centered on `date` — used by DashboardView to
+    /// show the user's resting HR / HRV / sleep / steps *at the time*
+    /// they scanned a lab report. Anchors the report in their broader
+    /// health state. Returns nil for any metric the user hasn't
+    /// authorized or doesn't have data for around that window.
+    struct ReportTimeMetrics {
+        var restingHR: Double?
+        var hrv: Double?
+        var sleepHours: Double?
+        var steps: Double?
+
+        var isEmpty: Bool {
+            restingHR == nil && hrv == nil && sleepHours == nil && steps == nil
+        }
+    }
+
+    func getMetricsAround(date: Date) async -> ReportTimeMetrics {
+        let calendar = Calendar.current
+        // 7-day window centered on the report date. If the report is
+        // recent (less than 3 days old) the window will overlap with
+        // "now" — that's fine, we just want the user's typical state
+        // around when they got the panel back.
+        guard
+            let start = calendar.date(byAdding: .day, value: -7, to: date),
+            let end = calendar.date(byAdding: .day, value: 1, to: date)
+        else {
+            return ReportTimeMetrics()
+        }
+
+        async let restingHR = fetchAverage(for: .restingHeartRate, unit: HKUnit(from: "count/min"), from: start, to: end)
+        async let hrv = fetchAverage(for: .heartRateVariabilitySDNN, unit: HKUnit.secondUnit(with: .milli), from: start, to: end)
+        async let sleep = fetchAverageSleep(from: start, to: end)
+        async let steps = fetchStepsSum(from: start, to: end)
+
+        return ReportTimeMetrics(
+            restingHR: await restingHR,
+            hrv: await hrv,
+            sleepHours: await sleep,
+            steps: await steps
+        )
+    }
+
+    /// Discrete sum over the window — only used by ReportTimeMetrics
+    /// for the steps figure. The Trends path uses HKStatisticsCollectionQuery
+    /// for per-day buckets, but here we just want the daily average
+    /// for an at-a-glance card.
+    private func fetchStepsSum(from startDate: Date, to endDate: Date) async -> Double? {
+        guard let stepsType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return nil }
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(quantityType: stepsType, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, result, _ in
+                guard let sum = result?.sumQuantity()?.doubleValue(for: .count()) else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let days = max(1, Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 7)
+                continuation.resume(returning: (sum / Double(days)).rounded())
+            }
+            healthStore.execute(query)
+        }
     }
 
     // MARK: - Authorization
@@ -325,9 +396,10 @@ class HealthKitService {
         unit: HKUnit,
         unitLabel: String,
         from startDate: Date,
-        to endDate: Date
+        to endDate: Date,
+        priorStart: Date
     ) async -> MetricSeries? {
-        await fetchSeries(identifier: identifier, unit: unit, unitLabel: unitLabel, options: .cumulativeSum, from: startDate, to: endDate)
+        await fetchSeries(identifier: identifier, unit: unit, unitLabel: unitLabel, options: .cumulativeSum, from: startDate, to: endDate, priorStart: priorStart)
     }
 
     /// Bucketed-by-day AVERAGE aggregation. Right for measured values
@@ -339,14 +411,19 @@ class HealthKitService {
         unitLabel: String,
         from startDate: Date,
         to endDate: Date,
+        priorStart: Date,
         multiplyBy: Double = 1
     ) async -> MetricSeries? {
-        await fetchSeries(identifier: identifier, unit: unit, unitLabel: unitLabel, options: .discreteAverage, from: startDate, to: endDate, multiplyBy: multiplyBy)
+        await fetchSeries(identifier: identifier, unit: unit, unitLabel: unitLabel, options: .discreteAverage, from: startDate, to: endDate, priorStart: priorStart, multiplyBy: multiplyBy)
     }
 
     /// The actual statistics-collection plumbing. iOS gives us
     /// `HKStatisticsCollectionQuery` which buckets samples into fixed
-    /// intervals — we ask for one bucket per calendar day.
+    /// intervals — we ask for one bucket per calendar day. We query
+    /// `priorStart...endDate` in one pass and split the results on
+    /// `startDate`, so we get both the current-period series + a
+    /// prior-period average for the delta indicator with a single
+    /// HealthKit roundtrip per metric.
     private func fetchSeries(
         identifier: HKQuantityTypeIdentifier,
         unit: HKUnit,
@@ -354,14 +431,15 @@ class HealthKitService {
         options: HKStatisticsOptions,
         from startDate: Date,
         to endDate: Date,
+        priorStart: Date,
         multiplyBy: Double = 1
     ) async -> MetricSeries? {
         guard let quantityType = HKQuantityType.quantityType(forIdentifier: identifier) else { return nil }
 
         let calendar = Calendar.current
-        let anchor = calendar.startOfDay(for: startDate)
+        let anchor = calendar.startOfDay(for: priorStart)
         let interval = DateComponents(day: 1)
-        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: priorStart, end: endDate, options: .strictStartDate)
 
         return await withCheckedContinuation { continuation in
             let query = HKStatisticsCollectionQuery(
@@ -376,8 +454,9 @@ class HealthKitService {
                     continuation.resume(returning: nil)
                     return
                 }
-                var daily: [DailyValue] = []
-                results.enumerateStatistics(from: startDate, to: endDate) { stats, _ in
+                var currentDaily: [DailyValue] = []
+                var priorDaily: [DailyValue] = []
+                results.enumerateStatistics(from: priorStart, to: endDate) { stats, _ in
                     let raw: Double?
                     switch options {
                     case .cumulativeSum:
@@ -388,18 +467,27 @@ class HealthKitService {
                         raw = nil
                     }
                     if let value = raw {
-                        daily.append(DailyValue(date: stats.startDate, value: value * multiplyBy))
+                        let entry = DailyValue(date: stats.startDate, value: value * multiplyBy)
+                        if stats.startDate < startDate {
+                            priorDaily.append(entry)
+                        } else {
+                            currentDaily.append(entry)
+                        }
                     }
                 }
-                guard !daily.isEmpty else {
+                guard !currentDaily.isEmpty else {
                     continuation.resume(returning: nil)
                     return
                 }
-                let avg = daily.map(\.value).reduce(0, +) / Double(daily.count)
+                let avg = currentDaily.map(\.value).reduce(0, +) / Double(currentDaily.count)
+                let priorAvg: Double? = priorDaily.isEmpty
+                    ? nil
+                    : (priorDaily.map(\.value).reduce(0, +) / Double(priorDaily.count))
                 continuation.resume(returning: MetricSeries(
                     average: (avg * 10).rounded() / 10,
-                    daily: daily,
-                    unit: unitLabel
+                    daily: currentDaily,
+                    unit: unitLabel,
+                    previousAverage: priorAvg.map { ($0 * 10).rounded() / 10 }
                 ))
             }
             healthStore.execute(query)
@@ -409,9 +497,12 @@ class HealthKitService {
     /// Sleep needs special handling because each sample is a (start,
     /// end) range that can span midnight. We bucket by "sleep night"
     /// using the end date — Apple's own convention for sleep cards.
-    private func fetchSleepSeries(from startDate: Date, to endDate: Date) async -> MetricSeries? {
+    /// Queries the doubled window (`priorStart...endDate`) and splits
+    /// the per-day hours on `startDate` so we can also surface the
+    /// prior-period average for the delta line on the sleep card.
+    private func fetchSleepSeries(from startDate: Date, to endDate: Date, priorStart: Date) async -> MetricSeries? {
         guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return nil }
-        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let predicate = HKQuery.predicateForSamples(withStart: priorStart, end: endDate, options: .strictStartDate)
 
         return await withCheckedContinuation { continuation in
             let query = HKSampleQuery(sampleType: sleepType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, _ in
@@ -429,18 +520,24 @@ class HealthKitService {
                     let day = calendar.startOfDay(for: sample.endDate)
                     perDay[day, default: 0] += sample.endDate.timeIntervalSince(sample.startDate)
                 }
-                let daily = perDay
+                let sorted = perDay
                     .map { DailyValue(date: $0.key, value: $0.value / 3600.0) }
                     .sorted { $0.date < $1.date }
-                guard !daily.isEmpty else {
+                let current = sorted.filter { $0.date >= startDate }
+                let prior = sorted.filter { $0.date < startDate }
+                guard !current.isEmpty else {
                     continuation.resume(returning: nil)
                     return
                 }
-                let avg = daily.map(\.value).reduce(0, +) / Double(daily.count)
+                let avg = current.map(\.value).reduce(0, +) / Double(current.count)
+                let priorAvg: Double? = prior.isEmpty
+                    ? nil
+                    : (prior.map(\.value).reduce(0, +) / Double(prior.count))
                 continuation.resume(returning: MetricSeries(
                     average: (avg * 10).rounded() / 10,
-                    daily: daily,
-                    unit: "h"
+                    daily: current,
+                    unit: "h",
+                    previousAverage: priorAvg.map { ($0 * 10).rounded() / 10 }
                 ))
             }
             healthStore.execute(query)

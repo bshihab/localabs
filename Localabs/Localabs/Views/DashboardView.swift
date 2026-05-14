@@ -12,6 +12,11 @@ struct DashboardView: View {
     @State private var report: StructuredReport?
     @State private var healthMetrics: HealthKitService.HealthMetrics?
     @State private var isRegenerating = false
+    /// Averages over a 7-day window centered on the report's
+    /// timestamp — surfaces the user's broader health state at the
+    /// time they scanned this report. Only fetched when a specific
+    /// report is being viewed (push mode), not on the empty tab.
+    @State private var reportTimeMetrics: HealthKitService.ReportTimeMetrics?
     @State private var showShareSheet = false
     @State private var shareItems: [Any] = []
 
@@ -48,6 +53,19 @@ struct DashboardView: View {
                     // gets the same live feedback as a fresh analysis.
                     if let report = currentReport, !report.isIncomplete {
                         regenerateCTA(for: report)
+                            .padding(.horizontal)
+                    }
+
+                    // Apple Health snapshot at the time this report
+                    // was scanned — only shown for specific reports
+                    // (push mode), since the empty tab state has no
+                    // meaningful "around when" to query. Helps users
+                    // see "what was my baseline when these labs
+                    // happened" without flipping to the Trends tab.
+                    if initialReport != nil,
+                       let metrics = reportTimeMetrics,
+                       !metrics.isEmpty {
+                        reportTimeMetricsCard(metrics)
                             .padding(.horizontal)
                     }
 
@@ -129,6 +147,9 @@ struct DashboardView: View {
             .task {
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
                 if report == nil { report = initialReport }
+                if let pushed = initialReport {
+                    reportTimeMetrics = await HealthKitService.shared.getMetricsAround(date: pushed.timestamp)
+                }
             }
             // Share button only appears when Dashboard is showing a
             // specific report (pushed from History or post-scan). The
@@ -177,6 +198,85 @@ struct DashboardView: View {
         if engine.isProcessing { return .blue }
         if currentReport != nil { return .green }
         return .secondary
+    }
+
+    // MARK: - Report-time Apple Health snapshot
+
+    /// 7-day averages centered on the report's timestamp — shown only
+    /// when this Dashboard is rendering a specific scanned report
+    /// (push from Scan or History). Anchors the user's lab values in
+    /// their broader health state at the time, which is the whole
+    /// point of pulling HealthKit data into the translation pipeline.
+    private func reportTimeMetricsCard(_ metrics: HealthKitService.ReportTimeMetrics) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.pink)
+                Text("YOUR HEALTH AT TIME OF SCAN")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.4)
+            }
+
+            Text("7-day averages around \(timestampLabel())")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            // Two-column grid of whichever metrics had data. Each
+            // cell falls back to "—" when nil rather than zeroing out.
+            LazyVGrid(columns: [
+                GridItem(.flexible(), spacing: 12),
+                GridItem(.flexible(), spacing: 12)
+            ], spacing: 12) {
+                if let v = metrics.restingHR {
+                    snapshotPill(label: "Resting HR", value: "\(Int(v))", unit: "bpm", tint: .red)
+                }
+                if let v = metrics.hrv {
+                    snapshotPill(label: "HRV", value: "\(Int(v))", unit: "ms", tint: .red)
+                }
+                if let v = metrics.sleepHours {
+                    snapshotPill(label: "Avg Sleep", value: String(format: "%.1f", v), unit: "h", tint: .purple)
+                }
+                if let v = metrics.steps {
+                    snapshotPill(label: "Avg Steps", value: "\(Int(v))", unit: "/day", tint: .blue)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func snapshotPill(label: String, value: String, unit: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.8)
+            HStack(alignment: .lastTextBaseline, spacing: 3) {
+                Text(value)
+                    .font(.system(size: 20, weight: .bold).monospacedDigit())
+                    .foregroundStyle(tint)
+                Text(unit)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint.opacity(0.7))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+        )
+    }
+
+    private func timestampLabel() -> String {
+        guard let report = initialReport else { return "today" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: report.timestamp)
     }
 
     // MARK: - Regenerate CTA
