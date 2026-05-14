@@ -56,13 +56,13 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Regenerating")
+                        Text("Generating")
                             .font(.system(size: 17, weight: .semibold))
                         // Allow the status to wrap to two lines so
                         // "Localabs is regenerating your report…"
                         // doesn't truncate to "…your repo".
                         Text(engine.processingStatus.isEmpty
-                             ? "Re-running Localabs against the same scan…"
+                             ? "Localabs is writing your translation…"
                              : engine.processingStatus)
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)

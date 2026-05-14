@@ -101,10 +101,18 @@ public final class LlamaContext: @unchecked Sendable {
         llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40))
         // Nucleus: keep tokens whose cumulative prob ≤ 0.9.
         llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.9, 1))
-        // Temperature 0.4: mostly deterministic, slight phrasing variation.
-        llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.4))
-        // Final dist sampler picks the actual token from the shaped distribution.
-        llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED))
+        // Temperature 0.7: room for genuine phrasing variation across
+        // calls. Was 0.4, which combined with a fixed seed made the
+        // model's output near-deterministic for any given prompt —
+        // users reasonably complained that regenerate produced
+        // byte-identical text.
+        llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.7))
+        // Final dist sampler picks the actual token. Seeded with a
+        // fresh random value per LlamaContext init so first-run output
+        // varies across app sessions. Per-call reseeding via
+        // chain_remove/add was attempted but tripped ggml_abort under
+        // Metal — the chain isn't safe to mutate after init.
+        llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 1...UInt32.max)))
 
         self.model = model
         self.vocab = vocab
@@ -159,22 +167,6 @@ public final class LlamaContext: @unchecked Sendable {
         // llama.cpp b7484 replaced llama_kv_cache_clear with the unified memory API.
         llama_memory_clear(llama_get_memory(context), true)
         llama_sampler_reset(sampler)
-
-        // Re-seed the dist sampler with a fresh value each run. The chain
-        // was originally built with `llama_sampler_init_dist(LLAMA_DEFAULT_SEED)`
-        // — a constant. Combined with temperature 0.4 (low but non-zero),
-        // that produced byte-identical output on every regeneration of the
-        // same prompt, so users reasonably said "is regenerate actually
-        // doing anything?". Removing the tail-most sampler (the dist one)
-        // and re-adding it with a random seed gives genuine variation
-        // across runs while keeping the rest of the chain (penalties /
-        // top-k / top-p / temp) intact.
-        let chainLen = llama_sampler_chain_n(sampler)
-        if chainLen > 0 {
-            _ = llama_sampler_chain_remove(sampler, chainLen - 1)
-        }
-        let seed = UInt32.random(in: 0...UInt32.max)
-        llama_sampler_chain_add(sampler, llama_sampler_init_dist(seed))
 
         let promptCStr = Array(prompt.utf8CString)
         let nCtx = Int32(llama_n_ctx(context))
