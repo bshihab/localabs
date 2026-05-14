@@ -10,6 +10,11 @@ struct ProfileView: View {
     @State private var hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
     @State private var healthMetrics: HealthKitService.HealthMetrics?
     @State private var isRequestingHealth = false
+    /// Dev-only — share sheet for the "Export Logo Layers" button.
+    /// Remove the state, the button, and Services/LogoExportTool.swift
+    /// once the .icon file is finalized.
+    @State private var logoExportItems: [Any] = []
+    @State private var showLogoExportShare = false
 
     var body: some View {
         NavigationStack {
@@ -431,6 +436,26 @@ struct ProfileView: View {
                     .padding(.vertical, 12)
             }
             .buttonStyle(.glass)
+
+            // Dev-only tool: renders the LocalabsLogo's chip + heart
+            // layers as 1024×1024 PNGs and offers them via share
+            // sheet, ready to drop into Apple's Icon Composer as the
+            // layered assets for a `.icon` file. Once the icon is
+            // finalized, this button + Services/LogoExportTool.swift
+            // + the logoExportItems/showLogoExportShare @State above
+            // can all be deleted.
+            Button {
+                logoExportItems = LogoExportTool.renderAllLayersToTempFiles()
+                showLogoExportShare = true
+            } label: {
+                Label("Export Logo Layers (Dev)", systemImage: "square.and.arrow.down.on.square")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.glass)
+            .sheet(isPresented: $showLogoExportShare) {
+                ShareSheet(items: logoExportItems)
+            }
 
             Button(role: .destructive) {
                 confirmReset = true

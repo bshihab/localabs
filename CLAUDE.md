@@ -64,6 +64,47 @@ Selected text feeds into `FollowUpChatView` (a sheet) where the user can chat wi
 - **Prompt overflow** — `n_ctx` is 4096, `n_batch` is 4096 (matched so multi-image prompts fit in one decode call without tripping `GGML_ASSERT(n_tokens_all <= cparams.n_batch)`). Combined OCR is truncated to 7000 chars (`truncateForContext`) as a safety net.
 - **Apple Vision tables** — Vision doesn't expose native table detection, so `RecognizedTable` is reconstructed via Y-cluster (rows) + left-edge X-cluster (columns) algorithm in `VisionOCRService.breakdown`. Works well on clean lab-report tables; merged cells and multi-line cells are known v1 limitations.
 
+## App icon (Icon Composer + Liquid Glass)
+
+The app icon is built as a layered `.icon` file using Apple's **Icon Composer** (download from developer.apple.com → Downloads → Applications → Icon Composer beta). Icon Composer is GUI-only — there's no API to assemble `.icon` files programmatically. The workflow is:
+
+### Generating the layer assets
+
+The `LocalabsLogo` SwiftUI view in `Views/SplashView.swift` is the canonical brand mark. To get PNG layers out of it for Icon Composer:
+
+1. Open Localabs on a real device or Simulator.
+2. **Profile tab → Export Logo Layers (Dev)**. Three PNGs save to a share sheet:
+   - `Localabs-full.png` — entire logo (flat icon fallback)
+   - `Localabs-chip.png` — chip + pins + traces, transparent background
+   - `Localabs-heart.png` — white heart on transparent, positioned to overlay the chip
+3. Save them to Files → iCloud Drive (or AirDrop to the Mac).
+
+### Building the .icon in Icon Composer
+
+1. **File → New** → save as `LocalabsAppIcon.icon` somewhere outside the repo (anywhere — you'll drop it into the project after).
+2. **Background:** choose "Gradient" and use `#5299FF` → `#135EE8` to match the chip's blue, OR "Solid" with pure white if you want the chip to read as a sticker against white (matches the PDF brand spec).
+3. Add a group **Chip** → drag `Localabs-chip.png` in. Toggle the glass effect ON for a subtle refraction.
+4. Add a group **Heart** → drag `Localabs-heart.png` in. Glass effect ON, set the glass intensity slightly higher — heart is the focal point.
+5. Set the dark-mode variant: same layout, but switch the background to system dark.
+6. Set the mono variant: leave glass off, the chip's blue desaturates automatically.
+7. **File → Export → All variants** (also produces PNG fallbacks for iOS 25 and below).
+8. **Save** the document.
+
+### Wiring `.icon` into the Xcode project
+
+1. Drag `LocalabsAppIcon.icon` into the Xcode project navigator at the same level as `LocalabsApp.swift` (NOT into Assets.xcassets).
+2. In `project.yml`, under `targets.Localabs.settings.base`, set:
+   ```yaml
+   ASSETCATALOG_COMPILER_APPICON_NAME: LocalabsAppIcon
+   ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+   ```
+3. Run `xcodegen` to regenerate the project.
+4. Clean build folder, rebuild — home-screen icon should now be the new layered Localabs logo.
+
+The flat PNG fallback (also exported from Icon Composer) goes into `Assets.xcassets/AppIcon.appiconset/` so iOS 25 devices render the same brand mark without Liquid Glass.
+
+Once the `.icon` is finalized and committed, remove the Export Logo Layers button and `Services/LogoExportTool.swift` — they're development scaffolding only.
+
 ## Working with this repo
 
 The repo lives in two places per the maintainer's split-machine setup: this dev machine (where Claude edits) and a separate, more capable Mac where Xcode builds run. The flow is always:

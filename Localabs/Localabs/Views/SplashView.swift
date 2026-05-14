@@ -121,11 +121,28 @@ struct SplashView: View {
 /// extending outward, and faint horizontal/vertical trace strokes
 /// inside the chip that feed in from each pin.
 struct LocalabsLogo: View {
+    enum Layer {
+        case full
+        /// Chip body + pins + traces. No heart. Used when exporting
+        /// PNGs for Icon Composer — the chip becomes one layer of
+        /// the layered `.icon` file.
+        case chipOnly
+        /// Just the white heart, positioned where it would sit in
+        /// the full logo. Transparent everywhere else. Stacked on
+        /// top of `.chipOnly` it reproduces the full logo.
+        case heartOnly
+    }
+
     var size: CGFloat = 140
     /// Scale applied to just the heart, so the splash can pulse the
     /// heart by itself while the chip + pins stay still. Default 1.0
     /// (no pulse) for non-animated use.
     var heartScale: CGFloat = 1.0
+    /// Which subset of the logo to render. Defaults to the full
+    /// composite for the splash + any other in-app usage; the export
+    /// tool flips this to `.chipOnly` / `.heartOnly` to save layered
+    /// PNGs for Icon Composer.
+    var layer: Layer = .full
 
     // Colors picked to match the PDF: a slightly cool, saturated
     // blue gradient running TL → BR, with a darker shade for pins
@@ -166,7 +183,53 @@ struct LocalabsLogo: View {
             // ZStack and flattened with drawingGroup so the chip
             // body never re-rasterizes during the splash animations.
             // Only the heart (the sibling below) animates.
-            ZStack {
+            if layer != .heartOnly {
+                chipFrame(
+                    pinSpacing: pinSpacing,
+                    pinW: pinW,
+                    pinH: pinH,
+                    pinOuter: pinOuter,
+                    cornerRadius: cornerRadius,
+                    s: s,
+                    traceLen: traceLen,
+                    traceInset: traceInset,
+                    traceThickness: traceThickness
+                )
+            }
+
+            if layer != .chipOnly {
+                Image(systemName: "heart.fill")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundStyle(.white)
+                    .frame(width: heartSize, height: heartSize)
+                    .offset(y: -heartSize * 0.04)
+                    .scaleEffect(heartScale, anchor: .center)
+            }
+        }
+        // Logo bounds include the pins, so the splash centers the
+        // whole composition (chip + pins) rather than just the chip.
+        .frame(width: s + pinH * 2, height: s + pinH * 2)
+    }
+
+    /// Extracted chip-frame view (pins, chip body, traces). Lives in
+    /// its own function so the layer split above doesn't have to
+    /// inline the ZStack twice. .drawingGroup() flattens this whole
+    /// composition into a single Metal texture so per-frame splash
+    /// animations don't re-rasterize the 40+ shapes.
+    @ViewBuilder
+    private func chipFrame(
+        pinSpacing: CGFloat,
+        pinW: CGFloat,
+        pinH: CGFloat,
+        pinOuter: CGFloat,
+        cornerRadius: CGFloat,
+        s: CGFloat,
+        traceLen: CGFloat,
+        traceInset: CGFloat,
+        traceThickness: CGFloat
+    ) -> some View {
+        ZStack {
                 // Pins — 5 per side, drawn before the chip so the
                 // chip's rounded corner gently overlaps each pin's
                 // inner edge.
@@ -227,23 +290,5 @@ struct LocalabsLogo: View {
                 }
             }
             .drawingGroup()
-
-            // The heart — white fill, centered. Scaled by heartScale
-            // so the splash can pulse the heart by itself while the
-            // chip + pins above stay still. SF Symbol heart.fill
-            // sits slightly below its geometric bounding box, so a
-            // tiny upward nudge makes it look optically centered
-            // inside the chip.
-            Image(systemName: "heart.fill")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .foregroundStyle(.white)
-                .frame(width: heartSize, height: heartSize)
-                .offset(y: -heartSize * 0.04)
-                .scaleEffect(heartScale, anchor: .center)
-        }
-        // Logo bounds include the pins, so the splash centers the
-        // whole composition (chip + pins) rather than just the chip.
-        .frame(width: s + pinH * 2, height: s + pinH * 2)
     }
 }
