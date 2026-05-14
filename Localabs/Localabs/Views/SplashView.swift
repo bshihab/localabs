@@ -19,6 +19,7 @@ struct SplashView: View {
     @State private var zoomScale: CGFloat = 1.0
     @State private var contentOpacity: Double = 1.0
     @State private var pulse: Bool = false
+    @State private var wordmarkOpacity: Double = 1.0
 
     var body: some View {
         ZStack {
@@ -33,30 +34,54 @@ struct SplashView: View {
                 LocalabsLogo()
                     .scaleEffect(pulse ? 1.04 : 1.0)
                     .shadow(color: Color.blue.opacity(0.18), radius: 24, y: 10)
+                    // Flatten the entire logo into a single Metal
+                    // texture so the zoom scales one bitmap instead
+                    // of re-rasterizing 40+ vector subviews (chip,
+                    // 20 pins, 20 trace strokes, heart) every frame.
+                    // The difference between "vector scale at 60fps"
+                    // and "texture scale at 120fps ProMotion" is the
+                    // difference between choppy and butter-smooth.
+                    .drawingGroup()
 
                 Text("Localabs")
                     .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
+                    .opacity(wordmarkOpacity)
             }
-            .scaleEffect(zoomScale)
+            .scaleEffect(zoomScale, anchor: .center)
             .opacity(contentOpacity)
         }
         .onAppear {
-            // Subtle continuous heartbeat pulse — gives the static
-            // logo a sense of life during the brief settle period.
+            // Heartbeat pulse from the moment the splash appears
+            // through the start of the zoom.
             withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
                 pulse = true
             }
-            // Zoom into the heart + fade to clear. Total runtime
-            // ~2.3s so the user definitely registers the logo even
-            // on a fast-cold-launch device.
+            // 1.0s settle — user registers the logo and a couple
+            // pulse cycles.
+            // Then the zoom: aggressive easeIn for the "flying in"
+            // feel. Wordmark fades out as the zoom begins so it
+            // doesn't dominate the frame as it scales massively.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    wordmarkOpacity = 0
+                }
+                withAnimation(.easeIn(duration: 0.65)) {
+                    zoomScale = 22.0
+                }
+            }
+            // The fade-out kicks in only AFTER the zoom has done
+            // most of its work — at that point the white heart
+            // fills the entire screen, so fading the splash reveals
+            // ContentView underneath cleanly. Doing zoom + fade in
+            // parallel was what made the previous version read as
+            // a cross-fade instead of a zoom.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                withAnimation(.easeIn(duration: 0.7)) {
-                    zoomScale = 12.0
+                withAnimation(.easeOut(duration: 0.2)) {
                     contentOpacity = 0
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.15) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.75) {
                 onComplete()
             }
         }
