@@ -225,15 +225,25 @@ struct ProfileView: View {
                 Spacer()
                 if isRequestingHealth {
                     ProgressView().scaleEffect(0.8)
-                } else if hasRequestedHealth, let metrics = healthMetrics, !metrics.isEmpty {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(.green)
+                } else if hasRequestedHealth {
+                    // Connected state — green check whether or not
+                    // there are readings yet. The detailed checklist
+                    // below shows which types have data and which
+                    // are dark, so the user can tell at a glance
+                    // what's actually flowing.
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.green)
+                        Text("Connected")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.green)
+                    }
                 }
             }
 
             if !hasRequestedHealth {
-                Text("Lets Localabs factor your resting heart rate, sleep, and HRV into every report.")
+                Text("Lets Localabs factor your activity, sleep, and vitals into every report.")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -248,56 +258,25 @@ struct ProfileView: View {
                 }
                 .buttonStyle(.glassProminent)
                 .disabled(isRequestingHealth)
-            } else if let metrics = healthMetrics, !metrics.isEmpty {
-                healthMetricsGrid(metrics)
-                // Re-link to Settings even when data IS flowing, so the
-                // user can adjust which categories Localabs reads. Small
-                // tertiary link rather than a prominent button.
+            } else if let metrics = healthMetrics {
+                // Connected (with or without readings). Show the
+                // checklist of types Localabs reads; check mark for
+                // ones with data in the last 30 days, empty circle
+                // for ones we can't see (denied, no device, or just
+                // no logged samples). Replaces the old "readings
+                // grid" — the readings themselves live in Trends; the
+                // job of this card is *connection status*, not data.
+                healthAccessChecklist(metrics)
+
                 Button {
                     openHealthApp()
                 } label: {
-                    Label("Adjust permissions in Health app", systemImage: "heart.fill")
+                    Label("Manage permissions in Health app", systemImage: "heart.fill")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 4)
-            } else if let metrics = healthMetrics, metrics.isEmpty {
-                // No data flowing despite the request having been made.
-                // Two common causes: user tapped Don't Allow on the iOS
-                // sheet, or Localabs is reading types they haven't
-                // enabled yet. Either way, the fix is in the Health app —
-                // iOS doesn't let apps re-trigger the permission sheet,
-                // but users can manage permissions manually under
-                // Health → Profile → Privacy → Apps and Services →
-                // Localabs.
-                Text("No recent Apple Health data found.")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-
-                Text("If you tapped Don't Allow, or want to enable more data types, you can manage permissions in the Health app:")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                VStack(alignment: .leading, spacing: 5) {
-                    settingsStep(number: 1, text: "Open the **Health** app")
-                    settingsStep(number: 2, text: "Tap your **profile picture** (top-right)")
-                    settingsStep(number: 3, text: "Scroll to **Privacy** and tap **Apps and Services**")
-                    settingsStep(number: 4, text: "Tap **Localabs** and turn on the toggles")
-                }
-                .padding(.leading, 2)
-
-                Button {
-                    openHealthApp()
-                } label: {
-                    Label("Open Health App", systemImage: "heart.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                }
-                .buttonStyle(.glassProminent)
-                .padding(.top, 2)
             } else {
                 ProgressView("Reading from Apple Health…")
                     .font(.system(size: 13))
@@ -316,31 +295,49 @@ struct ProfileView: View {
         }
     }
 
-    private func healthMetricsGrid(_ m: HealthKitService.HealthMetrics) -> some View {
-        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
-            GridRow {
-                metricCell(label: "Resting HR", value: m.avgRestingHR.map { "\(Int($0)) bpm" } ?? "—")
-                metricCell(label: "Sleep", value: m.avgSleepHours.map { String(format: "%.1f hrs", $0) } ?? "—")
+    /// Compact list of every Apple Health type Localabs requests +
+    /// whether each has any data in the last 30 days. Filled green
+    /// circle = data is flowing; dim outline circle = no data (could
+    /// mean denied, no device that logs it, or just no samples).
+    /// The user explicitly asked for this layout instead of a row of
+    /// readings — they have no Watch, so the readings view was mostly
+    /// empty and they wanted to see *what Localabs can read* with a
+    /// clear status per type.
+    private func healthAccessChecklist(_ metrics: HealthKitService.HealthMetrics) -> some View {
+        let entries: [(label: String, hasData: Bool)] = [
+            ("Resting heart rate", metrics.avgRestingHR != nil),
+            ("Heart rate variability", metrics.avgHRV != nil),
+            ("Sleep duration", metrics.avgSleepHours != nil),
+            ("Daily steps", metrics.avgSteps != nil),
+            ("Walking + running distance", metrics.avgWalkingDistanceMiles != nil),
+            ("Walking speed", metrics.avgWalkingSpeedMPH != nil),
+            ("Exercise minutes", metrics.avgExerciseMinutes != nil)
+        ]
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Data Localabs has access to:")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.4)
+                .padding(.bottom, 2)
+            ForEach(entries, id: \.label) { entry in
+                HStack(spacing: 10) {
+                    Image(systemName: entry.hasData ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 16))
+                        .foregroundStyle(entry.hasData ? Color.green : Color.secondary.opacity(0.5))
+                    Text(entry.label)
+                        .font(.system(size: 14))
+                        .foregroundStyle(entry.hasData ? Color.primary : Color.secondary)
+                    Spacer()
+                }
             }
-            GridRow {
-                metricCell(label: "HRV", value: m.avgHRV.map { "\(Int($0)) ms" } ?? "—")
-                metricCell(label: "Window", value: "30 days")
-            }
+            Text("Empty circles mean Localabs hasn't seen data for that type in the last 30 days — usually because you don't log it or don't have a paired device.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .padding(.top, 4)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func metricCell(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.8)
-            Text(value)
-                .font(.system(size: 16, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.primary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 
     private func connectAppleHealth() async {
         isRequestingHealth = true

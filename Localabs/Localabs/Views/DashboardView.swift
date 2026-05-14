@@ -21,27 +21,83 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    Text("Translation Dashboard")
-                        .font(.system(size: 34, weight: .bold))
-                        .padding(.horizontal)
-                        .padding(.top, 8)
+            if isRegenerating {
+                regeneratingView
+            } else {
+                dashboardContent
+            }
+        }
+    }
 
-                    GlassEffectContainer(spacing: 14) {
-                        HStack(spacing: 14) {
-                            StatusBadge(
-                                label: "Status",
-                                value: statusValue,
-                                color: statusColor
-                            )
-                            StatusBadge(label: "Health Sync", value: "Active", color: .blue)
-                        }
+    /// Mirrors ScanView's processingView during a regenerate so the
+    /// user sees the same live-streaming section cards instead of a
+    /// single opaque spinner. The header card carries the determinate
+    /// progress + percentage; the cards below fill in as each section
+    /// streams.
+    private var regeneratingView: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Regenerating")
+                            .font(.system(size: 17, weight: .semibold))
+                        // Allow the status to wrap to two lines so
+                        // "Localabs is regenerating your report…"
+                        // doesn't truncate to "…your repo".
+                        Text(engine.processingStatus.isEmpty
+                             ? "Re-running Localabs against the same scan…"
+                             : engine.processingStatus)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.horizontal)
+                    Spacer()
+                    Text("\(Int(engine.analysisProgress * 100))%")
+                        .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText(value: engine.analysisProgress))
+                }
+                ProgressView(value: engine.analysisProgress)
+                    .tint(.purple)
+                    .animation(.easeOut(duration: 0.25), value: engine.analysisProgress)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
 
-                    summaryCard
-                        .padding(.horizontal)
+            LiveReportSectionsView(streamingText: engine.streamingText)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+        }
+        .background(.background)
+    }
+
+    private var dashboardContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                Text("Translation Dashboard")
+                    .font(.system(size: 34, weight: .bold))
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+
+                GlassEffectContainer(spacing: 14) {
+                    HStack(spacing: 14) {
+                        StatusBadge(
+                            label: "Status",
+                            value: statusValue,
+                            color: statusColor
+                        )
+                        StatusBadge(label: "Health Sync", value: "Active", color: .blue)
+                    }
+                }
+                .padding(.horizontal)
+
+                summaryCard
+                    .padding(.horizontal)
 
                     // Prominent "Regenerate Translation" CTA — sits
                     // between the summary card and Ask More, sized
@@ -159,9 +215,16 @@ struct DashboardView: View {
                 }
             }
             .sheet(isPresented: $showShareSheet) {
-                ShareSheet(items: shareItems)
+                // Build items inside the sheet closure so they're
+                // always fresh when SwiftUI presents — the previous
+                // pattern (set shareItems on tap, then flip showSheet)
+                // sometimes raced and presented with stale/empty
+                // items, requiring a second tap to "warm up" the
+                // sheet. Lazy construction avoids the race entirely.
+                if let report = currentReport {
+                    ShareSheet(items: buildShareItems(for: report))
+                }
             }
-        }
     }
 
     private var currentReport: StructuredReport? {

@@ -357,7 +357,10 @@ struct ScanView: View {
 /// since the parser is header-anchored, partial input correctly attributes
 /// each chunk to its section. Whichever section currently has the latest
 /// text is the "active" one (gets a pulsing dot + tinted glass + auto-scroll).
-private struct LiveReportSectionsView: View {
+/// Internal so DashboardView can reuse the same streaming-card UI
+/// when the user taps Regenerate — we want regenerate to feel like a
+/// fresh scan rather than a single opaque spinner.
+struct LiveReportSectionsView: View {
     let streamingText: String
 
     private var partial: StructuredReport {
@@ -443,7 +446,7 @@ private struct LiveReportSectionsView: View {
     }
 }
 
-private enum ReportSection: Int, CaseIterable, Identifiable {
+enum ReportSection: Int, CaseIterable, Identifiable {
     case summary, questions, diet, glossary, medications
     var id: Int { rawValue }
 
@@ -478,11 +481,11 @@ private enum ReportSection: Int, CaseIterable, Identifiable {
     }
 }
 
-private enum LiveSectionState {
+enum LiveSectionState {
     case pending, active, complete
 }
 
-private struct LiveSectionCard: View {
+struct LiveSectionCard: View {
     let section: ReportSection
     let text: String
     let state: LiveSectionState
