@@ -1,0 +1,49 @@
+{
+  "fill" : {
+    "solid" : "srgb:1.00000,1.00000,1.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "layers" : [
+        {
+          "image-name" : "Localabs-heart.png",
+          "name" : "Localabs-heart"
+        },
+        {
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.38403,0.64839,1.04685,1.00000",
+              "extended-srgb:0.00000,0.53333,1.00000,1.00000"
+            ],
+            "orientation" : {
+              "start" : {
+                "x" : 0.5,
+                "y" : 0
+              },
+              "stop" : {
+                "x" : 0.5,
+                "y" : 0.5
+              }
+            }
+          },
+          "image-name" : "Localabs-chip.png",
+          "name" : "Localabs-chip"
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
