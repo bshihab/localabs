@@ -42,15 +42,17 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Localabs accesses your photo library so you can select existing photos of lab reports."
         INFOPLIST_KEY_NSHealthShareUsageDescription: "Localabs reads your Apple Health data to provide personalized context alongside your lab report analysis."
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: "Localabs does not write any data to Apple Health."
-        # Points Xcode at the layered LocalabsAppIcon.icon bundle
-        # (built in Apple's Icon Composer) as the live app icon
-        # source. The .icon file lives at the same level as the
-        # Swift sources so xcodegen picks it up automatically via
-        # `sources: Localabs` below. No matching .appiconset entry
-        # in Assets.xcassets is needed — the `.icon` format
-        # supersedes the old asset-catalog flow on iOS 26.
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
+        # NOTE: do NOT set ASSETCATALOG_COMPILER_APPICON_NAME for
+        # the new `.icon` format. That setting tells actool to look
+        # inside .xcassets bundles for an asset by name — and
+        # `AppIcon.icon` lives at the project source root, not in
+        # an asset catalog. With the setting present, actool fails
+        # with "None of the input catalogs contained a matching
+        # ... app icon set ... named 'AppIcon'". Xcode 26 has a
+        # separate build pipeline for top-level .icon files that
+        # picks them up automatically as long as they're added to
+        # the target as resources (handled below in sources via
+        # the AppIcon.icon folder-bundle entry).
     # HealthKit entitlement. The `properties:` block makes XcodeGen
     # *write* the key into the entitlements file AND wire
     # CODE_SIGN_ENTITLEMENTS so the signer actually sees it. Without
