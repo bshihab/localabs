@@ -45,7 +45,7 @@ targets:
         # `sources: Localabs` below. No matching .appiconset entry
         # in Assets.xcassets is needed — the `.icon` format
         # supersedes the old asset-catalog flow on iOS 26.
-        ASSETCATALOG_COMPILER_APPICON_NAME: LocalabsAppIcon
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
     # HealthKit entitlement. The `properties:` block makes XcodeGen
     # *write* the key into the entitlements file AND wire
