@@ -20,17 +20,7 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: Localabs
-        excludes:
-          # The .icon bundle is added explicitly below as type:folder
-          # so xcodegen registers it as one opaque resource. Without
-          # this exclude, the recursive scan would walk INTO the
-          # bundle and add icon.json + the PNG layer files as
-          # separate sources, which loses the bundle wrapper Xcode
-          # needs to recognize it as an app icon.
-          - "LocalabsAppIcon.icon/**"
-      - path: Localabs/LocalabsAppIcon.icon
-        type: folder
+      - Localabs
     dependencies:
       - package: llama-binary
         product: llama
