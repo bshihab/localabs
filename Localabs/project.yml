@@ -20,7 +20,11 @@ targets:
     type: application
     platform: iOS
     sources:
-      - Localabs
+      - path: Localabs
+        excludes:
+          - "AppIcon.icon/**"
+      - path: Localabs/AppIcon.icon
+        type: folder
     dependencies:
       - package: llama-binary
         product: llama
