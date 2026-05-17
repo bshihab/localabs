@@ -11,105 +11,126 @@ struct SplashView: View {
     /// flip its state to dismiss the splash and reveal ContentView.
     var onComplete: () -> Void
 
-    // Start everything visible at full size so the user sees the
-    // logo immediately. The fade-in version of this view depended on
-    // onAppear running animations during first render, which on iOS
-    // sometimes gets dropped (the system optimizes away animations
-    // for the very first frame, so opacity 0 → 1 sticks at 0).
-    @State private var zoomScale: CGFloat = 1.0
-    @State private var contentOpacity: Double = 1.0
-    @State private var pulseScale: CGFloat = 1.0
-    @State private var wordmarkOpacity: Double = 1.0
+    /// Toggled once in .onAppear to fire the keyframe timeline. A
+    /// single keyframeAnimator drives ALL animated values (pulse,
+    /// zoom, opacity) off CADisplayLink — that's what lets SwiftUI
+    /// request ProMotion's high refresh rate on iPhone 17. The old
+    /// chained DispatchQueue + withAnimation pattern fired ~10
+    /// independent short animations and never qualified for the
+    /// 120Hz path, so the splash felt like it was running at 30fps.
+    @State private var animationTrigger: Bool = false
+
+    /// All animated values bundled into one struct so a single
+    /// `keyframeAnimator` block can drive them as a coordinated
+    /// timeline. Each property gets its own KeyframeTrack below.
+    private struct Beats {
+        var heartScale: CGFloat = 1.0
+        var zoomScale: CGFloat = 1.0
+        var contentOpacity: Double = 1.0
+        var wordmarkOpacity: Double = 1.0
+    }
 
     var body: some View {
         ZStack {
-            // Background respects the user's theme — light mode
-            // gets the brand-spec white, dark mode gets the system
-            // dark background. The chip + white heart read well on
-            // both.
             Color(uiColor: .systemBackground)
                 .ignoresSafeArea()
 
-            // Logo lives at the *exact* screen center via ZStack
-            // layout — the wordmark below is positioned with
-            // .offset, NOT as a VStack sibling. Old layout used a
-            // VStack which centered the (logo + wordmark) pair, so
-            // the logo's center sat ABOVE screen center — and the
-            // zoom scaled from that off-center anchor, making the
-            // zoom feel slightly to the side of the heart.
-            LocalabsLogo(heartScale: pulseScale)
-                .scaleEffect(zoomScale, anchor: .center)
-                .shadow(color: Color.blue.opacity(0.18), radius: 24, y: 10)
-                .opacity(contentOpacity)
+            // Single keyframeAnimator drives the entire splash —
+            // pulse + zoom + opacity on one timeline. The animator
+            // schedules against CADisplayLink, which is what
+            // qualifies for ProMotion's 120Hz refresh on iPhone 17.
+            // Inside the animator's content builder, the chip and
+            // heart are stacked separately so heartScale only
+            // applies to the heart (chip + pins stay still during
+            // the pulse).
+            ZStack {
+                LocalabsLogo(layer: .chipOnly)
+                    .keyframeAnimator(
+                        initialValue: Beats(),
+                        trigger: animationTrigger
+                    ) { content, beats in
+                        content
+                            .overlay(
+                                LocalabsLogo(layer: .heartOnly)
+                                    .scaleEffect(beats.heartScale, anchor: .center)
+                            )
+                            .scaleEffect(beats.zoomScale, anchor: .center)
+                            .opacity(beats.contentOpacity)
+                    } keyframes: { _ in
+                        // Heartbeat: 5 accelerating pulses, then a
+                        // hold while the zoom takes over.
+                        KeyframeTrack(\.heartScale) {
+                            // beat 1 — slow (~60 bpm)
+                            CubicKeyframe(1.10, duration: 0.30)
+                            CubicKeyframe(1.00, duration: 0.30)
+                            // beat 2 — ~85 bpm
+                            CubicKeyframe(1.13, duration: 0.22)
+                            CubicKeyframe(1.00, duration: 0.22)
+                            // beat 3 — ~120 bpm
+                            CubicKeyframe(1.17, duration: 0.16)
+                            CubicKeyframe(1.00, duration: 0.16)
+                            // beat 4 — ~170 bpm
+                            CubicKeyframe(1.22, duration: 0.11)
+                            CubicKeyframe(1.00, duration: 0.11)
+                            // beat 5 — ~250 bpm (racing) — hold the
+                            // peak so it merges into the zoom.
+                            CubicKeyframe(1.30, duration: 0.08)
+                        }
 
+                        // Zoom: holds at 1.0 through the pulses,
+                        // then accelerates to 22× over 0.6s. EaseIn
+                        // for the "flying in" feel.
+                        KeyframeTrack(\.zoomScale) {
+                            LinearKeyframe(1.0, duration: 1.86)
+                            CubicKeyframe(22.0, duration: 0.55)
+                        }
+
+                        // Splash opacity: stays full through pulse +
+                        // zoom; fades to 0 only at the end, after
+                        // the white heart has filled the screen.
+                        KeyframeTrack(\.contentOpacity) {
+                            LinearKeyframe(1.0, duration: 2.22)
+                            CubicKeyframe(0.0, duration: 0.20)
+                        }
+
+                        // Wordmark fades out at the moment the racing
+                        // pulse hits, so it doesn't visually compete
+                        // with the zoom that follows.
+                        KeyframeTrack(\.wordmarkOpacity) {
+                            LinearKeyframe(1.0, duration: 1.55)
+                            CubicKeyframe(0.0, duration: 0.25)
+                        }
+                    }
+            }
+
+            // Wordmark is OUTSIDE the keyframeAnimator's content
+            // intentionally — it has its own opacity track that
+            // happens to share `wordmarkOpacity`, but it doesn't
+            // need to share the zoom/pulse transforms.
             Text("Localabs")
                 .font(.system(size: 32, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
-                .opacity(wordmarkOpacity)
                 .offset(y: 140)
-        }
-        .onAppear { runSequence() }
-    }
-
-    /// Accelerating heartbeat → zoom sequence. Each pulse is shorter
-    /// than the last, so the user perceives the heart speeding up
-    /// just before the camera flies into it. The final beats overlap
-    /// the start of the zoom for a single-motion feel.
-    private func runSequence() {
-        // Discrete pulses with shrinking cycle times. Format:
-        // (startSec, peakScale, halfCycleSec). The pulse cycles up
-        // to peakScale then back to 1.0 over 2 × halfCycleSec.
-        // Pulse peaks tuned for HEART-only scaling (chip + pins stay
-        // still). At the same numerical scales the visible pulse is
-        // smaller than when the whole logo scaled together, so the
-        // peaks ramp higher here for the same perceived effect.
-        let beats: [(start: Double, peak: CGFloat, half: Double)] = [
-            (0.05, 1.10, 0.30),  // ~60bpm
-            (0.65, 1.13, 0.22),  // ~85bpm
-            (1.09, 1.17, 0.16),  // ~120bpm
-            (1.41, 1.22, 0.11),  // ~170bpm
-            (1.63, 1.28, 0.08)   // ~250bpm — racing
-        ]
-        for beat in beats {
-            DispatchQueue.main.asyncAfter(deadline: .now() + beat.start) {
-                withAnimation(.easeOut(duration: beat.half)) {
-                    pulseScale = beat.peak
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + beat.half) {
-                    withAnimation(.easeIn(duration: beat.half)) {
-                        pulseScale = 1.0
+                .keyframeAnimator(
+                    initialValue: 1.0,
+                    trigger: animationTrigger
+                ) { content, opacity in
+                    content.opacity(opacity)
+                } keyframes: { _ in
+                    KeyframeTrack(\.self) {
+                        LinearKeyframe(1.0, duration: 1.55)
+                        CubicKeyframe(0.0, duration: 0.25)
                     }
                 }
-            }
         }
-
-        // Wordmark out at the moment the racing pulse hits, so the
-        // wordmark doesn't visually scale alongside the logo.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.55) {
-            withAnimation(.easeOut(duration: 0.2)) {
-                wordmarkOpacity = 0
+        .onAppear {
+            animationTrigger.toggle()
+            // Total keyframe runtime ~2.42s; fire onComplete just
+            // past the end so the last frame renders before
+            // ContentView takes over.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.45) {
+                onComplete()
             }
-        }
-
-        // Zoom flies in right as the last pulse peaks — the rising
-        // pulse seamlessly hands off to the scale-up so it reads as
-        // one continuous motion (faster + faster + WHOOSH).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.79) {
-            withAnimation(.easeIn(duration: 0.6)) {
-                zoomScale = 22.0
-            }
-        }
-
-        // Opacity fade kicks in only after the zoom has nearly
-        // completed — at that point the white heart fills the
-        // screen, so fading reveals ContentView underneath cleanly.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.24) {
-            withAnimation(.easeOut(duration: 0.18)) {
-                contentOpacity = 0
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.42) {
-            onComplete()
         }
     }
 }
