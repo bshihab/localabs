@@ -38,6 +38,15 @@ targets:
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Localabs accesses your photo library so you can select existing photos of lab reports."
         INFOPLIST_KEY_NSHealthShareUsageDescription: "Localabs reads your Apple Health data to provide personalized context alongside your lab report analysis."
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: "Localabs does not write any data to Apple Health."
+        # Points Xcode at the layered LocalabsAppIcon.icon bundle
+        # (built in Apple's Icon Composer) as the live app icon
+        # source. The .icon file lives at the same level as the
+        # Swift sources so xcodegen picks it up automatically via
+        # `sources: Localabs` below. No matching .appiconset entry
+        # in Assets.xcassets is needed — the `.icon` format
+        # supersedes the old asset-catalog flow on iOS 26.
+        ASSETCATALOG_COMPILER_APPICON_NAME: LocalabsAppIcon
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: YES
     # HealthKit entitlement. The `properties:` block makes XcodeGen
     # *write* the key into the entitlements file AND wire
     # CODE_SIGN_ENTITLEMENTS so the signer actually sees it. Without
