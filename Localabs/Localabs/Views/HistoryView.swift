@@ -45,37 +45,38 @@ struct HistoryView: View {
                         }
                     }
                     if editMode.isEditing {
-                        // Share and Delete in the BOTTOM toolbar —
-                        // matches Apple's pattern in Photos, Mail,
-                        // Notes, Messages when multi-selecting. The
-                        // bottom bar reads as "actions for the
-                        // selection I'm holding," and Apple anchors
-                        // it there consistently across iOS. Share
-                        // sits leading, Delete trailing, with a
-                        // spacer between so they're not clustered.
-                        ToolbarItemGroup(placement: .bottomBar) {
-                            Button {
-                                shareSelected()
-                            } label: {
-                                Label(
-                                    "Share\(selection.isEmpty ? "" : " (\(selection.count))")",
-                                    systemImage: "square.and.arrow.up"
-                                )
-                            }
-                            .disabled(selection.isEmpty)
+                        // Share and Delete in the TOP-LEADING toolbar
+                        // so they sit above the iOS 26 Liquid Glass
+                        // tab bar rather than getting visually
+                        // obscured behind it. Apple's HIG pattern is
+                        // .bottomBar, but on iOS 26 the new tab bar
+                        // overlaps that placement enough that the
+                        // actions read as "below the tab bar" instead
+                        // of "above the selection." Done stays in
+                        // .topBarTrailing.
+                        ToolbarItem(placement: .topBarLeading) {
+                            HStack(spacing: 16) {
+                                Button {
+                                    shareSelected()
+                                } label: {
+                                    Label(
+                                        "Share\(selection.isEmpty ? "" : " (\(selection.count))")",
+                                        systemImage: "square.and.arrow.up"
+                                    )
+                                }
+                                .disabled(selection.isEmpty)
 
-                            Spacer()
-
-                            Button(role: .destructive) {
-                                showBulkDeleteConfirmation = true
-                            } label: {
-                                Label(
-                                    "Delete\(selection.isEmpty ? "" : " (\(selection.count))")",
-                                    systemImage: "trash"
-                                )
+                                Button(role: .destructive) {
+                                    showBulkDeleteConfirmation = true
+                                } label: {
+                                    Label(
+                                        "Delete\(selection.isEmpty ? "" : " (\(selection.count))")",
+                                        systemImage: "trash"
+                                    )
+                                }
+                                .tint(.red)
+                                .disabled(selection.isEmpty)
                             }
-                            .tint(.red)
-                            .disabled(selection.isEmpty)
                         }
                     }
                 }

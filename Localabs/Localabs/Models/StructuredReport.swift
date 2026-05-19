@@ -64,18 +64,17 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     }
 
     /// Title shown in History rows + the Dashboard header. Three tiers:
-    ///   1. LLM-generated `title` (best — descriptive, panel-specific)
-    ///   2. First bullet/sentence of patientSummary, truncated (good — at
-    ///      least tells the user what the report *says* even when the
-    ///      model skipped the [TITLE: …] line)
+    ///   1. LLM-generated `title` (best — descriptive, panel-specific,
+    ///      derived from the model's read of the whole report)
+    ///   2. Lab-panel keyword detected in the raw OCR text — still
+    ///      "based on the entire scan", just heuristic. Catches the
+    ///      common case where the model skipped the [TITLE: …] line
+    ///      but the OCR contains a clear panel name.
     ///   3. Date-based label (last resort)
-    /// The middle tier replaces what used to be the only fallback. The
-    /// user found pure date titles uninformative when the model
-    /// occasionally omitted the structured title marker.
     var displayTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
-        if let derived = Self.deriveFallbackTitle(from: patientSummary), !derived.isEmpty {
+        if let derived = Self.titleFromOCRKeywords(rawText), !derived.isEmpty {
             return derived
         }
         let formatter = DateFormatter()
@@ -83,31 +82,42 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         return formatter.string(from: timestamp)
     }
 
-    /// Pulls a short, single-line title out of the first meaningful bullet
-    /// of a streamed patient summary. Strips bullet glyphs and markdown
-    /// emphasis, caps the length so it fits on a History row, and returns
-    /// nil if there's nothing usable to derive from.
-    private static func deriveFallbackTitle(from patientSummary: String) -> String? {
-        let firstLine = patientSummary
-            .components(separatedBy: .newlines)
-            .lazy
-            .map { line -> String in
-                var s = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                let bulletPrefixes = ["- ", "* ", "• ", "– ", "— "]
-                for prefix in bulletPrefixes where s.hasPrefix(prefix) {
-                    s = String(s.dropFirst(prefix.count))
-                    break
-                }
-                return s
-                    .replacingOccurrences(of: "**", with: "")
-                    .replacingOccurrences(of: "*", with: "")
-                    .replacingOccurrences(of: "`", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Scans the entire OCR text for common lab-panel keywords and
+    /// returns a clean human-readable title when one matches. Patterns
+    /// are ordered most-specific-first so "Comprehensive Metabolic
+    /// Panel" wins over a bare "Metabolic Panel" hit.
+    ///
+    /// This exists as the middle tier of `displayTitle` so the History
+    /// row reflects what the report actually IS even when the model
+    /// forgot to emit the structured [TITLE: …] marker.
+    private static func titleFromOCRKeywords(_ ocrText: String) -> String? {
+        guard !ocrText.isEmpty else { return nil }
+        let lower = ocrText.lowercased()
+        let patterns: [(needles: [String], title: String)] = [
+            (["comprehensive metabolic panel", "cmp panel"], "Comprehensive Metabolic Panel"),
+            (["basic metabolic panel", "bmp panel"], "Basic Metabolic Panel"),
+            (["complete blood count", "cbc panel", "cbc with diff", "cbc w/ diff"], "Complete Blood Count"),
+            (["lipid panel", "lipid profile"], "Lipid Panel Results"),
+            (["hemoglobin a1c", "hba1c", " a1c"], "Hemoglobin A1C Test"),
+            (["thyroid panel", "thyroid function", "tsh,"], "Thyroid Panel"),
+            (["vitamin d, 25", "25-hydroxyvitamin d", "vitamin d test"], "Vitamin D Test"),
+            (["vitamin b12"], "Vitamin B12 Test"),
+            (["liver function", "hepatic panel", "liver panel"], "Liver Function Panel"),
+            (["kidney function", "renal panel", "renal function"], "Renal Function Panel"),
+            (["iron panel", "iron studies", "ferritin"], "Iron Panel"),
+            (["urinalysis"], "Urinalysis"),
+            (["psa, total", "prostate specific antigen"], "PSA Test"),
+            (["estradiol"], "Estradiol Test"),
+            (["testosterone"], "Testosterone Test"),
+            (["cortisol"], "Cortisol Test"),
+            (["c-reactive protein", "crp,"], "C-Reactive Protein"),
+        ]
+        for (needles, title) in patterns {
+            if needles.contains(where: { lower.contains($0) }) {
+                return title
             }
-            .first { !$0.isEmpty }
-        guard let line = firstLine else { return nil }
-        if line.count <= 48 { return line }
-        return String(line.prefix(46)) + "…"
+        }
+        return nil
     }
 
     var imageURL: URL? {
