@@ -63,16 +63,51 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         self.additionalPagePaths = additionalPagePaths
     }
 
-    /// Title shown in History rows + the Dashboard header. Uses the
-    /// LLM-generated `title` when present, falls back to a date-based
-    /// label so reports created before this field existed still read
-    /// well in the list.
+    /// Title shown in History rows + the Dashboard header. Three tiers:
+    ///   1. LLM-generated `title` (best — descriptive, panel-specific)
+    ///   2. First bullet/sentence of patientSummary, truncated (good — at
+    ///      least tells the user what the report *says* even when the
+    ///      model skipped the [TITLE: …] line)
+    ///   3. Date-based label (last resort)
+    /// The middle tier replaces what used to be the only fallback. The
+    /// user found pure date titles uninformative when the model
+    /// occasionally omitted the structured title marker.
     var displayTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
+        if let derived = Self.deriveFallbackTitle(from: patientSummary), !derived.isEmpty {
+            return derived
+        }
         let formatter = DateFormatter()
         formatter.dateFormat = "MMMM d 'Lab Report'"
         return formatter.string(from: timestamp)
+    }
+
+    /// Pulls a short, single-line title out of the first meaningful bullet
+    /// of a streamed patient summary. Strips bullet glyphs and markdown
+    /// emphasis, caps the length so it fits on a History row, and returns
+    /// nil if there's nothing usable to derive from.
+    private static func deriveFallbackTitle(from patientSummary: String) -> String? {
+        let firstLine = patientSummary
+            .components(separatedBy: .newlines)
+            .lazy
+            .map { line -> String in
+                var s = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                let bulletPrefixes = ["- ", "* ", "• ", "– ", "— "]
+                for prefix in bulletPrefixes where s.hasPrefix(prefix) {
+                    s = String(s.dropFirst(prefix.count))
+                    break
+                }
+                return s
+                    .replacingOccurrences(of: "**", with: "")
+                    .replacingOccurrences(of: "*", with: "")
+                    .replacingOccurrences(of: "`", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .first { !$0.isEmpty }
+        guard let line = firstLine else { return nil }
+        if line.count <= 48 { return line }
+        return String(line.prefix(46)) + "…"
     }
 
     var imageURL: URL? {
@@ -127,29 +162,43 @@ struct StructuredReport: Codable, Identifiable, Hashable {
 
     static func parse(from rawText: String) -> StructuredReport {
         // Pull the model-generated title (if any) out of the leading
-        // `[TITLE: "..."]` marker. We do this first so the title
-        // doesn't end up appended to PATIENT SUMMARY. The marker
-        // pattern is forgiving on whitespace and quote style so
-        // small-model drift doesn't break it.
+        // `[TITLE: "..."]` marker. We try multiple patterns so small-
+        // model drift (missing quotes, missing brackets, markdown
+        // wrapping) doesn't strand the report with the date-based
+        // fallback.
+        //
+        // Patterns tried in order:
+        //   1. [TITLE: "..."] or [TITLE: ...]   (canonical + bracketless-quote)
+        //   2. TITLE: "..." or TITLE: ...        (bracket-less, line-anchored)
+        // First match wins. Both strip the matched text from the
+        // section-parsing input so the title doesn't get folded into
+        // PATIENT SUMMARY.
         var extractedTitle: String = ""
         var workingText = rawText
-        let titlePattern = #"\[\s*TITLE\s*:\s*[\"']([^\"'\]]+)[\"']\s*\]"#
-        if let regex = try? NSRegularExpression(pattern: titlePattern, options: []) {
-            let nsRange = NSRange(rawText.startIndex..., in: rawText)
-            if let match = regex.firstMatch(in: rawText, range: nsRange),
+        let titlePatterns = [
+            #"\[\s*TITLE\s*:\s*["']?([^"'\]\n]+?)["']?\s*\]"#,
+            #"(?m)^\s*\**\s*TITLE\s*:\s*["']?([^"'\n]+?)["']?\s*\**\s*$"#,
+        ]
+        for pattern in titlePatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
+            let nsRange = NSRange(workingText.startIndex..., in: workingText)
+            if let match = regex.firstMatch(in: workingText, range: nsRange),
                match.numberOfRanges >= 2,
-               let captureRange = Range(match.range(at: 1), in: rawText) {
-                extractedTitle = String(rawText[captureRange])
+               let captureRange = Range(match.range(at: 1), in: workingText) {
+                let raw = String(workingText[captureRange])
+                extractedTitle = raw
+                    .replacingOccurrences(of: "**", with: "")
+                    .replacingOccurrences(of: "*", with: "")
+                    .replacingOccurrences(of: "`", with: "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
+                workingText = regex.stringByReplacingMatches(
+                    in: workingText,
+                    options: [],
+                    range: nsRange,
+                    withTemplate: ""
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !extractedTitle.isEmpty { break }
             }
-            // Strip every TITLE marker from the section-parsing input so
-            // the title doesn't get folded into PATIENT SUMMARY.
-            workingText = regex.stringByReplacingMatches(
-                in: rawText,
-                options: [],
-                range: nsRange,
-                withTemplate: ""
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         let headers: [(key: String, patterns: [String])] = [

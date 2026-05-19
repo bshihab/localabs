@@ -939,11 +939,17 @@ final class InferenceEngine: ObservableObject {
         Lab Report OCR Text:
         "\(extractedText)"
 
-        BEFORE the 5 sections, emit exactly one line containing a short title for this specific report, in this format:
-        [TITLE: "<3 to 6 words>"]
-        - The title should describe what kind of lab report this is — e.g. "Lipid Panel Results", "Complete Blood Count", "Vitamin D Test", "Comprehensive Metabolic Panel", "Q2 2025 Cholesterol Check".
-        - Do NOT include the user's name, date, or generic phrases like "Lab Report" alone.
-        - The app strips this line before displaying; the user sees the title only in the History list and at the top of the dashboard. There must be EXACTLY one `[TITLE: …]` and nothing else on that line.
+        START YOUR RESPONSE with a title line in EXACTLY this format, as the very first line of your output, before any other text:
+
+        [TITLE: "<3 to 6 word descriptor>"]
+
+        Examples: [TITLE: "Lipid Panel Results"], [TITLE: "Complete Blood Count"], [TITLE: "Vitamin D Test"], [TITLE: "Comprehensive Metabolic Panel"], [TITLE: "Q2 2025 Cholesterol Check"].
+
+        Requirements for the title line:
+        - It is REQUIRED. Skipping it causes the report to fall back to a generic date label in the user's History.
+        - Wrap the title text in DOUBLE QUOTES inside the square brackets.
+        - Describe what KIND of lab panel this is. Do NOT include the user's name, the date, or a generic phrase like "Lab Report" alone.
+        - Output exactly ONE [TITLE: …] line, then a blank line, then the 5 numbered sections.
 
         Then provide the 5 sections, each starting with the numbered header on its own line:
 
@@ -957,7 +963,7 @@ final class InferenceEngine: ObservableObject {
 
         - Default to bullet points, not paragraphs. Each bullet should be a single short sentence (one line on a phone). Lines starting with `- ` will render as bullets.
         - When you must use prose, keep paragraphs to 2 sentences max. No walls of text.
-        - PATIENT SUMMARY in particular should be 2–4 short bullets that capture the headline findings, not a paragraph.
+        - PATIENT SUMMARY is a SUMMARY OF THE LAB REPORT, not a recap of the user. The user already knows their own age, sex, blood type, etc. — do NOT restate any field that came from "User's Personal Health Context" above. Each bullet must state a finding from THIS specific report (e.g. "**Cholesterol** is elevated at **240 mg/dL** vs. normal range 100–200", "All thyroid markers are within reference range", "**Vitamin D** is low and likely the most actionable item"). 2–4 short bullets, leading with the most clinically significant finding.
         - Use **bold** for lab values, drug names, medical terms, and important numbers.
         - Use *italics* sparingly, only for tone or emphasis.
         - Add emoji rarely and only when it genuinely aids comprehension (✅ normal, ⚠️ worth discussing, 💊 medications, 🥗 dietary). Max 1–2 per section. Never decorative.

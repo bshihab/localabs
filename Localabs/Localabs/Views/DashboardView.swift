@@ -97,7 +97,13 @@ struct DashboardView: View {
     private var dashboardContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                Text("Translation Dashboard")
+                // Use the LLM-generated title (e.g. "Lipid Panel
+                // Results") so the dashboard header matches the
+                // History row and the user immediately sees what the
+                // report is about. Falls back to a generic header only
+                // when there's no report yet (empty tab state) or the
+                // model omitted a title — displayTitle handles both.
+                Text(currentReport?.displayTitle ?? "Translation")
                     .font(.system(size: 34, weight: .bold))
                     .padding(.horizontal)
                     .padding(.top, 8)
@@ -491,7 +497,7 @@ struct DashboardView: View {
 
     private var summaryCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Empathetic Translation")
+            Text("Summary")
                 .font(.system(size: 20, weight: .bold))
                 .frame(maxWidth: .infinity, alignment: .leading)
 

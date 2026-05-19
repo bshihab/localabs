@@ -9,6 +9,15 @@ options:
     icon:
       file: true
       lastKnownFileType: folder.iconcomposer.icon
+  # Auto-patch the AppIcon.icon file type after generation. XcodeGen's
+  # fileTypes option (above) doesn't actually stick for custom folder
+  # types in the pbxproj, so a sed pass on the generated project file
+  # is the reliable fix. Without this Xcode treats AppIcon.icon as a
+  # plain folder reference and the home-screen icon falls back to the
+  # empty AppIcon.appiconset (which renders as the default white iOS
+  # icon). Running it here means rebuilds never need to remember to
+  # invoke the script manually.
+  postGenCommand: bash fix_icon_type.sh
 
 settings:
   base:
