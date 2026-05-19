@@ -314,7 +314,18 @@ struct ScanView: View {
             if needsResume {
                 VStack(spacing: 10) {
                     Button {
-                        Task { await engine.resumeFromPaused() }
+                        Task {
+                            // Route the regen result through the same
+                            // handler analyzeImages uses so a successful
+                            // resume actually pushes Dashboard. Without
+                            // this routing the result was discarded and
+                            // ScanView snapped back to the upload view
+                            // — the "saved to History but never showed
+                            // me the translation" bug.
+                            if let result = await engine.resumeFromPaused() {
+                                handleAnalysisResult(result)
+                            }
+                        }
                     } label: {
                         Label("Resume Analysis", systemImage: "play.fill")
                             .font(.system(size: 17, weight: .semibold))

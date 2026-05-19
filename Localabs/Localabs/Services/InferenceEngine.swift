@@ -147,7 +147,14 @@ final class InferenceEngine: ObservableObject {
     /// `regenerateReport` call path; the only difference is that this
     /// is the canonical entry point when the user is sitting on a
     /// paused ScanView and taps Resume.
-    func resumeFromPaused() async {
+    ///
+    /// Returns the regenerated report so the caller (ScanView's Resume
+    /// button) can route it through the same `handleAnalysisResult`
+    /// flow analyzeImages/analyzePDF use — without that, a successful
+    /// resume cleared `pendingResumeReport` to nil and the ScanView
+    /// ZStack snapped back to the upload view, leaving the user on
+    /// the main menu even though the report had saved to History.
+    func resumeFromPaused() async -> StructuredReport? {
         isPaused = false
         let incomplete: StructuredReport?
         if let pending = pendingResumeReport {
@@ -158,7 +165,7 @@ final class InferenceEngine: ObservableObject {
             // between pause and resume.
             incomplete = LocalStorageService.shared.getHistory().first(where: { $0.isIncomplete })
         }
-        guard let target = incomplete else { return }
+        guard let target = incomplete else { return nil }
         pendingResumeReport = nil
         // streamingText still holds whatever tokens were collected
         // before the pause — pass it through so the model continues
@@ -166,7 +173,7 @@ final class InferenceEngine: ObservableObject {
         // string means we paused before any tokens streamed; let
         // regenerate run from scratch in that case.
         let partial = streamingText.isEmpty ? nil : streamingText
-        _ = await regenerateReport(
+        return await regenerateReport(
             from: target,
             freshStart: false,
             continueFromPartial: partial

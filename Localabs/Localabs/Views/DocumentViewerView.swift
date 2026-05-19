@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Vision
 
 /// Interactive document viewer that displays the original scanned image
@@ -1118,6 +1119,13 @@ struct FollowUpChatView: View {
                 ocrText: ocrText,
                 healthMetrics: healthMetrics
             )
+            // Selection-feedback generator pulses softly on each word
+            // boundary so the chat feels like it's typing into the
+            // user's palm. Per-piece pulses would jitter (a single
+            // word can stream in 2–3 sub-word chunks); whitespace-
+            // bearing pieces give a natural per-word cadence.
+            let haptic = UISelectionFeedbackGenerator()
+            haptic.prepare()
             var receivedFirstPiece = false
             for await piece in stream {
                 if !receivedFirstPiece {
@@ -1126,6 +1134,10 @@ struct FollowUpChatView: View {
                 }
                 if let idx = messages.firstIndex(where: { $0.id == aiId }) {
                     messages[idx].content += piece
+                }
+                if piece.contains(where: \.isWhitespace) {
+                    haptic.selectionChanged()
+                    haptic.prepare()
                 }
             }
             isThinking = false
