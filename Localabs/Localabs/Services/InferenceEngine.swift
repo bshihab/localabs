@@ -912,7 +912,8 @@ final class InferenceEngine: ObservableObject {
             The user just scanned what should be a lab report. The text below was extracted using Apple's VisionKit OCR.
 
             CRITICAL RULES BEFORE YOU ANSWER:
-            - Base your analysis ONLY on values that appear in the OCR text below. You have NO access to the user's prior lab reports — do not mention or imply any prior findings, do not say things like "consistent with your earlier panel," and do not carry numbers or diagnoses from anywhere else. If a fact isn't in the OCR text, it doesn't exist for this analysis.
+            - Your ENTIRE analysis is about THE LAB REPORT OCR TEXT below and only that text. You have NO access to prior lab reports, prior chats, conversation history, or anything outside this single document. Do not mention or imply any prior findings, do not say things like "consistent with your earlier panel," and do not carry numbers or diagnoses from anywhere else. If a fact isn't in the OCR text below, it doesn't exist for this analysis.
+            - The "Reference-Only User Context" block (further down) exists ONLY to help you pick the right reference range for a given lab value (e.g. age- or sex-adjusted hemoglobin / creatinine). DO NOT restate any value from that block in your output, do NOT use Apple Health metrics or profile fields AS FINDINGS, and never make them the subject of a bullet. The user already knows their own age, sex, blood type, medications, family history, and Health averages — putting any of those in the analysis is filler, not insight.
             - If the OCR text is empty, partially unreadable, or doesn't contain lab values / reference ranges / medical findings, your VERY FIRST line of PATIENT SUMMARY must be exactly: "\(Self.midStreamRefusalSnippet) I can analyze. Please retake with a printed lab result." Then STOP — do not write anything else, do not fill the other sections. The app watches for that exact phrase (including the ⚠️) and will halt generation when it sees it.
             - REFUSAL PHRASING IS ONLY FOR THE WHOLE-IMAGE-EMPTY CASE. Never use phrases like "this image doesn't appear to contain", "no lab report content", "cannot analyze this image", "not enough medical data", or any variation, INSIDE any of the 5 sections. If a SPECIFIC section has nothing to populate from the OCR (e.g. MEDICATION NOTES on a report that lists no medications, or QUESTIONS FOR YOUR DOCTOR when the report is unambiguous), write a single short, neutral bullet describing the absence — for example:
                 MEDICATION NOTES section with no meds → "- No medications are listed in this report."
@@ -926,7 +927,11 @@ final class InferenceEngine: ObservableObject {
         You are an empathetic, highly trained medical assistant.
         \(behaviorPrompt)
 
-        User's Personal Health Context:
+        ╔══ Lab Report OCR Text (the ONLY content to analyze) ══╗
+        "\(extractedText)"
+        ╚══════════════════════════════════════════════════════╝
+
+        Reference-Only User Context (use SILENTLY to pick appropriate reference ranges. NEVER quote, restate, or make any of these values a finding in your output.):
         \(profile.promptContextBullets)
         - Resting HR (30-day avg): \(healthMetrics.avgRestingHR.map { "\($0) bpm" } ?? "Unknown")
         - Sleep (30-day avg): \(healthMetrics.avgSleepHours.map { "\($0) hours" } ?? "Unknown")
@@ -935,9 +940,6 @@ final class InferenceEngine: ObservableObject {
         - Daily walking/running distance (30-day avg): \(healthMetrics.avgWalkingDistanceMiles.map { String(format: "%.2f mi", $0) } ?? "Unknown")
         - Walking speed (30-day avg): \(healthMetrics.avgWalkingSpeedMPH.map { String(format: "%.2f mph", $0) } ?? "Unknown")
         - Daily exercise minutes (30-day avg): \(healthMetrics.avgExerciseMinutes.map { String(format: "%.0f min", $0) } ?? "Unknown")
-
-        Lab Report OCR Text:
-        "\(extractedText)"
 
         START YOUR RESPONSE with a title line in EXACTLY this format, as the very first line of your output, before any other text:
 
@@ -963,7 +965,20 @@ final class InferenceEngine: ObservableObject {
 
         - Default to bullet points, not paragraphs. Each bullet should be a single short sentence (one line on a phone). Lines starting with `- ` will render as bullets.
         - When you must use prose, keep paragraphs to 2 sentences max. No walls of text.
-        - PATIENT SUMMARY is a SUMMARY OF THE LAB REPORT, not a recap of the user. The user already knows their own age, sex, blood type, etc. — do NOT restate any field that came from "User's Personal Health Context" above. Each bullet must state a finding from THIS specific report (e.g. "**Cholesterol** is elevated at **240 mg/dL** vs. normal range 100–200", "All thyroid markers are within reference range", "**Vitamin D** is low and likely the most actionable item"). 2–4 short bullets, leading with the most clinically significant finding.
+        - PATIENT SUMMARY is a SUMMARY OF THE LAB REPORT — 2 to 4 short bullets, each one a finding pulled from the OCR text above. Lead with the most clinically significant finding.
+
+          HARD RULE: every PATIENT SUMMARY bullet MUST reference a lab marker, value, or finding that appears in the OCR text. If a bullet doesn't contain at least one specific lab term or value from the OCR, it is invalid — rewrite it.
+
+          GOOD examples (each cites OCR content):
+          - "**Cholesterol** is elevated at **240 mg/dL** vs. normal range 100–200."
+          - "All thyroid markers (**TSH**, **T3**, **T4**) are within reference range."
+          - "**Vitamin D** is low at **18 ng/mL** — likely the most actionable item."
+
+          BAD examples (NEVER produce anything like these — they restate Reference-Only User Context instead of analyzing the report):
+          - "You are a 35-year-old male with blood type O+." (profile recap, not a finding)
+          - "Your resting heart rate of 62 bpm is healthy." (Apple Health, not a lab finding)
+          - "Your sleep average of 7 hours supports recovery." (Apple Health, not a lab finding)
+          - "Based on your previous reports, ..." (you have no access to previous reports)
         - Use **bold** for lab values, drug names, medical terms, and important numbers.
         - Use *italics* sparingly, only for tone or emphasis.
         - Add emoji rarely and only when it genuinely aids comprehension (✅ normal, ⚠️ worth discussing, 💊 medications, 🥗 dietary). Max 1–2 per section. Never decorative.

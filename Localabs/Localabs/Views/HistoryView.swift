@@ -199,17 +199,32 @@ struct HistoryView: View {
                     renameText = report.displayTitle
                     renameTarget = report
                 } label: {
-                    Label("Rename Report", systemImage: "pencil")
+                    Label {
+                        Text("Rename Report")
+                    } icon: {
+                        Image(systemName: "pencil")
+                            .foregroundStyle(.black)
+                    }
                 }
                 Button {
                     shareSingle(report: report)
                 } label: {
-                    Label("Share Report", systemImage: "square.and.arrow.up")
+                    Label {
+                        Text("Share Report")
+                    } icon: {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundStyle(.black)
+                    }
                 }
                 Button(role: .destructive) {
                     deleteTarget = report
                 } label: {
-                    Label("Delete Report", systemImage: "trash")
+                    Label {
+                        Text("Delete Report")
+                    } icon: {
+                        Image(systemName: "trash")
+                            .foregroundStyle(.red)
+                    }
                 }
             }
         }
