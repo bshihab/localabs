@@ -91,6 +91,32 @@ struct ScanView: View {
             } message: {
                 Text("Localabs couldn't find any lab values, reference ranges, or medical findings in this scan. To prevent invented results, the analysis was stopped.\n\nTry again with a printed lab report showing test names, your values, and reference ranges.")
             }
+            // Hard-failure popup. Fires when a run finishes with no
+            // resumable state — model produced zero tokens (prompt
+            // overflow, model never loaded, etc.). Without this, the
+            // user would see the screen snap back to the upload view
+            // with no explanation. Dismissing clears the engine's
+            // failure flag + local report state so the next scan
+            // starts from a clean slate.
+            .alert(
+                "Analysis didn't complete",
+                isPresented: Binding(
+                    get: { engine.lastHardFailureMessage != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            engine.lastHardFailureMessage = nil
+                            report = nil
+                        }
+                    }
+                )
+            ) {
+                Button("OK", role: .cancel) {
+                    engine.lastHardFailureMessage = nil
+                    report = nil
+                }
+            } message: {
+                Text(engine.lastHardFailureMessage ?? "")
+            }
             .onChange(of: pickerItems) { _, newItems in
                 handlePickerItemsChange(newItems)
             }

@@ -59,6 +59,13 @@ final class InferenceEngine: ObservableObject {
     /// resumed again later if needed.
     @Published var pendingResumeReport: StructuredReport?
 
+    /// Set when a run finishes with no resumable state — the model
+    /// produced zero tokens (prompt overflow, model not loaded, etc.)
+    /// and Resume can't help. ScanView observes this and surfaces it
+    /// as an alert so the user gets a real explanation instead of a
+    /// futile Resume CTA that would just hit the same failure.
+    @Published var lastHardFailureMessage: String?
+
     private var modelURL: URL { selectedModel.localURL }
 
     /// True when the app has received `didEnterBackgroundNotification`
@@ -351,10 +358,15 @@ final class InferenceEngine: ObservableObject {
         }
 
         // Fresh run — clear any cancellation flag left over from a previous
-        // backgrounding event so this analysis starts unblocked.
+        // backgrounding event so this analysis starts unblocked. Also wipe
+        // streamingText and any prior hard-failure message so stale state
+        // from a previous run can't be mistaken for resumable partial output
+        // (which would mis-trigger the Resume CTA on the next hard failure).
         isInferenceCancelled = false
         isProcessing = true
         analysisProgress = 0
+        streamingText = ""
+        lastHardFailureMessage = nil
         defer { isProcessing = false }
 
         // ── OCR every page sequentially ──
@@ -439,10 +451,29 @@ final class InferenceEngine: ObservableObject {
         // would still get saved as a half-empty "completed" report.
         // That was the bug behind "I scan 3 medical records, it
         // returns me to the upload screen but the scan is in history."
+        //
+        // Distinguish "resumable partial state" (mid-stream cancel OR
+        // truncation with streamed tokens to continue from) from "hard
+        // failure" (model produced zero tokens — prompt overflow, model
+        // never loaded, etc.). Only resumable cases park a
+        // pendingResumeReport; hard failures surface as a one-shot alert
+        // via lastHardFailureMessage and clean up their orphan scans so
+        // the same images don't accumulate on disk.
+        let hasResumableState = isInferenceCancelled || !streamingText.isEmpty
+        let isHardFailure = report.isIncomplete && !hasResumableState
         if !isInferenceCancelled && !report.isIncomplete && !report.wasRejectedAsNonHealth {
             LocalStorageService.shared.saveReport(report)
         }
-        if isInferenceCancelled || report.isIncomplete { pendingResumeReport = report }
+        if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
+            pendingResumeReport = report
+        }
+        if isHardFailure {
+            Self.deleteSavedScans(named: savedNames)
+            report.imagePath = nil
+            report.additionalPagePaths = nil
+            lastHardFailureMessage = report.patientSummary
+            analysisProgress = 0
+        }
         processingStatus = ""
         if !report.isIncomplete { analysisProgress = 1.0 }
         return report
@@ -480,6 +511,8 @@ final class InferenceEngine: ObservableObject {
             isInferenceCancelled = false
             isProcessing = true
             analysisProgress = 0.20  // OCR is skipped for text-PDFs
+            streamingText = ""
+            lastHardFailureMessage = nil
             defer { isProcessing = false }
 
             // Same non-health rejection gate as analyzeImages, applied
@@ -523,10 +556,23 @@ final class InferenceEngine: ObservableObject {
             // Same triple-gate as analyzeImages: skip persistence for
             // any run that didn't make it to all 5 sections, so a
             // truncated multi-page PDF doesn't end up in History.
+            // Resumable-state distinction mirrors analyzeImages — see
+            // its comment for the full rationale.
+            let hasResumableState = isInferenceCancelled || !streamingText.isEmpty
+            let isHardFailure = report.isIncomplete && !hasResumableState
             if !isInferenceCancelled && !report.isIncomplete && !report.wasRejectedAsNonHealth {
                 LocalStorageService.shared.saveReport(report)
             }
-            if isInferenceCancelled || report.isIncomplete { pendingResumeReport = report }
+            if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
+                pendingResumeReport = report
+            }
+            if isHardFailure {
+                Self.deleteSavedScans(named: savedNames)
+                report.imagePath = nil
+                report.additionalPagePaths = nil
+                lastHardFailureMessage = report.patientSummary
+                analysisProgress = 0
+            }
             processingStatus = ""
             if !report.isIncomplete { analysisProgress = 1.0 }
             return report
@@ -555,14 +601,22 @@ final class InferenceEngine: ObservableObject {
     /// disambiguate cases where the same value appears on multiple pages.
     /// Single-page input gets no marker.
     /// Hard cap on OCR text length so the prompt fits inside LlamaContext's
-    /// 4096-token context window with margin for the system prompt + RAG
-    /// context + 1000-token output budget. Empirically the system prompt
-    /// + profile + Health + RAG comes to ~1000 tokens, leaving roughly
-    /// 2000 tokens (~7000–8000 chars depending on tokenization density)
-    /// for OCR. We use 7000 chars to give realistic medical-document
-    /// tokenization a margin without truncating most multi-page scans.
+    /// 4096-token context window with margin for the system prompt + output
+    /// budget. The behavior + section-instructions blocks grew over time and
+    /// the original 7000-char ceiling started overflowing on dense medical
+    /// OCR — `llama_tokenize` would return negative, `runPredict` would bail
+    /// before yielding a single token, and the UI froze at 25% with a
+    /// misleading "Resume Analysis" CTA.
+    ///
+    /// Current accounting (rough, 1 token ≈ 3 chars for medical text):
+    ///   behavior + section instructions + Health + Profile ≈ 1250 tokens
+    ///   OCR @ 4000 chars                                    ≈ 1300 tokens
+    ///   output budget (`maxTokens` in runInference)         ≈ 1300 tokens
+    ///   ────────────────────────────────────────────────────────────────
+    ///   total                                               ≈ 3850 tokens
+    /// Leaves ~250 tokens of headroom under n_ctx=4096.
     private func truncateForContext(_ raw: String) -> String {
-        let maxChars = 7000
+        let maxChars = 4000
         guard raw.count > maxChars else { return raw }
         let cut = String(raw.prefix(maxChars))
         return cut + "\n\n[Note: OCR text was truncated to fit Localabs's context window. If important details are missing, scan fewer pages or use a higher-resolution photo of the relevant section.]"
@@ -650,6 +704,7 @@ final class InferenceEngine: ObservableObject {
 
         isInferenceCancelled = false
         isProcessing = true
+        lastHardFailureMessage = nil
         // Fresh regens (from the Dashboard CTA) zero the bar so it
         // visibly fills from 0%. Without this, a previous completed
         // run leaves analysisProgress at 1.0 and the max() lines
@@ -679,10 +734,24 @@ final class InferenceEngine: ObservableObject {
         fresh.imagePath = existing.imagePath
         fresh.additionalPagePaths = existing.additionalPagePaths
 
-        if !isInferenceCancelled {
+        // Resumable-state distinction (see analyzeImages for the full
+        // rationale). For regen the save condition was previously just
+        // `!isInferenceCancelled`, which would happily overwrite a
+        // good existing report with a hard-failure shell. The
+        // `!isHardFailure` clause preserves the prior stored copy when
+        // the retry produces zero tokens.
+        let hasResumableState = isInferenceCancelled || !streamingText.isEmpty
+        let isHardFailure = fresh.isIncomplete && !hasResumableState
+        if !isInferenceCancelled && !isHardFailure {
             LocalStorageService.shared.saveReport(fresh)
         }
-        if isInferenceCancelled || fresh.isIncomplete { pendingResumeReport = fresh }
+        if (isInferenceCancelled || fresh.isIncomplete) && hasResumableState {
+            pendingResumeReport = fresh
+        }
+        if isHardFailure {
+            lastHardFailureMessage = fresh.patientSummary
+            analysisProgress = 0
+        }
         processingStatus = ""
         if !fresh.isIncomplete { analysisProgress = 1.0 }
         return fresh
@@ -924,12 +993,17 @@ final class InferenceEngine: ObservableObject {
         // to over-spend tokens on PATIENT SUMMARY / DIETARY ADVICE
         // and arrive at MEDICATION NOTES with only a sentence or
         // two of budget left, ending sections with "No medications"
-        // even when the report did list them. 2000 leaves ~300-400
-        // tokens of safety inside n_ctx=4096 after a 7000-char OCR
-        // (~1750 tokens) plus the system header (~250 tokens).
-        // Model still terminates at end-of-turn, so light reports
-        // don't pay any latency for the bigger ceiling.
-        let maxTokens = 2000
+        // even when the report did list them.
+        //
+        // 1300 is the new ceiling after the prompt grew (behavior +
+        // section-instruction blocks expanded) and 2000 started
+        // overflowing n_ctx=4096 once you add a 4000-char OCR
+        // (~1300 tokens) + ~1250 tokens of system header. 5 sections
+        // at ~80–120 words each ≈ 600 words ≈ 800 tokens, so 1300
+        // still leaves comfortable breathing room. Model still
+        // terminates at end-of-turn, so light reports don't pay any
+        // latency for the bigger ceiling.
+        let maxTokens = 1300
         var tokenCount = 0
         // Surface prompt size in the Xcode console — useful for diagnosing
         // tokenize-overflow / slow-decode complaints. Approximate token
@@ -984,11 +1058,15 @@ final class InferenceEngine: ObservableObject {
 
         // Empty output usually means llama_tokenize bailed because the
         // prompt overflowed n_ctx (multi-page scans + system prompt +
-        // 1000-token output budget). Don't save a blank report — preserve
-        // the OCR text so the user can retry via Resume.
+        // output budget). Don't save a blank report — preserve the OCR
+        // text and let the caller route this to an error alert via
+        // lastHardFailureMessage. The copy intentionally avoids
+        // suggesting "Resume" because hard failures route around the
+        // Resume CTA — re-running the same prompt would just hit the
+        // same overflow.
         if collected.isEmpty {
             return StructuredReport(
-                patientSummary: "Analysis didn't complete — your scan may be too long for Localabs's context window. Tap Resume to retry, or use fewer pages.",
+                patientSummary: "Analysis didn't complete — your scan may be too long for Localabs's context window. Try again with fewer pages, or use a higher-resolution photo of just the section you care about.",
                 rawText: extractedText
             )
         }
