@@ -181,14 +181,23 @@ struct StructuredReport: Codable, Identifiable, Hashable {
             let upper = stripped.uppercased()
 
             var matchedKey: String?
+            // Strip BOTH the numbering prefix ("5.", "5)") AND any
+            // leading non-letter glyphs (stray emoji like "💊", bullet
+            // chars, dashes) before pattern-matching the header. The
+            // model's prompt allows section-internal emoji and it
+            // occasionally leaks a 💊 onto the "MEDICATION NOTES"
+            // header line — previously that stranded the section as
+            // empty because the prefix check failed, which then
+            // tripped isIncomplete and blocked navigation to
+            // Dashboard.
+            let withoutNumbering = upper
+                .replacingOccurrences(
+                    of: #"^[^A-Z]+"#,
+                    with: "",
+                    options: .regularExpression
+                )
             for header in headers {
                 for pattern in header.patterns {
-                    let withoutNumbering = upper
-                        .replacingOccurrences(
-                            of: #"^\s*\d+[\.\)]\s*"#,
-                            with: "",
-                            options: .regularExpression
-                        )
                     if withoutNumbering.hasPrefix(pattern) {
                         matchedKey = header.key
                         break

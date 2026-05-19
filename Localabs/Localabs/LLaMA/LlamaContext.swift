@@ -46,13 +46,19 @@ public final class LlamaContext: @unchecked Sendable {
         }
 
         var ctxParams = llama_context_default_params()
-        // 4096 is enough for multi-page lab reports without the prompt
-        // silently overflowing (which manifested as blank reports — the
-        // 2048 default was getting exceeded as soon as the user uploaded
-        // 2+ pages worth of OCR text plus our system prompt + output
-        // budget). 4096 roughly doubles KV cache memory but still fits
-        // comfortably alongside the 4B model on iPhones with 6GB+ RAM.
-        ctxParams.n_ctx = 4096
+        // 6144 is the new ceiling after the analysis prompt's behavior
+        // + section-instruction blocks grew (~1250 tokens of system
+        // header before OCR). At 4096 the model couldn't fit both a
+        // realistic OCR (4000+ chars) AND a generous output budget,
+        // and started truncating mid-MEDICATION NOTES — leaving the
+        // report `isIncomplete` and stranding the user on the Resume
+        // CTA instead of Dashboard. 6144 gives ~2000 tokens of
+        // output budget after a 5000-char OCR (~1670 tokens) plus the
+        // system header, which is what the 5-section template actually
+        // needs to finish cleanly. KV cache grows ~50% over the prior
+        // 4096; still fits on iPhones with 6GB+ RAM alongside the 4B
+        // model in Q4_K_M.
+        ctxParams.n_ctx = 6144
         // n_batch caps how many tokens can be submitted in a single
         // llama_decode call. The default is 512, which causes
         // GGML_ASSERT(n_tokens_all <= cparams.n_batch) to fire for
@@ -62,7 +68,7 @@ public final class LlamaContext: @unchecked Sendable {
         // happens in n_ubatch-sized chunks, so this doesn't blow up
         // peak Metal memory — it just removes the artificial submission
         // ceiling.
-        ctxParams.n_batch = 4096
+        ctxParams.n_batch = 6144
         ctxParams.n_threads = Int32(max(1, ProcessInfo.processInfo.processorCount - 1))
         ctxParams.n_threads_batch = ctxParams.n_threads
 

@@ -601,22 +601,21 @@ final class InferenceEngine: ObservableObject {
     /// disambiguate cases where the same value appears on multiple pages.
     /// Single-page input gets no marker.
     /// Hard cap on OCR text length so the prompt fits inside LlamaContext's
-    /// 4096-token context window with margin for the system prompt + output
-    /// budget. The behavior + section-instructions blocks grew over time and
-    /// the original 7000-char ceiling started overflowing on dense medical
-    /// OCR — `llama_tokenize` would return negative, `runPredict` would bail
-    /// before yielding a single token, and the UI froze at 25% with a
-    /// misleading "Resume Analysis" CTA.
+    /// context window with margin for the system prompt + output budget.
     ///
-    /// Current accounting (rough, 1 token ≈ 3 chars for medical text):
+    /// Token accounting (rough, 1 token ≈ 3 chars for medical text), now
+    /// sized against n_ctx=6144:
     ///   behavior + section instructions + Health + Profile ≈ 1250 tokens
-    ///   OCR @ 4000 chars                                    ≈ 1300 tokens
-    ///   output budget (`maxTokens` in runInference)         ≈ 1300 tokens
+    ///   OCR @ 5000 chars                                    ≈ 1670 tokens
+    ///   output budget (`maxTokens` in runInference)         ≈ 1800 tokens
     ///   ────────────────────────────────────────────────────────────────
-    ///   total                                               ≈ 3850 tokens
-    /// Leaves ~250 tokens of headroom under n_ctx=4096.
+    ///   total                                               ≈ 4720 tokens
+    /// Leaves ~1400 tokens of headroom — enough for the model to comfortably
+    /// finish all 5 sections (the 1300-token output budget that came before
+    /// was triggering MEDICATION NOTES truncation, which marked the report
+    /// `isIncomplete` and stranded the user on the Resume CTA).
     private func truncateForContext(_ raw: String) -> String {
-        let maxChars = 4000
+        let maxChars = 5000
         guard raw.count > maxChars else { return raw }
         let cut = String(raw.prefix(maxChars))
         return cut + "\n\n[Note: OCR text was truncated to fit Localabs's context window. If important details are missing, scan fewer pages or use a higher-resolution photo of the relevant section.]"
@@ -992,18 +991,17 @@ final class InferenceEngine: ObservableObject {
         // room even on dense multi-page reports — the model tended
         // to over-spend tokens on PATIENT SUMMARY / DIETARY ADVICE
         // and arrive at MEDICATION NOTES with only a sentence or
-        // two of budget left, ending sections with "No medications"
-        // even when the report did list them.
+        // two of budget left (or never reach it at all), ending
+        // generation with that section empty. That tripped
+        // StructuredReport.isIncomplete and stranded the user on
+        // the Resume CTA instead of pushing into Dashboard.
         //
-        // 1300 is the new ceiling after the prompt grew (behavior +
-        // section-instruction blocks expanded) and 2000 started
-        // overflowing n_ctx=4096 once you add a 4000-char OCR
-        // (~1300 tokens) + ~1250 tokens of system header. 5 sections
-        // at ~80–120 words each ≈ 600 words ≈ 800 tokens, so 1300
-        // still leaves comfortable breathing room. Model still
-        // terminates at end-of-turn, so light reports don't pay any
-        // latency for the bigger ceiling.
-        let maxTokens = 1300
+        // 1800 paired with n_ctx=6144 leaves comfortable headroom
+        // for all 5 sections (5 × ~120 words ≈ 800 tokens of
+        // content + 5 headers + the title line). Model still
+        // terminates at end-of-turn, so light reports don't pay
+        // any latency for the bigger ceiling.
+        let maxTokens = 1800
         var tokenCount = 0
         // Surface prompt size in the Xcode console — useful for diagnosing
         // tokenize-overflow / slow-decode complaints. Approximate token
