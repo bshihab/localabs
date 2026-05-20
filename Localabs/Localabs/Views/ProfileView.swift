@@ -5,6 +5,11 @@ struct ProfileView: View {
     @AppStorage("onboarding_complete") var onboardingComplete = false
     @State private var profile = UserProfile.load()
     @State private var showOnboarding = false
+    /// Drives the new dedicated profile-edit sheet. Replaces the
+    /// previous `showOnboarding` route for the Edit button — that
+    /// took users back through the welcome / privacy flow, which
+    /// felt redundant for someone who'd already onboarded.
+    @State private var showProfileEdit = false
     @State private var confirmDelete = false
     @State private var confirmReset = false
     @State private var hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
@@ -53,6 +58,16 @@ struct ProfileView: View {
             }
             .sheet(isPresented: $showOnboarding) {
                 OnboardingView()
+            }
+            .sheet(isPresented: $showProfileEdit, onDismiss: {
+                // ProfileEditSheet auto-saves on every change, so by
+                // the time we dismiss the disk has the latest. Re-
+                // load the local @State so the inline cards in
+                // ProfileView reflect those edits without waiting
+                // for the next tab switch.
+                profile = UserProfile.load()
+            }) {
+                ProfileEditSheet()
             }
             .alert("Delete Model File?", isPresented: $confirmDelete) {
                 Button("Delete", role: .destructive) { engine.deleteSelectedModel() }
@@ -444,7 +459,13 @@ struct ProfileView: View {
     private var actionButtons: some View {
         VStack(spacing: 12) {
             Button {
-                showOnboarding = true
+                // New: dedicated edit sheet that shows existing
+                // field values + any auto-added entries, instead of
+                // re-routing through the 4-step onboarding flow.
+                // The welcome / privacy / re-acceptance experience
+                // is still reachable via the Re-Run Onboarding
+                // button below for users who want it.
+                showProfileEdit = true
             } label: {
                 Label("Edit Health Profile", systemImage: "pencil")
                     .frame(maxWidth: .infinity)

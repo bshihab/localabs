@@ -40,7 +40,11 @@ struct ProfileQuickAddSheet: View {
                 } header: {
                     Text("Where this gets saved")
                 } footer: {
-                    Text(footerText(for: selectedField))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(footerText(for: selectedField))
+                        Text("This becomes context for every future analysis and chat — Localabs reads your profile silently so answers stay personalized. Everything stays on this device; nothing is sent to a server.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section {

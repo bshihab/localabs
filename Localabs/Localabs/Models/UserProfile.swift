@@ -1,6 +1,6 @@
 import Foundation
 
-struct UserProfile: Codable {
+struct UserProfile: Codable, Equatable {
     var age: String = ""
     var biologicalSex: String = ""
     /// Free-form text when `biologicalSex == "Other"` — captures the
