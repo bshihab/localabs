@@ -27,6 +27,10 @@ struct ProfileQuickAddSheet: View {
     /// Brief "✓ Saved" confirmation shown before the sheet dismisses,
     /// so the user gets visible feedback that the write succeeded.
     @State private var showSavedConfirmation: Bool = false
+    /// Drives a validation alert when Save is tapped with a value
+    /// that doesn't fit the selected field (e.g. letters in the age
+    /// field, or somehow a non-allowed picker value).
+    @State private var validationMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -48,7 +52,28 @@ struct ProfileQuickAddSheet: View {
                 }
 
                 Section {
-                    if selectedField.isMultiLine {
+                    // Render the right input control for the field's
+                    // data type:
+                    //   - Picker for closed-set fields (biological
+                    //     sex / smoking / alcohol / blood type) so
+                    //     the user can't type "blue" for blood type
+                    //     or "male-ish" for biological sex.
+                    //   - Numeric TextField with the number keypad
+                    //     for age (still validated on Save in case
+                    //     the user pastes letters in).
+                    //   - Free-text TextField for medical conditions
+                    //     / medications / family history.
+                    if let options = selectedField.allowedValues {
+                        Picker(selectedField.displayName, selection: $inputValue) {
+                            ForEach(options, id: \.self) { option in
+                                Text(option).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    } else if selectedField.isNumeric {
+                        TextField(selectedField.placeholder, text: $inputValue)
+                            .keyboardType(.numberPad)
+                    } else if selectedField.isMultiLine {
                         TextField(
                             selectedField.placeholder,
                             text: $inputValue,
@@ -66,6 +91,17 @@ struct ProfileQuickAddSheet: View {
                        !existing.isEmpty {
                         Text("Will replace your saved value: \"\(existing)\"")
                             .foregroundStyle(.orange)
+                    }
+                }
+                // When the user switches to a Picker-style field,
+                // snap inputValue to a valid option. Without this,
+                // the prefilled chat text (e.g. "I'm 35 years old")
+                // wouldn't match any allowed value and the Picker
+                // would render with no selection highlighted.
+                .onChange(of: selectedField) { _, newField in
+                    if let options = newField.allowedValues,
+                       !options.contains(inputValue) {
+                        inputValue = options.first ?? ""
                     }
                 }
 
@@ -99,6 +135,26 @@ struct ProfileQuickAddSheet: View {
                 // chat input bar when they tapped "+". They can
                 // edit before saving.
                 if inputValue.isEmpty { inputValue = prefilledValue }
+                // If the user opens the sheet directly onto a picker
+                // field, ensure inputValue is a valid option from
+                // the start (covers the case where the prefilled
+                // chat text didn't match any allowed value).
+                if let options = selectedField.allowedValues,
+                   !options.contains(inputValue) {
+                    inputValue = options.first ?? ""
+                }
+            }
+            .alert(
+                "Invalid entry",
+                isPresented: Binding(
+                    get: { validationMessage != nil },
+                    set: { if !$0 { validationMessage = nil } }
+                ),
+                presenting: validationMessage
+            ) { _ in
+                Button("OK", role: .cancel) {}
+            } message: { message in
+                Text(message)
             }
         }
         .presentationDetents([.medium, .large])
@@ -130,8 +186,31 @@ struct ProfileQuickAddSheet: View {
     }
 
     private func save() {
+        // Pre-flight validation. The right input control already
+        // makes the wrong shape hard to enter (number-pad for age,
+        // Picker for closed-set fields) — this is the belt to the
+        // suspenders for cases like pasting letters into the age
+        // field or somehow ending up with a value outside the
+        // picker's allowed set.
+        let trimmed = inputValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if selectedField.isNumeric {
+            guard let n = Int(trimmed), (1...120).contains(n) else {
+                validationMessage = "Age has to be a whole number between 1 and 120."
+                return
+            }
+        }
+        if let allowed = selectedField.allowedValues, !allowed.contains(trimmed) {
+            validationMessage = "Pick one of the allowed options for \(selectedField.displayName)."
+            return
+        }
+        if trimmed.isEmpty {
+            validationMessage = "Type a value before saving."
+            return
+        }
+
         var profile = UserProfile.load()
-        let changed = profile.add(inputValue, to: selectedField)
+        let changed = profile.add(trimmed, to: selectedField)
         if changed {
             profile.save()
         }

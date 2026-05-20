@@ -112,6 +112,30 @@ struct UserProfile: Codable, Equatable {
             case .smoking, .alcohol, .bloodType, .age, .biologicalSex: return false
             }
         }
+
+        /// Closed set of valid values for picker-style fields. Used
+        /// by ProfileQuickAddSheet to render a Picker (instead of a
+        /// free-text TextField) so the user can't type "blue" for
+        /// blood type or "male-ish" for biological sex. Returns nil
+        /// for free-text + numeric fields, where the sheet falls
+        /// back to a TextField with appropriate keyboard type.
+        var allowedValues: [String]? {
+            switch self {
+            case .biologicalSex:  return ["Male", "Female", "Other"]
+            case .smoking:        return ["Never", "Former", "Current"]
+            case .alcohol:        return ["None", "Rarely", "Occasionally", "Daily"]
+            case .bloodType:      return ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"]
+            default:              return nil
+            }
+        }
+
+        /// True for fields that must be a number (currently only
+        /// `age`). The quick-add sheet uses this to switch on a
+        /// numeric keypad and to gate Save on an integer-in-range
+        /// validation.
+        var isNumeric: Bool {
+            self == .age
+        }
     }
 
     /// Returns the current stored value for a given field. Used by
