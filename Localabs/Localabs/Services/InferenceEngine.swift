@@ -991,7 +991,7 @@ final class InferenceEngine: ObservableObject {
             FIRST identify which it is from the OCR content, then summarize what THIS document says.
 
             CRITICAL RULES BEFORE YOU ANSWER:
-            - MULTI-PAGE SCANS ARE ONE DOCUMENT. The OCR text may contain `[Page 1]`, `[Page 2]`, etc. markers — these are just page boundaries inside the SAME report. Produce ONE cohesive 5-section analysis covering ALL pages together. Do NOT restart PATIENT SUMMARY when you reach the next page marker. Do NOT emit a second [TITLE: …] line. Treat the whole stream as one document; values on page 2 + page 3 belong in the same sections as page 1.
+            - MULTI-PAGE SCANS ARE ONE DOCUMENT. The OCR text may contain `[Page 1]`, `[Page 2]`, etc. markers — these are just page boundaries inside the SAME report. Produce ONE cohesive 5-section analysis covering ALL pages together. Do NOT restart PATIENT SUMMARY when you reach the next page marker. Treat the whole stream as one document; values on page 2 + page 3 belong in the same sections as page 1.
             - Your ENTIRE analysis is about THE OCR TEXT below and only that text. You have NO access to prior reports, prior chats, conversation history, or anything outside this single document. Do not say "consistent with your earlier panel," do not carry numbers or diagnoses from anywhere else. If a fact isn't in the OCR text, it doesn't exist for this analysis.
             - NEVER FABRICATE. Every numeric value (e.g. "240 mg/dL", "35 mg/dL", "18 ng/mL") and every diagnosis you cite must appear verbatim, character-for-character, in the OCR text above. If you cannot point to the exact characters, do not write it. The model has been observed inventing entire lipid panels for documents that mention "cholesterol" only in an Orders section — this is a critical failure and must never happen.
             - DISTINGUISH ORDERS FROM RESULTS. Clinical notes routinely list labs the doctor ORDERED (phrasing like "Laboratory orders placed today: CBC, CMP, TSH…"). Orders are NOT results — do not pretend the test came back with a value. Reference the orders only as part of the PLAN, not as findings.
@@ -1021,20 +1021,7 @@ final class InferenceEngine: ObservableObject {
         - Walking speed (30-day avg): \(healthMetrics.avgWalkingSpeedMPH.map { String(format: "%.2f mph", $0) } ?? "Unknown")
         - Daily exercise minutes (30-day avg): \(healthMetrics.avgExerciseMinutes.map { String(format: "%.0f min", $0) } ?? "Unknown")
 
-        START YOUR RESPONSE with a title line in EXACTLY this format, as the very first line of your output, before any other text:
-
-        [TITLE: "<3 to 6 word descriptor>"]
-
-        Examples for LAB REPORTS: [TITLE: "Lipid Panel Results"], [TITLE: "Complete Blood Count"], [TITLE: "Vitamin D Test"], [TITLE: "Comprehensive Metabolic Panel"].
-        Examples for CLINICAL NOTES: [TITLE: "Vitiligo Evaluation"], [TITLE: "Dermatology Consultation"], [TITLE: "Hypertension Follow-Up"], [TITLE: "Annual Physical Exam"].
-
-        Requirements for the title line:
-        - It is REQUIRED. Skipping it causes the report to fall back to a generic date label in the user's History.
-        - Wrap the title text in DOUBLE QUOTES inside the square brackets.
-        - Describe what the document is PRIMARILY about — the specific lab panel, OR the visit's chief diagnosis / reason. Do NOT include the user's name, the date, or a generic phrase like "Lab Report" / "Clinical Note" alone.
-        - Output exactly ONE [TITLE: …] line, then a blank line, then the 5 numbered sections.
-
-        Then provide the 5 sections, each starting with the numbered header on its own line:
+        Provide the 5 sections, each starting with the numbered header on its own line:
 
         1. PATIENT SUMMARY
         2. QUESTIONS FOR YOUR DOCTOR

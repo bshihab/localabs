@@ -64,13 +64,16 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     }
 
     /// Title shown in History rows + the Dashboard header. Three tiers:
-    ///   1. LLM-generated `title` (best — descriptive, panel-specific,
-    ///      derived from the model's read of the whole report)
-    ///   2. Lab-panel keyword detected in the raw OCR text — still
-    ///      "based on the entire scan", just heuristic. Catches the
-    ///      common case where the model skipped the [TITLE: …] line
-    ///      but the OCR contains a clear panel name.
-    ///   3. Date-based label (last resort)
+    ///   1. User-set `title` from the History row's Rename action
+    ///   2. Lab-panel / clinical-note keyword detected in the raw OCR
+    ///      text — deterministic regex match against common panel +
+    ///      diagnosis names. This is the default for any new scan
+    ///      since the LLM no longer generates a title (that feature
+    ///      was unreliable on a 4B model — it tended to latch onto
+    ///      whichever noun appeared most often, not the document's
+    ///      actual subject).
+    ///   3. Date-based label (last resort, for scans whose OCR
+    ///      doesn't match any known keyword)
     var displayTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { return trimmed }
@@ -78,7 +81,7 @@ struct StructuredReport: Codable, Identifiable, Hashable {
             return derived
         }
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMMM d 'Lab Report'"
+        formatter.dateFormat = "MMMM d 'Report'"
         return formatter.string(from: timestamp)
     }
 
@@ -87,9 +90,11 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     /// are ordered most-specific-first so "Comprehensive Metabolic
     /// Panel" wins over a bare "Metabolic Panel" hit.
     ///
-    /// This exists as the middle tier of `displayTitle` so the History
-    /// row reflects what the report actually IS even when the model
-    /// forgot to emit the structured [TITLE: …] marker.
+    /// This is the default title path for every new scan now that
+    /// the LLM-side `[TITLE: …]` feature was removed for reliability
+    /// reasons. The History row reflects what the report actually
+    /// IS by pattern-matching the OCR against a curated list of
+    /// panel + diagnosis names.
     private static func titleFromOCRKeywords(_ ocrText: String) -> String? {
         guard !ocrText.isEmpty else { return nil }
         let lower = ocrText.lowercased()
@@ -113,10 +118,10 @@ struct StructuredReport: Codable, Identifiable, Hashable {
             (["cortisol"], "Cortisol Test"),
             (["c-reactive protein", "crp,"], "C-Reactive Protein"),
 
-            // Clinical-note patterns — diagnosis keywords from common
-            // encounter notes. Now that the heuristic accepts clinical
-            // notes through the gate, the title fallback needs to be
-            // able to label them when the model skips [TITLE: …].
+            // Clinical-note patterns — diagnosis keywords from
+            // common encounter notes. Used the same way as the lab-
+            // panel patterns above: the History row labels itself
+            // from whichever clinical term matches the OCR text.
             (["vitiligo", "icd-10: l80", "icd 10 l80"], "Vitiligo Evaluation"),
             (["psoriasis", "icd-10: l40"], "Psoriasis Evaluation"),
             (["eczema", "atopic dermatitis"], "Eczema Evaluation"),
@@ -195,45 +200,15 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     }
 
     static func parse(from rawText: String) -> StructuredReport {
-        // Pull the model-generated title (if any) out of the leading
-        // `[TITLE: "..."]` marker. We try multiple patterns so small-
-        // model drift (missing quotes, missing brackets, markdown
-        // wrapping) doesn't strand the report with the date-based
-        // fallback.
-        //
-        // Patterns tried in order:
-        //   1. [TITLE: "..."] or [TITLE: ...]   (canonical + bracketless-quote)
-        //   2. TITLE: "..." or TITLE: ...        (bracket-less, line-anchored)
-        // First match wins. Both strip the matched text from the
-        // section-parsing input so the title doesn't get folded into
-        // PATIENT SUMMARY.
-        var extractedTitle: String = ""
-        var workingText = rawText
-        let titlePatterns = [
-            #"\[\s*TITLE\s*:\s*["']?([^"'\]\n]+?)["']?\s*\]"#,
-            #"(?m)^\s*\**\s*TITLE\s*:\s*["']?([^"'\n]+?)["']?\s*\**\s*$"#,
-        ]
-        for pattern in titlePatterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { continue }
-            let nsRange = NSRange(workingText.startIndex..., in: workingText)
-            if let match = regex.firstMatch(in: workingText, range: nsRange),
-               match.numberOfRanges >= 2,
-               let captureRange = Range(match.range(at: 1), in: workingText) {
-                let raw = String(workingText[captureRange])
-                extractedTitle = raw
-                    .replacingOccurrences(of: "**", with: "")
-                    .replacingOccurrences(of: "*", with: "")
-                    .replacingOccurrences(of: "`", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                workingText = regex.stringByReplacingMatches(
-                    in: workingText,
-                    options: [],
-                    range: nsRange,
-                    withTemplate: ""
-                ).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !extractedTitle.isEmpty { break }
-            }
-        }
+        // Title is no longer extracted from model output — the
+        // [TITLE: …] feature was removed because small models
+        // routinely produced unhelpful titles (single OCR keywords,
+        // generic words). `displayTitle` now falls back to a
+        // deterministic keyword-based detector over the raw OCR,
+        // then a date-based label. The `title` field on
+        // StructuredReport stays as the destination for the
+        // History row's Rename action.
+        let workingText = rawText
 
         let headers: [(key: String, patterns: [String])] = [
             ("patientSummary",   ["PATIENT SUMMARY"]),
@@ -312,8 +287,10 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         }
         flush()
 
+        // title defaults to "" — displayTitle handles the keyword-
+        // detector + date fallback so the History row always reads
+        // something meaningful even without a manually-set title.
         return StructuredReport(
-            title: extractedTitle,
             patientSummary: sections["patientSummary"] ?? workingText.trimmingCharacters(in: .whitespacesAndNewlines),
             doctorQuestions: sections["doctorQuestions"] ?? "",
             dietaryAdvice: sections["dietaryAdvice"] ?? "",
