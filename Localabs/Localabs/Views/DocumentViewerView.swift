@@ -803,6 +803,12 @@ struct FollowUpChatView: View {
     /// trash icon in the top toolbar sets this true; the
     /// confirmation dialog then commits or cancels the wipe.
     @State private var showClearChatConfirm = false
+    /// Reference to the in-flight streaming Task so we can cancel
+    /// it if the user dismisses the sheet mid-stream. Without this,
+    /// the llama.cpp predict loop kept generating tokens after the
+    /// sheet closed — you could feel each whitespace token's haptic
+    /// even though there was no visible bubble to update.
+    @State private var sendTask: Task<Void, Never>?
 
     struct ChatMessage: Identifiable, Equatable {
         // Explicit init (instead of an inline `let id = UUID()`
@@ -900,6 +906,23 @@ struct FollowUpChatView: View {
                 // header still render via the `messages.isEmpty`
                 // branch below.
                 loadPersistedMessages()
+            }
+            .onDisappear {
+                // Sheet is going away — stop the in-flight stream
+                // immediately. Cancellation propagates through the
+                // for-await loop's `Task.isCancelled` check, then
+                // down into LlamaContext via the AsyncStream's
+                // onTermination handler, halting token generation
+                // at the model's next safe checkpoint. Without this,
+                // the predict loop kept running after dismiss and
+                // the haptic kept firing on every whitespace token.
+                sendTask?.cancel()
+                sendTask = nil
+                isThinking = false
+                if let idx = messages.firstIndex(where: { $0.isStreaming }) {
+                    messages[idx].isStreaming = false
+                    persistMessages()
+                }
             }
             .navigationTitle("Ask Localabs")
             .navigationBarTitleDisplayMode(.inline)
@@ -1222,7 +1245,12 @@ struct FollowUpChatView: View {
         let aiId = aiMessage.id
         messages.append(aiMessage)
 
-        Task {
+        // Hold the streaming Task in @State so `.onDisappear` (or
+        // any cancellation path) can stop it. Without this, dismissing
+        // the sheet mid-stream left llama.cpp generating tokens
+        // against a torn-down view — the user felt every word-
+        // boundary haptic with no visible bubble updating.
+        sendTask = Task {
             // Use the snapshot pre-fetched in `.task` at sheet-open
             // time. Fetching inside this Task was the source of the
             // "chat hangs forever on typing dots" bug — one of the
@@ -1245,6 +1273,16 @@ struct FollowUpChatView: View {
             haptic.prepare()
             var receivedFirstPiece = false
             for await piece in stream {
+                // Exit the loop the moment the parent Task is
+                // cancelled — happens on sheet dismiss via
+                // `sendTask?.cancel()` in `.onDisappear`.
+                // Cancelling the consumer also triggers the
+                // AsyncStream's onTermination, which propagates the
+                // cancel down to LlamaContext.predict's detached
+                // task and stops token generation at its next
+                // safe checkpoint.
+                if Task.isCancelled { break }
+
                 if !receivedFirstPiece {
                     isThinking = false
                     receivedFirstPiece = true
