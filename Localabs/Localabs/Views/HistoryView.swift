@@ -278,6 +278,7 @@ struct HistoryView: View {
                 } label: {
                     Label("Delete Report", systemImage: "trash")
                 }
+                .tint(.red)
             }
         }
     }
