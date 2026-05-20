@@ -214,16 +214,29 @@ final class InferenceEngine: ObservableObject {
     /// doesn't reappear on the Dashboard tab or in History, and returns
     /// ScanView to the upload state.
     func discardPausedAnalysis() {
+        // Fully reset every piece of analysis state so ScanView's
+        // body condition (`isProcessing || isPaused ||
+        // pendingResumeReport != nil`) becomes false and the view
+        // flips back to upload mode. Previous bug: after pause →
+        // background → foreground → Discard, ScanView would stay on
+        // the progress screen. The fix is to explicitly clear ALL
+        // four resumable-state flags here, not just three, AND to
+        // call objectWillChange to defeat any SwiftUI batching that
+        // might be holding the prior render.
         isPaused = false
+        isProcessing = false
+        isInferenceCancelled = false
         streamingText = ""
         analysisProgress = 0
         processingStatus = ""
+        lastHardFailureMessage = nil
         if let pending = pendingResumeReport {
             LocalStorageService.shared.deleteReport(id: pending.id)
         } else if let latest = LocalStorageService.shared.getHistory().first, latest.isIncomplete {
             LocalStorageService.shared.deleteReport(id: latest.id)
         }
         pendingResumeReport = nil
+        objectWillChange.send()
     }
 
     /// Memory-efficient image downsampler. ImageIO's thumbnail API decodes
@@ -415,7 +428,7 @@ final class InferenceEngine: ObservableObject {
         var pageTexts: [String] = []
         for (idx, image) in images.enumerated() {
             processingStatus = images.count == 1
-                ? "Scanning with Apple Vision…"
+                ? "Scanning…"
                 : "Scanning page \(idx + 1) of \(images.count)…"
             do {
                 let text = try await VisionOCRService.extractText(from: image)

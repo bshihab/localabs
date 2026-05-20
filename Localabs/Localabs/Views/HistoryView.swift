@@ -109,33 +109,13 @@ struct HistoryView: View {
             } message: { _ in
                 Text("Give this report a short title — what you'll see in History and at the top of the dashboard.")
             }
-            // Destructive confirmations use confirmationDialog (action
-            // sheet) instead of alert — matches Apple's pattern in
-            // Photos / Notes / Messages, where "Delete?" prompts
-            // slide up from the bottom anchored to the action that
-            // triggered them rather than appearing as a centered
-            // modal.
-            .confirmationDialog(
-                deleteTarget.map { "Delete \"\($0.displayTitle)\"?" } ?? "Delete report?",
-                isPresented: Binding(
-                    get: { deleteTarget != nil },
-                    set: { presenting in
-                        if !presenting { deleteTarget = nil }
-                    }
-                ),
-                titleVisibility: .visible,
-                presenting: deleteTarget
-            ) { target in
-                Button("Delete Report", role: .destructive) {
-                    delete(report: target)
-                    deleteTarget = nil
-                }
-                Button("Cancel", role: .cancel) {
-                    deleteTarget = nil
-                }
-            } message: { _ in
-                Text("This report will be removed from History. This can't be undone.")
-            }
+            // Single-row delete uses a `.popover` anchored to the
+            // tapped row (see `reportsList`) instead of an action
+            // sheet — so the confirm appears next to the report
+            // it's about, with iOS picking the arrow direction
+            // automatically. Bulk delete (toolbar) still uses
+            // confirmationDialog below because there's no single
+            // row to anchor to.
             .confirmationDialog(
                 "Delete \(selection.count) report\(selection.count == 1 ? "" : "s")?",
                 isPresented: $showBulkDeleteConfirmation,
@@ -173,10 +153,79 @@ struct HistoryView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .tag(report.id)
+                    // Per-row popover for the single-delete confirm.
+                    // Anchored to the row's center so iOS picks the
+                    // arrow direction automatically — above the row
+                    // when there's space, below for the bottom of
+                    // the list. `presentationCompactAdaptation(.popover)`
+                    // forces the popover style on iPhone (without it,
+                    // SwiftUI would adapt to a sheet on compact width).
+                    .popover(
+                        isPresented: deleteBinding(for: report.id),
+                        attachmentAnchor: .point(.center),
+                        arrowEdge: .top
+                    ) {
+                        deleteConfirmationContent(for: report)
+                            .presentationCompactAdaptation(.popover)
+                    }
             }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+    }
+
+    /// Computed binding that's only `true` for the row currently
+    /// targeted for deletion. Each row's `.popover` reads its own
+    /// binding, so only the right row's popover presents — and
+    /// dismissing one clears `deleteTarget`, flipping every binding
+    /// back to false.
+    private func deleteBinding(for id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { deleteTarget?.id == id },
+            set: { presenting in
+                if !presenting { deleteTarget = nil }
+            }
+        )
+    }
+
+    /// Popover body for the single-row delete confirmation. Compact
+    /// title + body + two-button row, sized to feel like an Apple
+    /// popover (not a full-width sheet).
+    private func deleteConfirmationContent(for target: StructuredReport) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.system(size: 16, weight: .semibold))
+                Text("Delete this report?")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            Text("\"\(target.displayTitle)\" will be removed from History. This can't be undone.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button("Cancel") {
+                    deleteTarget = nil
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button(role: .destructive) {
+                    delete(report: target)
+                    deleteTarget = nil
+                } label: {
+                    Text("Delete")
+                        .fontWeight(.semibold)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+            }
+        }
+        .padding(16)
+        .frame(width: 280)
     }
 
     /// In normal mode the row is a Button that opens the dashboard
@@ -204,7 +253,7 @@ struct HistoryView: View {
                         Text("Rename Report")
                     } icon: {
                         Image(systemName: "pencil")
-                            .foregroundStyle(.black)
+                            .foregroundStyle(.primary)
                     }
                 }
                 Button {
@@ -214,7 +263,7 @@ struct HistoryView: View {
                         Text("Share Report")
                     } icon: {
                         Image(systemName: "square.and.arrow.up")
-                            .foregroundStyle(.black)
+                            .foregroundStyle(.primary)
                     }
                 }
                 Button(role: .destructive) {
