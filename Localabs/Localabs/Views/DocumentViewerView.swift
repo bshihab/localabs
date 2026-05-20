@@ -1193,7 +1193,7 @@ struct FollowUpChatView: View {
     /// on `.onAppear` so reopening a scan picks the chat up where
     /// the user left off.
     private func loadPersistedMessages() {
-        let stored = ChatHistoryService.shared.messages(for: reportID)
+        let stored = ChatHistoryService.messages(for: reportID)
         guard !stored.isEmpty else { return }
         messages = stored.map { persisted in
             ChatMessage(
@@ -1217,6 +1217,6 @@ struct FollowUpChatView: View {
                 content: msg.content
             )
         }
-        ChatHistoryService.shared.save(toSave, for: reportID)
+        ChatHistoryService.save(toSave, for: reportID)
     }
 }

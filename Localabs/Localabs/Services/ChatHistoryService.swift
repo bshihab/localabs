@@ -39,19 +39,24 @@ struct PersistedChatMessage: Codable, Identifiable, Equatable {
     }
 }
 
-final class ChatHistoryService {
-    static let shared = ChatHistoryService()
-    private init() {}
-
+/// Namespace for the chat-history store. Modeled as an `enum`
+/// (uninstantiable) with `static` methods because the service has
+/// no instance state — everything goes through UserDefaults, which
+/// is globally thread-safe. The previous singleton-class shape
+/// tripped Swift 6 strict concurrency ("'shared' is not
+/// concurrency-safe because non-'Sendable' type may have shared
+/// mutable state"); an enum sidesteps the Sendable requirement
+/// because there's no instance to share in the first place.
+enum ChatHistoryService {
     /// UserDefaults bucket. Stored as `[UUID-string: [PersistedChatMessage]]`
     /// so a single decode pulls every report's chat at once — fine
     /// at app scale (hundreds of reports × dozens of messages each
     /// is still tens of KB).
-    private let storageKey = "localabs_chat_history"
+    private static let storageKey = "localabs_chat_history"
 
     /// Loads the conversation for `reportID`, or returns an empty
     /// array if the user has never chatted about that report.
-    func messages(for reportID: UUID) -> [PersistedChatMessage] {
+    static func messages(for reportID: UUID) -> [PersistedChatMessage] {
         loadAll()[reportID.uuidString] ?? []
     }
 
@@ -59,7 +64,7 @@ final class ChatHistoryService {
     /// Called after every turn in FollowUpChatView so the on-disk
     /// copy is always current — if the app gets killed mid-stream,
     /// the conversation up to the last complete turn survives.
-    func save(_ messages: [PersistedChatMessage], for reportID: UUID) {
+    static func save(_ messages: [PersistedChatMessage], for reportID: UUID) {
         var all = loadAll()
         all[reportID.uuidString] = messages
         persist(all)
@@ -68,7 +73,7 @@ final class ChatHistoryService {
     /// Drops the chat for `reportID`. Hooked into
     /// `LocalStorageService.deleteReport` so deleting a scan from
     /// History also removes its chat — no orphan conversations.
-    func clear(for reportID: UUID) {
+    static func clear(for reportID: UUID) {
         var all = loadAll()
         all.removeValue(forKey: reportID.uuidString)
         persist(all)
@@ -76,12 +81,12 @@ final class ChatHistoryService {
 
     // MARK: - Storage internals
 
-    private func loadAll() -> [String: [PersistedChatMessage]] {
+    private static func loadAll() -> [String: [PersistedChatMessage]] {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return [:] }
         return (try? JSONDecoder().decode([String: [PersistedChatMessage]].self, from: data)) ?? [:]
     }
 
-    private func persist(_ all: [String: [PersistedChatMessage]]) {
+    private static func persist(_ all: [String: [PersistedChatMessage]]) {
         guard let data = try? JSONEncoder().encode(all) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
     }

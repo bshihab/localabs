@@ -123,6 +123,6 @@ class LocalStorageService {
         if let data = try? JSONEncoder().encode(history) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
-        ChatHistoryService.shared.clear(for: id)
+        ChatHistoryService.clear(for: id)
     }
 }
