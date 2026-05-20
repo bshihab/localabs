@@ -803,13 +803,41 @@ final class InferenceEngine: ObservableObject {
     private static func looksLikeLabReport(_ text: String) -> Bool {
         let lowered = text.lowercased()
 
-        // Medical units. The "/" in things like mg/dL is rare outside
-        // of medical content, so even one hit is a strong signal.
+        // Clinical-note exclusion FIRST. An encounter note (dermatology
+        // visit, primary-care visit, etc.) typically mentions a bunch
+        // of lab terms in its "Orders Placed" section without showing
+        // any actual lab values. Without this guard the term-only
+        // signal below would let the note through, the model would be
+        // asked to produce a 5-section lab report, and would
+        // confabulate plausible-looking lab values to fill the
+        // sections — exactly the dermatology note → fabricated
+        // lipid-panel failure mode.
+        //
+        // If two or more of these encounter-note markers appear, it's
+        // a clinical note, not a lab result — refuse regardless of
+        // term counts.
+        let clinicalNoteMarkers = [
+            "chief complaint", "history of present illness", "(hpi)",
+            "review of systems", "(ros)", "physical examination",
+            "assessment and plan", "icd-10", "icd 10",
+            "electronically signed", "encounter type",
+            "attending provider", "clinical encounter",
+            "past medical history", "social history",
+            "labs ordered", "laboratory orders placed",
+            "follow-up:", "follow up in", "plan:",
+        ]
+        let clinicalNoteHits = clinicalNoteMarkers.reduce(0) { $0 + (lowered.contains($1) ? 1 : 0) }
+        if clinicalNoteHits >= 2 { return false }
+
+        // Lab units. "mmHg" and "cells/mm" used to be in here but
+        // they're vitals/cytology indicators that appear in clinical
+        // notes too — kept them out so a clinical note's BP reading
+        // doesn't single-handedly trip the gate.
         let labUnits = [
             "mg/dl", "mmol/l", "ng/ml", "meq/l", "pg/ml", "iu/l", "u/l",
             "miu/l", "g/dl", "mg/l", "ng/dl", "miu/ml", "mcg/dl", "μg/dl",
-            "10^3", "10^9", "10^6", "k/ul", "k/μl", "/μl", "mmhg",
-            "cells/mm", "x10^", "fl/cell"
+            "10^3", "10^9", "10^6", "k/ul", "k/μl", "/μl",
+            "x10^", "fl/cell"
         ]
         let unitHits = labUnits.reduce(0) { $0 + (lowered.contains($1) ? 1 : 0) }
 
@@ -844,11 +872,14 @@ final class InferenceEngine: ObservableObject {
             return regex.numberOfMatches(in: text, range: nsRange)
         }()
 
-        // Combine the signals. Single strong hits (unit OR range
-        // pattern) pass; for the term-only path we require two hits
-        // to defend against false positives on a single mention
-        // (e.g. someone's grocery list saying "cholesterol-free").
-        return unitHits >= 1 || rangeHits >= 1 || termHits >= 2
+        // Combine the signals. Range pattern (numeric + unit on the
+        // same line) is the most reliable single signal — real lab
+        // reports almost always carry it. For the unit-only path we
+        // now require TWO hits since a single mention can sneak
+        // through clinical notes. Term-only path keeps the 2-hit
+        // threshold but is gated by the clinical-note exclusion
+        // above.
+        return rangeHits >= 1 || unitHits >= 2 || termHits >= 2
     }
 
     /// Exact phrase the analysis prompt instructs the model to emit
@@ -913,6 +944,8 @@ final class InferenceEngine: ObservableObject {
 
             CRITICAL RULES BEFORE YOU ANSWER:
             - Your ENTIRE analysis is about THE LAB REPORT OCR TEXT below and only that text. You have NO access to prior lab reports, prior chats, conversation history, or anything outside this single document. Do not mention or imply any prior findings, do not say things like "consistent with your earlier panel," and do not carry numbers or diagnoses from anywhere else. If a fact isn't in the OCR text below, it doesn't exist for this analysis.
+            - NEVER FABRICATE LAB VALUES. Every numeric lab value you cite (e.g. "240 mg/dL", "35 mg/dL", "18 ng/mL") must appear verbatim, character-for-character, in the OCR text above. If you cannot point to the exact characters in the OCR, do not write the value. The model has been observed inventing entire lipid panels for documents that mention "cholesterol" only in an Orders section — this is a critical failure and must never happen.
+            - DISTINGUISH ORDERS FROM RESULTS. A clinical encounter note may list lab tests that the doctor ORDERED for the future (phrasing like "Laboratory orders placed today: CBC, CMP, TSH…"). Orders are NOT results. If the OCR shows tests being ordered but does not show numeric values WITH UNITS for those tests, you have no results to analyze — emit the standard refusal phrase as the first line of PATIENT SUMMARY and stop, exactly as you would for an empty OCR.
             - The "Reference-Only User Context" block (further down) exists ONLY to help you pick the right reference range for a given lab value (e.g. age- or sex-adjusted hemoglobin / creatinine). DO NOT restate any value from that block in your output, do NOT use Apple Health metrics or profile fields AS FINDINGS, and never make them the subject of a bullet. The user already knows their own age, sex, blood type, medications, family history, and Health averages — putting any of those in the analysis is filler, not insight.
             - If the OCR text is empty, partially unreadable, or doesn't contain lab values / reference ranges / medical findings, your VERY FIRST line of PATIENT SUMMARY must be exactly: "\(Self.midStreamRefusalSnippet) I can analyze. Please retake with a printed lab result." Then STOP — do not write anything else, do not fill the other sections. The app watches for that exact phrase (including the ⚠️) and will halt generation when it sees it.
             - REFUSAL PHRASING IS ONLY FOR THE WHOLE-IMAGE-EMPTY CASE. Never use phrases like "this image doesn't appear to contain", "no lab report content", "cannot analyze this image", "not enough medical data", or any variation, INSIDE any of the 5 sections. If a SPECIFIC section has nothing to populate from the OCR (e.g. MEDICATION NOTES on a report that lists no medications, or QUESTIONS FOR YOUR DOCTOR when the report is unambiguous), write a single short, neutral bullet describing the absence — for example:
