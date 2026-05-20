@@ -84,12 +84,12 @@ struct ScanView: View {
             // (the heuristic refused to send something that doesn't
             // look like a lab report to the model). Dismissing clears
             // `report` so the view flips back to the upload buttons.
-            .alert("No health content detected", isPresented: $showNonHealthAlert) {
+            .alert("No medical content detected", isPresented: $showNonHealthAlert) {
                 Button("OK", role: .cancel) {
                     report = nil
                 }
             } message: {
-                Text("Localabs couldn't find any lab values, reference ranges, or medical findings in this scan. To prevent invented results, the analysis was stopped.\n\nTry again with a printed lab report showing test names, your values, and reference ranges.")
+                Text("Localabs couldn't find any medical content in this scan — no lab values, no clinical findings, no diagnosis. To prevent invented results, the analysis was stopped.\n\nTry again with a printed lab result (e.g. cholesterol values with reference ranges) or a clinical note (visit summary with diagnosis and plan).")
             }
             // Hard-failure popup. Fires when a run finishes with no
             // resumable state — model produced zero tokens (prompt

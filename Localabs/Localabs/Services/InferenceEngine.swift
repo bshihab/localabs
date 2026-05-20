@@ -439,7 +439,7 @@ final class InferenceEngine: ObservableObject {
         // findings from prior reports in RAG. ScanView watches the
         // resulting marker and shows the "No health content detected"
         // popup instead of routing into DashboardView.
-        if !Self.looksLikeLabReport(combinedText) {
+        if !Self.looksLikeMedicalDocument(combinedText) {
             analysisProgress = 0
             processingStatus = ""
             return Self.makeNonHealthRejectionReport(rawText: combinedText)
@@ -556,7 +556,7 @@ final class InferenceEngine: ObservableObject {
             // receipts, etc. that happen to have embedded text but
             // nothing medical to analyze.
             let combinedText = truncateForContext(combinePageTexts(pdfTextByPage))
-            if !Self.looksLikeLabReport(combinedText) {
+            if !Self.looksLikeMedicalDocument(combinedText) {
                 analysisProgress = 0
                 processingStatus = ""
                 return Self.makeNonHealthRejectionReport(rawText: combinedText)
@@ -817,46 +817,21 @@ final class InferenceEngine: ObservableObject {
     enum AnalysisMode { case lab, weekly }
 
     /// Cheap, fully-deterministic pre-flight: does the OCR text look
-    /// like it came from a lab report at all? This exists because the
-    /// inference prompt is structured to ALWAYS emit a 5-section lab
-    /// report — if we hand it Xcode screenshot OCR or a random photo,
-    /// the model fills the sections from whatever lab context it has
-    /// in its RAG window, which reads to the user as the model
-    /// fabricating results. The honest behavior is to refuse early.
+    /// like a medical document worth handing to the model? Accepts
+    /// EITHER a lab report (lab values + units + reference ranges)
+    /// OR a clinical encounter note (chief complaint, diagnosis,
+    /// plan, ICD-10, etc.). Rejects truly non-medical content
+    /// (random photos, app screenshots, recipes) so the model isn't
+    /// asked to invent findings from nothing.
     ///
-    /// The check is permissive: any one of (a) a recognizable medical
-    /// unit like "mg/dL" / "mmol/L", (b) two or more common lab terms
-    /// like "cholesterol" / "hemoglobin" / "reference range", or (c)
-    /// a numeric range with a unit ("100-200 mg/dL") is enough. Real
-    /// lab reports will trivially pass; non-medical images won't.
-    private static func looksLikeLabReport(_ text: String) -> Bool {
+    /// Previous version rejected clinical notes outright as a
+    /// hallucination defense, but that broke the dermatology-PDF
+    /// use case the user actually has. The fabrication defense now
+    /// lives in the prompt (explicit "never fabricate", explicit
+    /// "orders are not results", explicit "focus on the diagnosis
+    /// not the vitals"), which lets this gate be permissive.
+    private static func looksLikeMedicalDocument(_ text: String) -> Bool {
         let lowered = text.lowercased()
-
-        // Clinical-note exclusion FIRST. An encounter note (dermatology
-        // visit, primary-care visit, etc.) typically mentions a bunch
-        // of lab terms in its "Orders Placed" section without showing
-        // any actual lab values. Without this guard the term-only
-        // signal below would let the note through, the model would be
-        // asked to produce a 5-section lab report, and would
-        // confabulate plausible-looking lab values to fill the
-        // sections — exactly the dermatology note → fabricated
-        // lipid-panel failure mode.
-        //
-        // If two or more of these encounter-note markers appear, it's
-        // a clinical note, not a lab result — refuse regardless of
-        // term counts.
-        let clinicalNoteMarkers = [
-            "chief complaint", "history of present illness", "(hpi)",
-            "review of systems", "(ros)", "physical examination",
-            "assessment and plan", "icd-10", "icd 10",
-            "electronically signed", "encounter type",
-            "attending provider", "clinical encounter",
-            "past medical history", "social history",
-            "labs ordered", "laboratory orders placed",
-            "follow-up:", "follow up in", "plan:",
-        ]
-        let clinicalNoteHits = clinicalNoteMarkers.reduce(0) { $0 + (lowered.contains($1) ? 1 : 0) }
-        if clinicalNoteHits >= 2 { return false }
 
         // Lab units. "mmHg" and "cells/mm" used to be in here but
         // they're vitals/cytology indicators that appear in clinical
@@ -901,14 +876,31 @@ final class InferenceEngine: ObservableObject {
             return regex.numberOfMatches(in: text, range: nsRange)
         }()
 
-        // Combine the signals. Range pattern (numeric + unit on the
-        // same line) is the most reliable single signal — real lab
-        // reports almost always carry it. For the unit-only path we
-        // now require TWO hits since a single mention can sneak
-        // through clinical notes. Term-only path keeps the 2-hit
-        // threshold but is gated by the clinical-note exclusion
-        // above.
-        return rangeHits >= 1 || unitHits >= 2 || termHits >= 2
+        // Clinical-note signals — encounter-note markers indicate the
+        // doc is a visit summary / referral / progress note. ACCEPT
+        // these now (the prompt handles them safely with explicit
+        // anti-fabrication + anti-vitals-lead rules); they used to
+        // bounce out, which broke the dermatology-PDF use case.
+        let clinicalNoteMarkers = [
+            "chief complaint", "history of present illness", "(hpi)",
+            "review of systems", "(ros)", "physical examination",
+            "assessment and plan", "icd-10", "icd 10",
+            "electronically signed", "encounter type",
+            "attending provider", "clinical encounter",
+            "past medical history", "social history",
+            "labs ordered", "laboratory orders placed",
+            "follow-up:", "follow up in",
+            "diagnosis:", "impression:",
+        ]
+        let clinicalNoteHits = clinicalNoteMarkers.reduce(0) { $0 + (lowered.contains($1) ? 1 : 0) }
+
+        // Accept if EITHER lab-report signals land OR clinical-note
+        // signals land (2+ markers — single markers are too noisy).
+        // Below all of those is genuinely non-medical content
+        // (screenshots, recipes, random photos), which is refused.
+        let isLabReport = rangeHits >= 1 || unitHits >= 2 || termHits >= 2
+        let isClinicalNote = clinicalNoteHits >= 2
+        return isLabReport || isClinicalNote
     }
 
     /// Exact phrase the analysis prompt instructs the model to emit
@@ -930,9 +922,9 @@ final class InferenceEngine: ObservableObject {
     /// the same regardless of which entry point caught it.
     static func makeNonHealthRejectionReport(rawText: String) -> StructuredReport {
         let body = """
-        Localabs couldn't find any lab values, reference ranges, or medical findings in this scan. To prevent invented results, the analysis was stopped.
+        Localabs couldn't find any medical content in this scan — no lab values, no clinical findings, no diagnosis. To prevent invented results, the analysis was stopped.
 
-        Try again with a printed lab result that shows test names, your values, and reference ranges (e.g. "180 mg/dL — normal range 100–200").
+        Try again with a printed lab result (e.g. "180 mg/dL — normal range 100–200") or a clinical note (visit summary with chief complaint, diagnosis, plan).
         """
         return StructuredReport(
             patientSummary: "\(StructuredReport.nonHealthRejectionMarker)\n\(body)",
@@ -951,7 +943,7 @@ final class InferenceEngine: ObservableObject {
         // but if anything ever calls runInference directly with a
         // non-lab text (and we're in lab mode), produce the same
         // rejection shape ScanView knows how to handle.
-        if mode == .lab, !Self.looksLikeLabReport(extractedText) {
+        if mode == .lab, !Self.looksLikeMedicalDocument(extractedText) {
             return Self.makeNonHealthRejectionReport(rawText: extractedText)
         }
 
@@ -969,18 +961,21 @@ final class InferenceEngine: ObservableObject {
         let behaviorPrompt = mode == .weekly
             ? "The user is requesting their weekly health check-in review. Analyze their Apple Health data provided below."
             : """
-            The user just scanned what should be a lab report. The text below was extracted using Apple's VisionKit OCR.
+            The user just scanned a medical document. The text below was extracted using Apple's VisionKit OCR. The document could be:
+            (a) A LAB REPORT — has lab values with units and reference ranges (e.g. "Cholesterol 240 mg/dL, normal 100–200").
+            (b) A CLINICAL ENCOUNTER NOTE — visit summary with chief complaint, diagnosis (often ICD-10 coded), assessment, treatment plan, follow-up. May list labs that the doctor ORDERED for the future but typically does NOT contain lab result values.
+            (c) A combination of both.
+
+            FIRST identify which it is from the OCR content, then summarize what THIS document says.
 
             CRITICAL RULES BEFORE YOU ANSWER:
-            - Your ENTIRE analysis is about THE LAB REPORT OCR TEXT below and only that text. You have NO access to prior lab reports, prior chats, conversation history, or anything outside this single document. Do not mention or imply any prior findings, do not say things like "consistent with your earlier panel," and do not carry numbers or diagnoses from anywhere else. If a fact isn't in the OCR text below, it doesn't exist for this analysis.
-            - NEVER FABRICATE LAB VALUES. Every numeric lab value you cite (e.g. "240 mg/dL", "35 mg/dL", "18 ng/mL") must appear verbatim, character-for-character, in the OCR text above. If you cannot point to the exact characters in the OCR, do not write the value. The model has been observed inventing entire lipid panels for documents that mention "cholesterol" only in an Orders section — this is a critical failure and must never happen.
-            - DISTINGUISH ORDERS FROM RESULTS. A clinical encounter note may list lab tests that the doctor ORDERED for the future (phrasing like "Laboratory orders placed today: CBC, CMP, TSH…"). Orders are NOT results. If the OCR shows tests being ordered but does not show numeric values WITH UNITS for those tests, you have no results to analyze — emit the standard refusal phrase as the first line of PATIENT SUMMARY and stop, exactly as you would for an empty OCR.
-            - The "Reference-Only User Context" block (further down) exists ONLY to help you pick the right reference range for a given lab value (e.g. age- or sex-adjusted hemoglobin / creatinine). DO NOT restate any value from that block in your output, do NOT use Apple Health metrics or profile fields AS FINDINGS, and never make them the subject of a bullet. The user already knows their own age, sex, blood type, medications, family history, and Health averages — putting any of those in the analysis is filler, not insight.
-            - If the OCR text is empty, partially unreadable, or doesn't contain lab values / reference ranges / medical findings, your VERY FIRST line of PATIENT SUMMARY must be exactly: "\(Self.midStreamRefusalSnippet) I can analyze. Please retake with a printed lab result." Then STOP — do not write anything else, do not fill the other sections. The app watches for that exact phrase (including the ⚠️) and will halt generation when it sees it.
-            - REFUSAL PHRASING IS ONLY FOR THE WHOLE-IMAGE-EMPTY CASE. Never use phrases like "this image doesn't appear to contain", "no lab report content", "cannot analyze this image", "not enough medical data", or any variation, INSIDE any of the 5 sections. If a SPECIFIC section has nothing to populate from the OCR (e.g. MEDICATION NOTES on a report that lists no medications, or QUESTIONS FOR YOUR DOCTOR when the report is unambiguous), write a single short, neutral bullet describing the absence — for example:
-                MEDICATION NOTES section with no meds → "- No medications are listed in this report."
-                MEDICAL GLOSSARY section with no jargon → "- No specialized terms in this report needed defining."
-              Do NOT write "this image doesn't contain..." anywhere except as the very first line of PATIENT SUMMARY in the whole-image-empty case described above.
+            - Your ENTIRE analysis is about THE OCR TEXT below and only that text. You have NO access to prior reports, prior chats, conversation history, or anything outside this single document. Do not say "consistent with your earlier panel," do not carry numbers or diagnoses from anywhere else. If a fact isn't in the OCR text, it doesn't exist for this analysis.
+            - NEVER FABRICATE. Every numeric value (e.g. "240 mg/dL", "35 mg/dL", "18 ng/mL") and every diagnosis you cite must appear verbatim, character-for-character, in the OCR text above. If you cannot point to the exact characters, do not write it. The model has been observed inventing entire lipid panels for documents that mention "cholesterol" only in an Orders section — this is a critical failure and must never happen.
+            - DISTINGUISH ORDERS FROM RESULTS. Clinical notes routinely list labs the doctor ORDERED (phrasing like "Laboratory orders placed today: CBC, CMP, TSH…"). Orders are NOT results — do not pretend the test came back with a value. Reference the orders only as part of the PLAN, not as findings.
+            - FOCUS ON THE DOCUMENT'S PRIMARY SUBJECT. For a clinical note, that's the DIAGNOSIS and clinical decision (e.g. "Vitiligo, ICD-10 L80" + the treatment plan). For a lab report, that's the abnormal LAB VALUES. Vitals (BP, HR, BMI, RR, Temp, SpO2, weight, height) are background context — do NOT lead with them, do NOT make them the main subject of PATIENT SUMMARY. Only mention vitals if they're clinically abnormal AND directly relevant to the document's primary subject.
+            - The "Reference-Only User Context" block (further down) exists ONLY to help you pick appropriate reference ranges. DO NOT restate any value from that block in your output, do NOT use Apple Health metrics or profile fields AS FINDINGS, and never make them the subject of a bullet. The user already knows their own age, sex, blood type, medications, family history, and Health averages.
+            - If the OCR text is empty, partially unreadable, or doesn't contain any medical content at all, your VERY FIRST line of PATIENT SUMMARY must be exactly: "\(Self.midStreamRefusalSnippet) I can analyze. Please retake with a printed lab result or clinical note." Then STOP — do not write anything else, do not fill the other sections. The app watches for that exact phrase (including the ⚠️) and will halt generation when it sees it.
+            - REFUSAL PHRASING IS ONLY FOR THE WHOLE-IMAGE-EMPTY CASE. Never use phrases like "this image doesn't appear to contain", "no lab report content", "cannot analyze this image", "not enough medical data", or any variation, INSIDE any of the 5 sections. If a SPECIFIC section has nothing to populate (e.g. MEDICATION NOTES on a report that lists no medications), write a single short, neutral bullet describing the absence — for example "- No medications are listed in this report." or "- No specialized terms in this report needed defining."
             - If the OCR is partially legible, analyze only what IS legible and explicitly note in PATIENT SUMMARY which fields were unreadable. Never paper over unreadable values with plausible-sounding text.
             """
 
@@ -989,9 +984,9 @@ final class InferenceEngine: ObservableObject {
         You are an empathetic, highly trained medical assistant.
         \(behaviorPrompt)
 
-        ╔══ Lab Report OCR Text (the ONLY content to analyze) ══╗
+        ╔══ Medical Document OCR Text (the ONLY content to analyze) ══╗
         "\(extractedText)"
-        ╚══════════════════════════════════════════════════════╝
+        ╚════════════════════════════════════════════════════════════╝
 
         Reference-Only User Context (use SILENTLY to pick appropriate reference ranges. NEVER quote, restate, or make any of these values a finding in your output.):
         \(profile.promptContextBullets)
@@ -1007,12 +1002,13 @@ final class InferenceEngine: ObservableObject {
 
         [TITLE: "<3 to 6 word descriptor>"]
 
-        Examples: [TITLE: "Lipid Panel Results"], [TITLE: "Complete Blood Count"], [TITLE: "Vitamin D Test"], [TITLE: "Comprehensive Metabolic Panel"], [TITLE: "Q2 2025 Cholesterol Check"].
+        Examples for LAB REPORTS: [TITLE: "Lipid Panel Results"], [TITLE: "Complete Blood Count"], [TITLE: "Vitamin D Test"], [TITLE: "Comprehensive Metabolic Panel"].
+        Examples for CLINICAL NOTES: [TITLE: "Vitiligo Evaluation"], [TITLE: "Dermatology Consultation"], [TITLE: "Hypertension Follow-Up"], [TITLE: "Annual Physical Exam"].
 
         Requirements for the title line:
         - It is REQUIRED. Skipping it causes the report to fall back to a generic date label in the user's History.
         - Wrap the title text in DOUBLE QUOTES inside the square brackets.
-        - Describe what KIND of lab panel this is. Do NOT include the user's name, the date, or a generic phrase like "Lab Report" alone.
+        - Describe what the document is PRIMARILY about — the specific lab panel, OR the visit's chief diagnosis / reason. Do NOT include the user's name, the date, or a generic phrase like "Lab Report" / "Clinical Note" alone.
         - Output exactly ONE [TITLE: …] line, then a blank line, then the 5 numbered sections.
 
         Then provide the 5 sections, each starting with the numbered header on its own line:
@@ -1027,20 +1023,28 @@ final class InferenceEngine: ObservableObject {
 
         - Default to bullet points, not paragraphs. Each bullet should be a single short sentence (one line on a phone). Lines starting with `- ` will render as bullets.
         - When you must use prose, keep paragraphs to 2 sentences max. No walls of text.
-        - PATIENT SUMMARY is a SUMMARY OF THE LAB REPORT — 2 to 4 short bullets, each one a finding pulled from the OCR text above. Lead with the most clinically significant finding.
+        - PATIENT SUMMARY is a SUMMARY OF THE DOCUMENT — 2 to 4 short bullets, each citing a specific finding pulled from the OCR text. Lead with the most clinically significant content the document is PRIMARILY about (the diagnosis for a clinical note, the most abnormal lab value for a lab report). NEVER lead with vitals.
 
-          HARD RULE: every PATIENT SUMMARY bullet MUST reference a lab marker, value, or finding that appears in the OCR text. If a bullet doesn't contain at least one specific lab term or value from the OCR, it is invalid — rewrite it.
+          HARD RULE: every PATIENT SUMMARY bullet MUST reference a specific finding from the OCR — a diagnosis, a lab value with units, a clinical finding from the physical exam, or a treatment from the plan. Bullets that just describe vitals (BP, HR, BMI, Temp) or restate Reference-Only User Context are INVALID — rewrite them.
 
-          GOOD examples (each cites OCR content):
+          GOOD examples for a CLINICAL NOTE (each leads with the actual subject of the document):
+          - "Diagnosis: **Generalized Vitiligo (ICD-10: L80)**, an autoimmune skin condition causing depigmented patches."
+          - "Active phase — progressive spread over the past 6 months involving hands, face, and forearms."
+          - "Concurrent **Hashimoto's Thyroiditis** in the patient's PMH strongly supports an autoimmune etiology."
+          - "Plan: topical **Clobetasol** + **Tacrolimus** + narrowband UVB phototherapy."
+
+          GOOD examples for a LAB REPORT (each cites a specific lab value from the OCR):
           - "**Cholesterol** is elevated at **240 mg/dL** vs. normal range 100–200."
           - "All thyroid markers (**TSH**, **T3**, **T4**) are within reference range."
           - "**Vitamin D** is low at **18 ng/mL** — likely the most actionable item."
 
-          BAD examples (NEVER produce anything like these — they restate Reference-Only User Context instead of analyzing the report):
+          BAD examples — NEVER produce anything like these:
+          - "Your blood pressure of 118/76 mmHg and heart rate of 72 bpm are normal." (vitals as main subject — wrong; vitals are background)
           - "You are a 35-year-old male with blood type O+." (profile recap, not a finding)
-          - "Your resting heart rate of 62 bpm is healthy." (Apple Health, not a lab finding)
-          - "Your sleep average of 7 hours supports recovery." (Apple Health, not a lab finding)
+          - "Your resting heart rate of 62 bpm is healthy." (Apple Health, not a document finding)
+          - "Your sleep average of 7 hours supports recovery." (Apple Health, not a document finding)
           - "Based on your previous reports, ..." (you have no access to previous reports)
+          - "Cholesterol is elevated at 240 mg/dL." — when the OCR contains NO cholesterol value (pure fabrication; this is the failure mode that produced an invented lipid panel for a vitiligo note)
         - Use **bold** for lab values, drug names, medical terms, and important numbers.
         - Use *italics* sparingly, only for tone or emphasis.
         - Add emoji rarely and only when it genuinely aids comprehension (✅ normal, ⚠️ worth discussing, 💊 medications, 🥗 dietary). Max 1–2 per section. Never decorative.

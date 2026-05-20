@@ -94,6 +94,7 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         guard !ocrText.isEmpty else { return nil }
         let lower = ocrText.lowercased()
         let patterns: [(needles: [String], title: String)] = [
+            // Lab-report patterns (specific panels first)
             (["comprehensive metabolic panel", "cmp panel"], "Comprehensive Metabolic Panel"),
             (["basic metabolic panel", "bmp panel"], "Basic Metabolic Panel"),
             (["complete blood count", "cbc panel", "cbc with diff", "cbc w/ diff"], "Complete Blood Count"),
@@ -111,6 +112,29 @@ struct StructuredReport: Codable, Identifiable, Hashable {
             (["testosterone"], "Testosterone Test"),
             (["cortisol"], "Cortisol Test"),
             (["c-reactive protein", "crp,"], "C-Reactive Protein"),
+
+            // Clinical-note patterns — diagnosis keywords from common
+            // encounter notes. Now that the heuristic accepts clinical
+            // notes through the gate, the title fallback needs to be
+            // able to label them when the model skips [TITLE: …].
+            (["vitiligo", "icd-10: l80", "icd 10 l80"], "Vitiligo Evaluation"),
+            (["psoriasis", "icd-10: l40"], "Psoriasis Evaluation"),
+            (["eczema", "atopic dermatitis"], "Eczema Evaluation"),
+            (["hashimoto"], "Hashimoto's Thyroiditis Visit"),
+            (["graves' disease", "graves disease"], "Graves' Disease Visit"),
+            (["diabetes mellitus", "type 2 diabetes", "type 1 diabetes"], "Diabetes Visit"),
+            (["hypertension", "essential htn", "icd-10: i10"], "Hypertension Visit"),
+            (["hyperlipidemia", "dyslipidemia"], "Hyperlipidemia Visit"),
+            (["asthma"], "Asthma Visit"),
+            (["copd", "chronic obstructive"], "COPD Visit"),
+            (["rheumatoid arthritis"], "Rheumatoid Arthritis Visit"),
+            (["osteoarthritis"], "Osteoarthritis Visit"),
+            (["migraine"], "Migraine Visit"),
+            (["depression", "major depressive"], "Depression Visit"),
+            (["anxiety disorder"], "Anxiety Visit"),
+            (["annual physical", "annual wellness"], "Annual Physical"),
+            (["new patient evaluation"], "New Patient Visit"),
+            (["follow-up visit", "follow up visit"], "Follow-Up Visit"),
         ]
         for (needles, title) in patterns {
             if needles.contains(where: { lower.contains($0) }) {
