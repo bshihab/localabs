@@ -764,6 +764,15 @@ struct FollowUpChatView: View {
     /// Add / Skip. The queue lets multiple suggestions from a single
     /// message (e.g. "I'm 35, I take metformin") present in sequence.
     @State private var suggestionQueue: [ProfileSuggestion] = []
+    /// HealthKit averages fetched once at sheet-open time, then
+    /// reused for every send. Pre-fetching aligns FollowUpChatView
+    /// with TrendsChatView (which already received metrics from its
+    /// parent) — fetching fresh inside each send Task occasionally
+    /// hung indefinitely if one of the seven concurrent HKQueries
+    /// didn't return, leaving the chat stuck on typing dots forever.
+    /// Empty `HealthMetrics()` is a safe placeholder until the real
+    /// values land via `.task` below.
+    @State private var healthMetrics: HealthKitService.HealthMetrics = HealthKitService.HealthMetrics()
 
     struct ChatMessage: Identifiable, Equatable {
         let id = UUID()
@@ -829,6 +838,15 @@ struct FollowUpChatView: View {
             }
             .background(Color.clear)
             .profileSuggestionAlert(queue: $suggestionQueue)
+            .task {
+                // Pre-fetch HealthKit metrics ONCE when the sheet
+                // opens, instead of inside every send Task. If any
+                // single HKQuery hangs, this puts the wait at sheet-
+                // open time (with the UI still responsive) rather
+                // than at message-send time (where the chat would
+                // get stuck on typing dots).
+                healthMetrics = await HealthKitService.shared.getHealthMetrics()
+            }
             .navigationTitle("Ask Localabs")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1105,12 +1123,11 @@ struct FollowUpChatView: View {
         messages.append(aiMessage)
 
         Task {
-            // Pull Apple Health metrics so the chat model has the
-            // same context the analysis pipeline used. Without this
-            // the user gets "I don't have access to your personal
-            // information" answers even though the report's analysis
-            // factored their HR / HRV / sleep / activity.
-            let healthMetrics = await HealthKitService.shared.getHealthMetrics()
+            // Use the snapshot pre-fetched in `.task` at sheet-open
+            // time. Fetching inside this Task was the source of the
+            // "chat hangs forever on typing dots" bug — one of the
+            // 7 concurrent HKQueries could fail to return its
+            // continuation, and the whole send would stall waiting.
             let stream = engine.askFollowUp(
                 question: question,
                 history: history,
