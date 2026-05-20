@@ -1224,20 +1224,7 @@ final class InferenceEngine: ObservableObject {
 
         Keep prose answers to 2–4 sentences. Use simple language. If the highlighted text contains a medical term, define it. If it's a lab value, explain whether it's normal and what it means.
 
-        PROFILE-INFO SIGNALS (advanced):
-        MEMORY MODEL — this matters for what you can honestly promise:
-        - Within THIS chat session you see the full conversation history every turn, so you can reference anything the user said earlier in this same chat (e.g. "as you mentioned above, your grandfather had…").
-        - Between DIFFERENT chats (closing this sheet and opening a new one later) you start fresh. The only way a fact reaches future chats is if it's saved to the user's profile.
-
-        So:
-        - For facts that are useful just for the current discussion, no action needed — you'll remember within this chat.
-        - For facts worth keeping forever (medication, condition, family history item, smoking/alcohol status, age, biological sex, blood type), emit ONE structured signal anywhere in your reply:
-          `[PROFILE_ADD: <field> = "<value>"]`
-          Allowed <field>: medications, conditions, family_history, smoking, alcohol, age, biological_sex, blood_type. <value> must be a short factual phrase the user actually stated (max 60 chars). The app strips this signal from your message and shows the user a popup asking whether to add it; the popup is what actually writes to the profile. Use AT MOST ONCE per reply.
-
-        What NOT to do:
-        - Don't promise long-term memory you don't have. "I'll keep that in mind for next time" is misleading because there is no next time without the profile save. If you want the user to benefit from this fact in future chats, emit the signal — otherwise just acknowledge briefly ("got it" or similar).
-        - Don't invent facts the user did not state.
+        Memory: within this chat you can reference anything the user said earlier in the conversation. You do NOT have persistent memory across different chats — the user's profile (loaded above) is the only thing that carries between sessions. Don't promise to "remember" things long-term; if the user says something they want saved, tell them they can tap the + button next to the message field to add it to their profile.
         """
 
         var prompt = ""
@@ -1308,12 +1295,7 @@ final class InferenceEngine: ObservableObject {
         - Format with **bold** for medical terms / metric values / numbers, *italics* sparingly, bullet points for short lists, and Markdown tables only when comparing 3+ values across categories.
         - Keep prose answers to 3–6 sentences unless the user explicitly asks for more depth.
 
-        PROFILE-INFO SIGNALS (advanced):
-        You have NO persistent memory across chats. Never say "I'll remember", "I'll keep that in mind", or any phrase implying you can store info — those are false promises.
-
-        Instead, when the user states a personal-health fact NOT in their profile (medication, condition, family history, smoking/alcohol, age, biological sex, blood type) that would improve future answers, emit ONE signal anywhere in your reply:
-        `[PROFILE_ADD: <field> = "<value>"]`
-        Allowed <field>: medications, conditions, family_history, smoking, alcohol, age, biological_sex, blood_type. The app strips the signal and shows a popup — that popup is what actually saves it. Use AT MOST ONCE per reply. Do not invent facts.
+        Memory: you can reference anything the user said earlier in this conversation, but you don't have persistent memory across different chats — only the user's profile (loaded above) carries between sessions. If the user says something save-worthy, tell them they can tap the + button next to the message field to add it to their profile.
         """
 
         var prompt = ""
@@ -1423,12 +1405,7 @@ final class InferenceEngine: ObservableObject {
         - Format with **bold** for numbers / medical terms, bullet points for short lists.
         - Keep prose answers to 2–5 sentences unless the user asks for more depth.
 
-        PROFILE-INFO SIGNALS (advanced):
-        You have NO persistent memory across chats. Never say "I'll remember" or "I'll keep that in mind" — false promises.
-
-        When interpreting this metric would benefit from a personal-health fact the profile doesn't have (medication, condition, family history, smoking/alcohol, age, biological_sex, blood_type) AND the user has stated it, emit ONE signal:
-        `[PROFILE_ADD: <field> = "<value>"]`
-        The app strips it and shows the user a popup — the popup is what saves it. Use AT MOST ONCE. Do not invent facts.
+        Memory: only the user's profile (loaded above) carries between chats — within this conversation you can reference earlier turns, but new chats start fresh. If the user says something worth saving permanently, tell them to tap the + button next to the message field to add it to their profile.
         """
 
         var prompt = ""

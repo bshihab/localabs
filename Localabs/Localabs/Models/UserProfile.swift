@@ -54,44 +54,108 @@ struct UserProfile: Codable {
             && !biologicalSex.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    /// Applies a chat-derived suggestion to the matching profile
-    /// field. Multi-line fields (medications, conditions, family
-    /// history) get a newline-separated append so the user can see
-    /// the accumulated set in their profile; single-value fields
-    /// (age, blood type, biological sex, smoking, alcohol) overwrite
-    /// only when blank — we never replace a value the user has
-    /// already filled in manually. Returns true when the profile
-    /// actually changed (so callers can show "✓ Added" feedback only
-    /// for real writes, not duplicates).
-    mutating func apply(_ suggestion: ProfileSuggestion) -> Bool {
-        let value = suggestion.value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return false }
+    /// One of the user-mutable fields on `UserProfile`. Lives here
+    /// (instead of in the now-removed `ProfileSuggestion` module)
+    /// because the only consumer is the manual quick-add sheet
+    /// surfaced from the chat input bars — there's no more model-
+    /// driven or regex-driven suggestion pipeline to feed it.
+    enum Field: String, CaseIterable, Identifiable {
+        case medicalConditions
+        case medications
+        case familyHistory
+        case smoking
+        case alcohol
+        case bloodType
+        case age
+        case biologicalSex
 
-        switch suggestion.field {
-        case .medications:
-            return appendUnique(value: value, to: \.medications)
-        case .medicalConditions:
-            return appendUnique(value: value, to: \.medicalConditions)
-        case .familyHistory:
-            return appendUnique(value: value, to: \.familyHistory)
-        case .smoking:
-            return setIfEmpty(value: value, on: \.smoking)
-        case .alcohol:
-            return setIfEmpty(value: value, on: \.alcohol)
-        case .bloodType:
-            return setIfEmpty(value: value, on: \.bloodType)
-        case .age:
-            return setIfEmpty(value: value, on: \.age)
-        case .biologicalSex:
-            return setIfEmpty(value: value, on: \.biologicalSex)
+        var id: String { rawValue }
+
+        /// User-facing name for picker rows + button labels.
+        var displayName: String {
+            switch self {
+            case .medicalConditions: return "Medical Conditions"
+            case .medications:       return "Medications"
+            case .familyHistory:     return "Family History"
+            case .smoking:           return "Smoking / Vaping"
+            case .alcohol:           return "Alcohol"
+            case .bloodType:         return "Blood Type"
+            case .age:               return "Age"
+            case .biologicalSex:     return "Biological Sex"
+            }
+        }
+
+        /// Short prompt used inside the TextField when the value is
+        /// empty — gives the user a worked example so they know the
+        /// shape of input we're expecting.
+        var placeholder: String {
+            switch self {
+            case .medicalConditions: return "e.g. Type 2 diabetes"
+            case .medications:       return "e.g. Metformin 500mg, morning"
+            case .familyHistory:     return "e.g. Mom: breast cancer at 50"
+            case .smoking:           return "e.g. Former smoker, quit 2020"
+            case .alcohol:           return "e.g. 2–3 drinks per week"
+            case .bloodType:         return "e.g. O+, A-, AB-"
+            case .age:               return "e.g. 34"
+            case .biologicalSex:     return "Male / Female / Other"
+            }
+        }
+
+        /// Multi-line fields (conditions, medications, family
+        /// history) append a new line each time the user adds an
+        /// entry — that's how their UI fields are already structured.
+        /// Single-value fields (age, sex, blood type, etc.) overwrite
+        /// whatever was there.
+        var isMultiLine: Bool {
+            switch self {
+            case .medications, .medicalConditions, .familyHistory: return true
+            case .smoking, .alcohol, .bloodType, .age, .biologicalSex: return false
+            }
         }
     }
 
-    /// Helper: append `value` as a new line to a multi-line field,
-    /// skipping the write if the field already contains that value
-    /// (case-insensitive). Prevents duplicate "Diabetes" / "diabetes"
-    /// entries when the same suggestion comes up across multiple
-    /// chats.
+    /// Returns the current stored value for a given field. Used by
+    /// the quick-add sheet to show "Already saved" hints for single-
+    /// value fields the user has already filled in.
+    func value(for field: Field) -> String {
+        switch field {
+        case .medicalConditions: return medicalConditions
+        case .medications:       return medications
+        case .familyHistory:     return familyHistory
+        case .smoking:           return smoking
+        case .alcohol:           return alcohol
+        case .bloodType:         return bloodType
+        case .age:               return age
+        case .biologicalSex:     return biologicalSex
+        }
+    }
+
+    /// Writes a user-supplied value to a profile field. Multi-line
+    /// fields append-unique so duplicate entries don't accumulate;
+    /// single-value fields overwrite (the user manually picked the
+    /// field, they know they're replacing). Returns true when the
+    /// profile actually changed so the caller can show a brief
+    /// confirmation.
+    mutating func add(_ value: String, to field: Field) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        switch field {
+        case .medications:       return appendUnique(value: trimmed, to: \.medications)
+        case .medicalConditions: return appendUnique(value: trimmed, to: \.medicalConditions)
+        case .familyHistory:     return appendUnique(value: trimmed, to: \.familyHistory)
+        case .smoking:           return setOverwriting(value: trimmed, on: \.smoking)
+        case .alcohol:           return setOverwriting(value: trimmed, on: \.alcohol)
+        case .bloodType:         return setOverwriting(value: trimmed, on: \.bloodType)
+        case .age:               return setOverwriting(value: trimmed, on: \.age)
+        case .biologicalSex:     return setOverwriting(value: trimmed, on: \.biologicalSex)
+        }
+    }
+
+    /// Append `value` as a new line to a multi-line field, skipping
+    /// the write if the field already contains that value (case-
+    /// insensitive). Prevents duplicate entries like "Diabetes" /
+    /// "diabetes" from piling up.
     private mutating func appendUnique(value: String, to keyPath: WritableKeyPath<UserProfile, String>) -> Bool {
         let current = self[keyPath: keyPath]
         let needle = value.lowercased()
@@ -101,12 +165,13 @@ struct UserProfile: Codable {
         return true
     }
 
-    /// Helper: set a single-value field only when it's currently
-    /// empty. We never overwrite a manually-entered value with a
-    /// chat-derived one — the user's explicit input is authoritative.
-    private mutating func setIfEmpty(value: String, on keyPath: WritableKeyPath<UserProfile, String>) -> Bool {
+    /// Overwrite a single-value field. The user manually picked the
+    /// field name in the quick-add sheet — they know they're
+    /// replacing the prior value. Returns true unless the new value
+    /// equals what was already there.
+    private mutating func setOverwriting(value: String, on keyPath: WritableKeyPath<UserProfile, String>) -> Bool {
         let current = self[keyPath: keyPath].trimmingCharacters(in: .whitespacesAndNewlines)
-        guard current.isEmpty else { return false }
+        if current == value { return false }
         self[keyPath: keyPath] = value
         return true
     }

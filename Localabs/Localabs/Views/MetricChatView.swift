@@ -29,8 +29,8 @@ struct MetricChatView: View {
     @State private var messages: [ChatMessage] = []
     @State private var inputText: String = ""
     @State private var isThinking: Bool = false
-    /// FIFO popup-alert queue. See FollowUpChatView for design notes.
-    @State private var suggestionQueue: [ProfileSuggestion] = []
+    /// Drives the "+" quick-add-to-profile sheet from the input bar.
+    @State private var showQuickAddSheet = false
 
     struct ChatMessage: Identifiable, Equatable {
         let id = UUID()
@@ -97,7 +97,9 @@ struct MetricChatView: View {
                 }
             }
             .background(Color(uiColor: .systemBackground))
-            .profileSuggestionAlert(queue: $suggestionQueue)
+            .sheet(isPresented: $showQuickAddSheet) {
+                ProfileQuickAddSheet(prefilledValue: inputText)
+            }
         }
         .presentationContentInteraction(.scrolls)
     }
@@ -222,6 +224,19 @@ struct MetricChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 10) {
+            // Manual quick-save sheet trigger — same shape the
+            // other two chats use.
+            Button {
+                showQuickAddSheet = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: Circle())
+            }
+            .accessibilityLabel("Save something to your profile")
+
             TextField("Ask about your \(label.lowercased())…", text: $inputText, axis: .vertical)
                 .lineLimit(1...4)
                 .padding(.horizontal, 16)
@@ -268,12 +283,6 @@ struct MetricChatView: View {
         messages.append(ChatMessage(role: .user, content: question))
         inputText = ""
         isThinking = true
-
-        // Option B: scan typed message for profile-worthy facts;
-        // enqueue them so the popup-alert modifier picks them up.
-        let userSuggestions = ProfileSuggestionService.extractFromUserMessage(question)
-            .filter { !alreadyInProfile($0) }
-        suggestionQueue.append(contentsOf: userSuggestions)
 
         let aiMessage = ChatMessage(role: .ai, content: "", isStreaming: true)
         let aiId = aiMessage.id
@@ -332,34 +341,11 @@ struct MetricChatView: View {
                     haptic.prepare()
                 }
             }
-            // Option A: parse model output for [PROFILE_ADD: …]
-            // signals, strip markers, enqueue for popup.
             if let idx = messages.firstIndex(where: { $0.id == aiId }) {
-                let parsed = ProfileSuggestionService.extractFromModelOutput(messages[idx].content)
-                messages[idx].content = parsed.cleanedText
                 messages[idx].isStreaming = false
-                let modelSuggestions = parsed.suggestions.filter { !alreadyInProfile($0) }
-                suggestionQueue.append(contentsOf: modelSuggestions)
             }
             isThinking = false
         }
-    }
-
-    private func alreadyInProfile(_ suggestion: ProfileSuggestion) -> Bool {
-        let profile = UserProfile.load()
-        let needle = suggestion.value.lowercased()
-        let haystack: String
-        switch suggestion.field {
-        case .medications:       haystack = profile.medications
-        case .medicalConditions: haystack = profile.medicalConditions
-        case .familyHistory:     haystack = profile.familyHistory
-        case .smoking:           haystack = profile.smoking
-        case .alcohol:           haystack = profile.alcohol
-        case .bloodType:         haystack = profile.bloodType
-        case .age:               haystack = profile.age
-        case .biologicalSex:     haystack = profile.biologicalSex
-        }
-        return haystack.lowercased().contains(needle)
     }
 
     // MARK: - Formatting helpers

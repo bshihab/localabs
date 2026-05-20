@@ -756,14 +756,12 @@ struct FollowUpChatView: View {
     @State private var messages: [ChatMessage] = []
     @State private var inputText = ""
     @State private var isThinking = false
-    /// FIFO queue of profile suggestions awaiting user decision.
-    /// Replaced the previous inline banner UI — users were missing
-    /// banners that sat under bubbles, especially when the model
-    /// reply above said something reassuring like "I'll remember
-    /// that." A popup alert is unmissable and forces an explicit
-    /// Add / Skip. The queue lets multiple suggestions from a single
-    /// message (e.g. "I'm 35, I take metformin") present in sequence.
-    @State private var suggestionQueue: [ProfileSuggestion] = []
+    /// Drives the "+" quick-add-to-profile sheet shown from the
+    /// chat input bar. Replaced the previous auto-detection
+    /// pipeline (regex scanner + model `[PROFILE_ADD: …]` signals
+    /// + popup alerts) which was too unreliable to be worth the
+    /// interruptions.
+    @State private var showQuickAddSheet = false
     /// HealthKit averages fetched once at sheet-open time, then
     /// reused for every send. Pre-fetching aligns FollowUpChatView
     /// with TrendsChatView (which already received metrics from its
@@ -837,7 +835,9 @@ struct FollowUpChatView: View {
                 inputBar
             }
             .background(Color.clear)
-            .profileSuggestionAlert(queue: $suggestionQueue)
+            .sheet(isPresented: $showQuickAddSheet) {
+                ProfileQuickAddSheet(prefilledValue: inputText)
+            }
             .task {
                 // Pre-fetch HealthKit metrics ONCE when the sheet
                 // opens, instead of inside every send Task. If any
@@ -1055,6 +1055,21 @@ struct FollowUpChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 10) {
+            // "+ to profile" button — opens the manual quick-add
+            // sheet pre-filled with whatever's currently typed.
+            // Replaces the previous auto-detection feature; the
+            // user is now in explicit control of what gets saved.
+            Button {
+                showQuickAddSheet = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive(), in: Circle())
+            }
+            .accessibilityLabel("Save something to your profile")
+
             TextField("Ask about this text…", text: $inputText, axis: .vertical)
                 .lineLimit(1...4)
                 .padding(.horizontal, 16)
@@ -1101,22 +1116,9 @@ struct FollowUpChatView: View {
             InferenceEngine.ChatTurn(isUser: $0.role == .user, content: $0.content)
         }
 
-        let userMessage = ChatMessage(role: .user, content: question)
-        let userId = userMessage.id
-        messages.append(userMessage)
+        messages.append(ChatMessage(role: .user, content: question))
         inputText = ""
         isThinking = true
-
-        // Option B (user-stated): scan the typed message for self-
-        // statements ("I take metformin", "my mom had breast cancer")
-        // and enqueue them as popup alerts. The scan is purely
-        // pattern-based — no LLM call, runs synchronously.
-        // userId is unused now but kept above for symmetry with the
-        // ai branch and in case the inline-banner UI returns.
-        _ = userId
-        let userSuggestions = ProfileSuggestionService.extractFromUserMessage(question)
-            .filter { !alreadyInProfile($0) }
-        suggestionQueue.append(contentsOf: userSuggestions)
 
         let aiMessage = ChatMessage(role: .ai, content: "", isStreaming: true)
         let aiId = aiMessage.id
@@ -1158,39 +1160,9 @@ struct FollowUpChatView: View {
                 }
             }
             isThinking = false
-
-            // Option A (model-requested): once streaming ends, parse
-            // the final response for [PROFILE_ADD: …] signals, strip
-            // them from the visible bubble, and enqueue each as a
-            // popup alert. The visible text is the cleaned version
-            // so users never see the bracketed markers.
             if let idx = messages.firstIndex(where: { $0.id == aiId }) {
-                let parsed = ProfileSuggestionService.extractFromModelOutput(messages[idx].content)
-                messages[idx].content = parsed.cleanedText
                 messages[idx].isStreaming = false
-                let modelSuggestions = parsed.suggestions.filter { !alreadyInProfile($0) }
-                suggestionQueue.append(contentsOf: modelSuggestions)
             }
         }
-    }
-
-    /// Quick check so we don't surface a banner for something the
-    /// user already has in their profile. Case-insensitive
-    /// substring match against the field's stored value.
-    private func alreadyInProfile(_ suggestion: ProfileSuggestion) -> Bool {
-        let profile = UserProfile.load()
-        let needle = suggestion.value.lowercased()
-        let haystack: String
-        switch suggestion.field {
-        case .medications:       haystack = profile.medications
-        case .medicalConditions: haystack = profile.medicalConditions
-        case .familyHistory:     haystack = profile.familyHistory
-        case .smoking:           haystack = profile.smoking
-        case .alcohol:           haystack = profile.alcohol
-        case .bloodType:         haystack = profile.bloodType
-        case .age:               haystack = profile.age
-        case .biologicalSex:     haystack = profile.biologicalSex
-        }
-        return haystack.lowercased().contains(needle)
     }
 }

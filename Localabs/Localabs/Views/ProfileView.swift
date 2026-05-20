@@ -30,9 +30,6 @@ struct ProfileView: View {
                     medicationsCard
                         .padding(.horizontal)
 
-                    aiSuggestionsFooter
-                        .padding(.horizontal)
-
                     actionButtons
                         .padding(.horizontal)
                         .padding(.bottom, 100)
@@ -442,32 +439,6 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-
-    /// Footer note that explains entries surfaced by AI chats can
-    /// appear in the fields above. Tucked at the bottom of the
-    /// profile so it doesn't compete with the primary form fields,
-    /// but is visible enough that users notice their conditions /
-    /// medications list grew without them typing it themselves.
-    private var aiSuggestionsFooter: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.yellow)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Entries from chats appear here")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                Text("When you mention something personal in a Localabs chat (a medication, condition, family history, etc.), the app may offer to save it to your profile. Anything you accepted is in the fields above — feel free to edit or remove it.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var actionButtons: some View {
