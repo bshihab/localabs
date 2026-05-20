@@ -439,20 +439,7 @@ final class InferenceEngine: ObservableObject {
             analysisProgress = Double(idx + 1) / Double(images.count) * 0.20
         }
 
-        // Diagnostic prints — investigating the "multi-page scan
-        // returns text from a prior unrelated scan" report. Tags
-        // make grep'ing the Xcode console trivial.
-        for (idx, text) in pageTexts.enumerated() {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let preview = String(trimmed.prefix(80))
-                .replacingOccurrences(of: "\n", with: " ⏎ ")
-            print("[Analyze#OCR] page \(idx + 1)/\(pageTexts.count): chars=\(trimmed.count) preview=\"\(preview)…\"")
-        }
-
         let combinedText = truncateForContext(combinePageTexts(pageTexts))
-        let combinedPreview = String(combinedText.prefix(200))
-            .replacingOccurrences(of: "\n", with: " ⏎ ")
-        print("[Analyze#combine] combined chars=\(combinedText.count) preview=\"\(combinedPreview)…\"")
         if combinedText.isEmpty {
             return StructuredReport(patientSummary: "No text was found in these pages. Please ensure the document is clearly visible and try again.")
         }
@@ -1137,18 +1124,6 @@ final class InferenceEngine: ObservableObject {
         // tokenize-overflow / slow-decode complaints. Approximate token
         // count assumes ~4 chars/token for English text + medical jargon.
         print("[InferenceEngine] Prompt: \(promptWithPartial.count) chars (~\(promptWithPartial.count / 4) tokens) before Localabs run.")
-        // Diagnostic — investigating the "multi-page scan returns
-        // text from a prior scan" report. Print the LAST 200 chars
-        // of the prompt: the OCR text ends near here, so any
-        // mismatch between the document we expect and the prompt
-        // we send will show up immediately. Print the FIRST 80 to
-        // confirm the system header is intact.
-        let promptHead = String(promptWithPartial.prefix(80))
-            .replacingOccurrences(of: "\n", with: " ⏎ ")
-        let promptTail = String(promptWithPartial.suffix(200))
-            .replacingOccurrences(of: "\n", with: " ⏎ ")
-        print("[InferenceEngine] Prompt head: \"\(promptHead)\"")
-        print("[InferenceEngine] Prompt tail: \"\(promptTail)\"")
         let stream = context.predict(prompt: promptWithPartial, maxTokens: maxTokens)
         for await piece in stream {
             // Bail if the user paused (or the app got backgrounded /
@@ -1192,26 +1167,9 @@ final class InferenceEngine: ObservableObject {
             // the new run restarts the LLM from token 0, but the bar
             // stays at the user's prior position until streaming
             // catches up.
-            // Diagnostic — snapshot the first generated chunk so
-            // we can see if the model's output starts as fresh
-            // analysis of THIS document or if it's reproducing a
-            // prior scan's text. Print only on the first stream
-            // milestone so the console doesn't fill with per-token
-            // junk.
-            if tokenCount == 50 || tokenCount == 200 {
-                let preview = String(collected.prefix(300))
-                    .replacingOccurrences(of: "\n", with: " ⏎ ")
-                print("[InferenceEngine] Generated at token \(tokenCount): \"\(preview)\"")
-            }
-
             let proposed = min(0.25 + Double(tokenCount) / Double(maxTokens) * 0.70, 0.95)
             analysisProgress = max(analysisProgress, proposed)
         }
-
-        // Diagnostic — final generated content length + opening 300 chars.
-        let finalPreview = String(collected.prefix(300))
-            .replacingOccurrences(of: "\n", with: " ⏎ ")
-        print("[InferenceEngine] Generation complete: \(collected.count) chars. Opens with: \"\(finalPreview)\"")
 
         // Empty output usually means llama_tokenize bailed because the
         // prompt overflowed n_ctx (multi-page scans + system prompt +

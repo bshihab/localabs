@@ -125,7 +125,15 @@ struct ScanView: View {
             }
             .navigationDestination(isPresented: $navigateToDashboard) {
                 if let report = report {
+                    // `.id(report.id)` forces SwiftUI to build a
+                    // fresh DashboardView instance whenever the
+                    // pushed report changes. Without this, the
+                    // dashboard could reuse its @State (including
+                    // a stale `report` value) across consecutive
+                    // scans — making a brand-new multi-page scan
+                    // appear to display the prior scan's text.
                     DashboardView(initialReport: report)
+                        .id(report.id)
                 }
             }
         }

@@ -33,7 +33,12 @@ struct HistoryView: View {
             }
             .navigationTitle("Report History")
             .navigationDestination(item: $selectedReport) { report in
+                // `.id(report.id)` is the same identity reset that
+                // ScanView uses — guarantees a fresh DashboardView
+                // every time the user taps a different history row,
+                // so the previous row's @State can't bleed through.
                 DashboardView(initialReport: report)
+                    .id(report.id)
             }
             .toolbar {
                 if !reports.isEmpty {
@@ -245,36 +250,33 @@ struct HistoryView: View {
             }
             .buttonStyle(.plain)
             .contextMenu {
+                // Icon color inside a context-menu Label is governed
+                // by the BUTTON's tint, not by .foregroundStyle on
+                // the inner Image — the system menu picks tint at
+                // the button level and applies it uniformly. Setting
+                // .tint(.primary) overrides the default blue accent
+                // so the pencil + share icons match the text color.
+                // The destructive role tints the whole Delete button
+                // red (text + icon) without our needing to set .tint.
                 Button {
                     renameText = report.displayTitle
                     renameTarget = report
                 } label: {
-                    Label {
-                        Text("Rename Report")
-                    } icon: {
-                        Image(systemName: "pencil")
-                            .foregroundStyle(.primary)
-                    }
+                    Label("Rename Report", systemImage: "pencil")
                 }
+                .tint(.primary)
+
                 Button {
                     shareSingle(report: report)
                 } label: {
-                    Label {
-                        Text("Share Report")
-                    } icon: {
-                        Image(systemName: "square.and.arrow.up")
-                            .foregroundStyle(.primary)
-                    }
+                    Label("Share Report", systemImage: "square.and.arrow.up")
                 }
+                .tint(.primary)
+
                 Button(role: .destructive) {
                     deleteTarget = report
                 } label: {
-                    Label {
-                        Text("Delete Report")
-                    } icon: {
-                        Image(systemName: "trash")
-                            .foregroundStyle(.red)
-                    }
+                    Label("Delete Report", systemImage: "trash")
                 }
             }
         }

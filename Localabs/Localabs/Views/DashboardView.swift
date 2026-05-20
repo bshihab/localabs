@@ -222,6 +222,17 @@ struct DashboardView: View {
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
                 if report == nil { report = initialReport }
             }
+            // ALWAYS sync the local @State to the most recent
+            // initialReport. The previous logic only assigned in
+            // `.task` when `report == nil`, which left the view
+            // showing stale content if SwiftUI happened to reuse
+            // the DashboardView instance for a new report. This was
+            // the bug behind "I scan a multi-page Alzheimer's doc,
+            // the model generates correct Alzheimer's content, but
+            // the dashboard still shows the previous lipid scan."
+            .onChange(of: initialReport?.id) { _, _ in
+                report = initialReport
+            }
             // Share button only appears when Dashboard is showing a
             // specific report (pushed from History or post-scan). The
             // empty tab state has nothing to share, so we hide it.
