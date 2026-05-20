@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct HistoryView: View {
+    @EnvironmentObject var engine: InferenceEngine
     @State private var reports: [StructuredReport] = []
     @State private var selectedReport: StructuredReport?
     /// Drives the Select / Done toggle. Active mode shows checkboxes
@@ -327,7 +328,11 @@ struct HistoryView: View {
     // MARK: - Actions
 
     private func delete(report: StructuredReport) {
-        LocalStorageService.shared.deleteReport(id: report.id)
+        // Route through engine.deleteReport so pendingResumeReport
+        // and the on-disk scan JPEGs get cleaned up alongside the
+        // history entry. Calling LocalStorageService directly left
+        // both behind.
+        engine.deleteReport(report)
         reports.removeAll { $0.id == report.id }
         selection.remove(report.id)
     }
@@ -338,7 +343,9 @@ struct HistoryView: View {
     private func deleteSelected() {
         let toDelete = selection
         for id in toDelete {
-            LocalStorageService.shared.deleteReport(id: id)
+            if let report = reports.first(where: { $0.id == id }) {
+                engine.deleteReport(report)
+            }
         }
         reports.removeAll { toDelete.contains($0.id) }
         selection.removeAll()

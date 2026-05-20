@@ -180,6 +180,35 @@ final class InferenceEngine: ObservableObject {
         )
     }
 
+    /// Canonical delete path for a saved report. Use this instead of
+    /// calling `LocalStorageService.deleteReport` directly so the
+    /// engine's in-memory state and the on-disk scan images get
+    /// cleaned up together. Without this, deleting a report from
+    /// History left two ghosts behind:
+    ///   1. `pendingResumeReport` could still point at the deleted
+    ///      record — Scan tab would keep showing a Resume CTA for a
+    ///      report that no longer exists in History, and tapping it
+    ///      would re-create the entry on regen.
+    ///   2. The JPEG page images in `Documents/scans/` were orphaned,
+    ///      accumulating storage with every delete.
+    /// Both are addressed here.
+    func deleteReport(_ report: StructuredReport) {
+        var filenames: [String] = []
+        if let path = report.imagePath { filenames.append(path) }
+        if let extras = report.additionalPagePaths { filenames.append(contentsOf: extras) }
+        if !filenames.isEmpty {
+            Self.deleteSavedScans(named: filenames)
+        }
+        if pendingResumeReport?.id == report.id {
+            pendingResumeReport = nil
+            streamingText = ""
+            analysisProgress = 0
+            processingStatus = ""
+            isPaused = false
+        }
+        LocalStorageService.shared.deleteReport(id: report.id)
+    }
+
     /// Throws away the paused analysis — clears the live-cards state,
     /// deletes the saved incomplete report from LocalStorage so it
     /// doesn't reappear on the Dashboard tab or in History, and returns
