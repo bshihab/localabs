@@ -127,6 +127,7 @@ struct DocumentViewerView: View {
         .sheet(isPresented: $showChat) {
             let bd = lassoBreakdown
             FollowUpChatView(
+                reportID: report.id,
                 selectedText: getSelectedText(),
                 fullReportContext: report.patientSummary,
                 ocrText: report.rawText,
@@ -744,6 +745,14 @@ private struct LassoPath: View {
 // MARK: - Follow-Up Chat View
 
 struct FollowUpChatView: View {
+    /// The scan this chat belongs to. Drives ChatHistoryService:
+    /// the sheet loads any prior conversation about this report on
+    /// `.task` and persists every completed turn so reopening the
+    /// scan later picks the chat up where it left off. Per-document
+    /// chats are scoped to a real saved scan (which lives forever
+    /// in History until explicitly deleted), unlike Trends and
+    /// Metric chats whose underlying data is a rolling window.
+    let reportID: UUID
     let selectedText: String
     let fullReportContext: String
     let ocrText: String
@@ -846,6 +855,14 @@ struct FollowUpChatView: View {
                 // than at message-send time (where the chat would
                 // get stuck on typing dots).
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
+            }
+            .onAppear {
+                // Hydrate the conversation from disk if the user
+                // chatted about this report before. Empty array
+                // means it's a fresh chat — the starter chips + intro
+                // header still render via the `messages.isEmpty`
+                // branch below.
+                loadPersistedMessages()
             }
             .navigationTitle("Ask Localabs")
             .navigationBarTitleDisplayMode(.inline)
@@ -1163,6 +1180,43 @@ struct FollowUpChatView: View {
             if let idx = messages.firstIndex(where: { $0.id == aiId }) {
                 messages[idx].isStreaming = false
             }
+            // Persist the full conversation so reopening this scan
+            // later restores the chat. Saving here (rather than per-
+            // chunk) means we always write a stable, completed-turn
+            // snapshot — never a half-streamed AI message.
+            persistMessages()
         }
+    }
+
+    /// Loads the saved conversation for `reportID` and converts the
+    /// persisted form back into in-memory ChatMessage rows. Called
+    /// on `.onAppear` so reopening a scan picks the chat up where
+    /// the user left off.
+    private func loadPersistedMessages() {
+        let stored = ChatHistoryService.shared.messages(for: reportID)
+        guard !stored.isEmpty else { return }
+        messages = stored.map { persisted in
+            ChatMessage(
+                id: persisted.id,
+                role: persisted.role == .user ? .user : .ai,
+                content: persisted.content,
+                isStreaming: false
+            )
+        }
+    }
+
+    /// Writes the current conversation to disk. Called after every
+    /// completed AI turn so the on-disk copy is always current —
+    /// if the app gets killed mid-session, the chat up to the last
+    /// completed turn survives.
+    private func persistMessages() {
+        let toSave = messages.map { msg in
+            PersistedChatMessage(
+                id: msg.id,
+                role: msg.role == .user ? .user : .ai,
+                content: msg.content
+            )
+        }
+        ChatHistoryService.shared.save(toSave, for: reportID)
     }
 }

@@ -102,17 +102,27 @@ class LocalStorageService {
     
     // MARK: - Cleanup
     
-    /// Clears all history.
+    /// Clears all history — used by Profile → Reset App & Erase
+    /// Data. Wipes the report list AND every per-report chat
+    /// (chats are keyed by report ID, so without this they'd
+    /// outlive their parent reports as orphan entries).
     func clearHistory() {
         UserDefaults.standard.removeObject(forKey: storageKey)
+        UserDefaults.standard.removeObject(forKey: "localabs_chat_history")
     }
     
-    /// Deletes a specific report by ID.
+    /// Deletes a specific report by ID. Also clears any persisted
+    /// chat history scoped to that report — orphan conversations
+    /// for deleted scans were a privacy + UX surprise. Chat history
+    /// for an in-flight scan that the user discards (via the
+    /// Discard CTA on a paused/incomplete run) routes through this
+    /// same path, so that case is covered too.
     func deleteReport(id: UUID) {
         var history = getHistory()
         history.removeAll { $0.id == id }
         if let data = try? JSONEncoder().encode(history) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
+        ChatHistoryService.shared.clear(for: id)
     }
 }
