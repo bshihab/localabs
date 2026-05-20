@@ -445,6 +445,12 @@ struct ScanView: View {
             showNonHealthAlert = true
             return
         }
+        // Diagnostic — what report ID and content is being routed
+        // to Dashboard? Cross-reference with [Analyze#save] and
+        // [Dashboard#init] to see if any of those three differ.
+        let resultPreview = String(result.patientSummary.prefix(150))
+            .replacingOccurrences(of: "\n", with: " ⏎ ")
+        print("[ScanView#route] id=\(result.id.uuidString.prefix(8)) title=\"\(result.displayTitle)\" patientSummary[0..150]=\"\(resultPreview)\"")
         report = result
         if !result.isIncomplete && !engine.isPaused {
             navigateToDashboard = true

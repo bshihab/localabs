@@ -511,6 +511,13 @@ final class InferenceEngine: ObservableObject {
         let hasResumableState = isInferenceCancelled || !streamingText.isEmpty
         let isHardFailure = report.isIncomplete && !hasResumableState
         if !isInferenceCancelled && !report.isIncomplete && !report.wasRejectedAsNonHealth {
+            // Diagnostic — investigating "fresh scan returns text
+            // from a prior unrelated scan." Want to see what
+            // analyzeImages actually saves vs. what Dashboard
+            // eventually displays.
+            let preview = String(report.patientSummary.prefix(150))
+                .replacingOccurrences(of: "\n", with: " ⏎ ")
+            print("[Analyze#save] id=\(report.id.uuidString.prefix(8)) title=\"\(report.displayTitle)\" patientSummary[0..150]=\"\(preview)\"")
             LocalStorageService.shared.saveReport(report)
         }
         if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
