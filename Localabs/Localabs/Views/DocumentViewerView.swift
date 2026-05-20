@@ -780,6 +780,10 @@ struct FollowUpChatView: View {
     /// Empty `HealthMetrics()` is a safe placeholder until the real
     /// values land via `.task` below.
     @State private var healthMetrics: HealthKitService.HealthMetrics = HealthKitService.HealthMetrics()
+    /// Drives the "Clear this chat?" confirmation. Tapping the
+    /// trash icon in the top toolbar sets this true; the
+    /// confirmation dialog then commits or cancels the wipe.
+    @State private var showClearChatConfirm = false
 
     struct ChatMessage: Identifiable, Equatable {
         // Explicit init (instead of an inline `let id = UUID()`
@@ -893,8 +897,52 @@ struct FollowUpChatView: View {
                             .font(.system(size: 18, weight: .semibold))
                     }
                 }
+                // Clear-chat trash icon, top trailing. Only renders
+                // when there's a conversation to clear — keeps the
+                // empty state uncluttered. Tap routes through a
+                // confirmation dialog so an errant tap doesn't wipe
+                // a long thread.
+                if !messages.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showClearChatConfirm = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(.red)
+                        }
+                        .accessibilityLabel("Clear conversation")
+                    }
+                }
+            }
+            // Confirmation dialog instead of an alert — matches the
+            // History single-row delete pattern; slides up from the
+            // bottom anchored to the trash tap rather than appearing
+            // as a centered modal.
+            .confirmationDialog(
+                "Clear this conversation?",
+                isPresented: $showClearChatConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Clear Conversation", role: .destructive) {
+                    clearConversation()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes every message in this chat — the empty starter prompts come back. The original scan and its analysis stay untouched.")
             }
         }
+    }
+
+    /// Wipes the in-memory chat AND its persisted copy, returning
+    /// the sheet to its fresh-conversation state (empty-state header
+    /// + starter chips). The scan itself and its analysis are
+    /// untouched — this only resets the conversational history.
+    private func clearConversation() {
+        withAnimation(.easeOut(duration: 0.2)) {
+            messages.removeAll()
+        }
+        ChatHistoryService.clear(for: reportID)
     }
 
     /// Same shape language as TrendsChatView's intro card. Explains
