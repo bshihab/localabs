@@ -88,23 +88,36 @@ struct DocumentViewerView: View {
         }
         .navigationTitle("Scan Viewer")
         .navigationBarTitleDisplayMode(.inline)
+        // Lasso-start haptic via SwiftUI's pre-warmed haptic engine.
+        // The previous inline `UIImpactFeedbackGenerator(...).impactOccurred()`
+        // ran from a cold engine and landed ~1s after the actual
+        // touch-down. .sensoryFeedback keeps the engine warm in the
+        // background; the closure gate fires only on the false → true
+        // edge so we don't double-tap when the gesture ends.
+        .sensoryFeedback(.impact(weight: .medium), trigger: isLassoing) { oldValue, newValue in
+            newValue == true && oldValue == false
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 8) {
-                    // "Find table on this page" — runs the same breakdown
-                    // algorithm over every recognized block on the current
-                    // page (no lasso required) and selects the table region
-                    // automatically. Useful for pages where the user
-                    // already knows the table is the main thing.
+                    // "Auto-select table on this page" — runs the
+                    // breakdown algorithm over every recognized block
+                    // on the current page (no lasso required) and
+                    // selects the table region automatically. The
+                    // icon is the universal "auto / magic" wand
+                    // because the action is "do the lasso for me,"
+                    // not "browse tables" — the previous tablecells
+                    // glyph read as a tables-list affordance and
+                    // confused first-time users.
                     Button {
                         autoSelectTableOnCurrentPage()
                     } label: {
-                        Image(systemName: "tablecells.badge.ellipsis")
+                        Image(systemName: "wand.and.stars")
                             .font(.system(size: 18))
                             .foregroundStyle(.blue)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Find table on this page")
+                    .accessibilityLabel("Auto-select table on this page")
                     .disabled(recognizedBlocks.isEmpty)
 
                     if !selectedBlocks.isEmpty {
@@ -249,7 +262,13 @@ struct DocumentViewerView: View {
                 if !isLassoing {
                     isLassoing = true
                     lassoPoints = [value.startLocation]
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    // Haptic intentionally NOT triggered here — the
+                    // inline `UIImpactFeedbackGenerator(...).impactOccurred()`
+                    // pattern fires from a cold engine and lands ~1s
+                    // late. The view's `.sensoryFeedback(_:trigger:)`
+                    // modifier watches `isLassoing` and fires the
+                    // impact immediately (it keeps the haptic engine
+                    // warm in the background).
                     dismissHintIfShown()
                 } else if let last = lassoPoints.last,
                           hypot(value.location.x - last.x, value.location.y - last.y) > 4 {
