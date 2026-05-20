@@ -459,12 +459,11 @@ struct ProfileView: View {
     private var actionButtons: some View {
         VStack(spacing: 12) {
             Button {
-                // New: dedicated edit sheet that shows existing
-                // field values + any auto-added entries, instead of
-                // re-routing through the 4-step onboarding flow.
-                // The welcome / privacy / re-acceptance experience
-                // is still reachable via the Re-Run Onboarding
-                // button below for users who want it.
+                // Dedicated edit sheet that shows existing field
+                // values + any chat-added entries. The full 4-step
+                // welcome / privacy onboarding flow only re-fires
+                // if the user taps Reset App below (which clears
+                // `onboarding_complete` and forces it on next launch).
                 showProfileEdit = true
             } label: {
                 Label("Edit Health Profile", systemImage: "pencil")
