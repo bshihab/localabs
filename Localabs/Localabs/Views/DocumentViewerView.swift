@@ -782,11 +782,25 @@ struct FollowUpChatView: View {
     @State private var healthMetrics: HealthKitService.HealthMetrics = HealthKitService.HealthMetrics()
 
     struct ChatMessage: Identifiable, Equatable {
-        let id = UUID()
+        // Explicit init (instead of an inline `let id = UUID()`
+        // default) so callers can pass a specific UUID when
+        // hydrating from ChatHistoryService — Swift's synthesized
+        // memberwise initializer drops `let` properties that have
+        // inline defaults, which made `ChatMessage(id: …, role:
+        // …, content: …)` fail to compile during chat restore.
+        let id: UUID
         let role: Role
         var content: String
-        var isStreaming: Bool = false
+        var isStreaming: Bool
+
         enum Role { case user, ai }
+
+        init(id: UUID = UUID(), role: Role, content: String, isStreaming: Bool = false) {
+            self.id = id
+            self.role = role
+            self.content = content
+            self.isStreaming = isStreaming
+        }
     }
 
     var body: some View {
