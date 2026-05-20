@@ -671,8 +671,17 @@ final class InferenceEngine: ObservableObject {
         guard nonEmpty.count > 1 else {
             return nonEmpty.first?.text ?? ""
         }
+        // Inline `[Page N]` markers (instead of the previous
+        // `--- Page N ---` divider blocks). The dashed dividers
+        // were reading like document separators to the model — it
+        // would emit a complete 5-section analysis for page 1,
+        // then on hitting the next divider restart with a fresh
+        // PATIENT SUMMARY for page 2, and the parser would
+        // overwrite earlier sections with later ones. Quieter
+        // inline markers preserve citation ability without looking
+        // like "new document starts here."
         return nonEmpty
-            .map { "--- Page \($0.index + 1) ---\n\($0.text)" }
+            .map { "[Page \($0.index + 1)]\n\($0.text)" }
             .joined(separator: "\n\n")
     }
 
@@ -969,6 +978,7 @@ final class InferenceEngine: ObservableObject {
             FIRST identify which it is from the OCR content, then summarize what THIS document says.
 
             CRITICAL RULES BEFORE YOU ANSWER:
+            - MULTI-PAGE SCANS ARE ONE DOCUMENT. The OCR text may contain `[Page 1]`, `[Page 2]`, etc. markers — these are just page boundaries inside the SAME report. Produce ONE cohesive 5-section analysis covering ALL pages together. Do NOT restart PATIENT SUMMARY when you reach the next page marker. Do NOT emit a second [TITLE: …] line. Treat the whole stream as one document; values on page 2 + page 3 belong in the same sections as page 1.
             - Your ENTIRE analysis is about THE OCR TEXT below and only that text. You have NO access to prior reports, prior chats, conversation history, or anything outside this single document. Do not say "consistent with your earlier panel," do not carry numbers or diagnoses from anywhere else. If a fact isn't in the OCR text, it doesn't exist for this analysis.
             - NEVER FABRICATE. Every numeric value (e.g. "240 mg/dL", "35 mg/dL", "18 ng/mL") and every diagnosis you cite must appear verbatim, character-for-character, in the OCR text above. If you cannot point to the exact characters, do not write it. The model has been observed inventing entire lipid panels for documents that mention "cholesterol" only in an Orders section — this is a critical failure and must never happen.
             - DISTINGUISH ORDERS FROM RESULTS. Clinical notes routinely list labs the doctor ORDERED (phrasing like "Laboratory orders placed today: CBC, CMP, TSH…"). Orders are NOT results — do not pretend the test came back with a value. Reference the orders only as part of the PLAN, not as findings.

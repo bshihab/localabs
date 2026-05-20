@@ -251,7 +251,21 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         func flush() {
             if let key = currentKey {
                 let value = buffer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-                sections[key] = value
+                if !value.isEmpty {
+                    // Append on repeat instead of overwriting. The model
+                    // occasionally restarts a section on multi-page
+                    // scans — emits PATIENT SUMMARY for page 1, then
+                    // emits PATIENT SUMMARY again when it hits the
+                    // [Page 2] marker. The prompt now forbids this, but
+                    // if it leaks through, merging preserves both
+                    // chunks instead of clobbering page 1's content
+                    // with page 2's.
+                    if let existing = sections[key], !existing.isEmpty {
+                        sections[key] = "\(existing)\n\n\(value)"
+                    } else {
+                        sections[key] = value
+                    }
+                }
             }
             buffer.removeAll(keepingCapacity: true)
         }
