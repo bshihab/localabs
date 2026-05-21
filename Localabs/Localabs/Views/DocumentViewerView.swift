@@ -19,6 +19,12 @@ struct DocumentViewerView: View {
     @State private var showInteractionHint = false
     @State private var hintRingProgress: CGFloat = 0
     @State private var mode: ViewerMode = .browse
+    /// Drives the floating "you have selections on other pages"
+    /// banner. Auto-shows on page change + on every new selection
+    /// while in Select mode, as long as some OTHER page has at
+    /// least one selected block. Dismisses on tap; reappears the
+    /// next time the selection set or current page changes.
+    @State private var showCrossPageBanner = false
     @Namespace private var glassNamespace
 
     /// Two explicit interaction modes — replaces the long-press-to-engage
@@ -51,6 +57,31 @@ struct DocumentViewerView: View {
         return pageBlocks[currentPageIndex]
     }
 
+    /// One-based page numbers of every OTHER page (i.e. not the page
+    /// currently displayed) that has at least one selected block.
+    /// Drives the cross-page reminder banner — without it, users
+    /// would flip between pages, make new selections, and forget
+    /// that earlier-page selections were still part of the bundle
+    /// they'd be asking Localabs about.
+    private var otherPagesWithSelections: [Int] {
+        pageBlocks.enumerated().compactMap { idx, blocks in
+            guard idx != currentPageIndex else { return nil }
+            return blocks.contains(where: { selectedBlocks.contains($0.id) }) ? idx + 1 : nil
+        }
+    }
+
+    /// Human-readable list of page numbers: "page 3", "pages 3 and
+    /// 4", "pages 3, 4, and 5". Used inside the banner body so the
+    /// copy reads naturally regardless of how many pages have
+    /// selections.
+    private func formatPageList(_ pages: [Int]) -> String {
+        guard !pages.isEmpty else { return "" }
+        if pages.count == 1 { return "page \(pages[0])" }
+        if pages.count == 2 { return "pages \(pages[0]) and \(pages[1])" }
+        let head = pages.dropLast().map(String.init).joined(separator: ", ")
+        return "pages \(head), and \(pages.last!)"
+    }
+
     /// Every recognized block across every page, used by the chat sheet to
     /// resolve a UUID-keyed selection back to text regardless of which
     /// page each selected block came from.
@@ -71,6 +102,16 @@ struct DocumentViewerView: View {
                 modeToggle
                     .padding(.top, 8)
                 Spacer()
+                // Cross-page selection reminder. Sits just above the
+                // page-nav control so the user reads "selections on
+                // pages 3 and 4" right next to the page indicator
+                // they used to navigate. Tap-to-dismiss; reappears
+                // on the next page change or new selection.
+                if showCrossPageBanner && !otherPagesWithSelections.isEmpty {
+                    crossPageBanner
+                        .padding(.horizontal, 20)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 if scanImages.count > 1 {
                     pageNavigation
                         .padding(.horizontal, 20)
@@ -96,6 +137,29 @@ struct DocumentViewerView: View {
         // edge so we don't double-tap when the gesture ends.
         .sensoryFeedback(.impact(weight: .medium), trigger: isLassoing) { oldValue, newValue in
             newValue == true && oldValue == false
+        }
+        // Cross-page banner trigger. Re-surfaces the reminder
+        // whenever the user navigates pages OR mutates the
+        // selection set, AS LONG AS we're in Select mode and at
+        // least one other page has selections. Tapping the banner
+        // sets showCrossPageBanner=false; these onChange handlers
+        // bring it back the next time something changes.
+        .onChange(of: currentPageIndex) { _, _ in
+            evaluateCrossPageBanner()
+        }
+        .onChange(of: selectedBlocks) { _, _ in
+            evaluateCrossPageBanner()
+        }
+        .onChange(of: mode) { _, newMode in
+            // Leaving Select mode clears the banner outright;
+            // entering Select mode evaluates fresh.
+            if newMode == .browse {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    showCrossPageBanner = false
+                }
+            } else {
+                evaluateCrossPageBanner()
+            }
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -221,6 +285,13 @@ struct DocumentViewerView: View {
                                 .position(x: rect.midX, y: rect.midY)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
+                                    // Tap-to-select is Select-mode only.
+                                    // Without this gate, taps in Browse
+                                    // mode flipped selection state too,
+                                    // which let users accidentally select
+                                    // blocks while just panning around
+                                    // the scan.
+                                    guard mode == .select else { return }
                                     dismissHintIfShown()
                                     withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
                                         if isSelected {
@@ -366,6 +437,50 @@ struct DocumentViewerView: View {
             Text("Original scan not available")
                 .font(.headline)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Glass banner that surfaces when the user is on a page with
+    /// no selections on it, but earlier-visited pages still have
+    /// selections in the bundle. Tap to dismiss; the underlying
+    /// onChange handlers re-show it on the next state change.
+    private var crossPageBanner: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) {
+                showCrossPageBanner = false
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "highlighter")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.yellow)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("You have selections on \(formatPageList(otherPagesWithSelections))")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text("Tap to dismiss")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Re-evaluates whether the cross-page banner should show.
+    /// Two gates: must be in Select mode (banner is useless in
+    /// Browse), and there must be at least one other page with
+    /// selections. Setting the flag inside an animation gives the
+    /// banner the slide-up appearance the user expects.
+    private func evaluateCrossPageBanner() {
+        let shouldShow = mode == .select && !otherPagesWithSelections.isEmpty
+        withAnimation(.easeOut(duration: 0.25)) {
+            showCrossPageBanner = shouldShow
         }
     }
 
