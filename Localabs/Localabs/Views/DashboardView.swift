@@ -220,16 +220,7 @@ struct DashboardView: View {
             .background(.background)
             .task {
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
-                // Diagnostic — what report did this Dashboard
-                // instance actually receive vs. what does its local
-                // @State end up showing?
-                let initialPreview = String(initialReport?.patientSummary.prefix(150) ?? "<nil>")
-                    .replacingOccurrences(of: "\n", with: " ⏎ ")
-                print("[Dashboard#init] initialReport.id=\(initialReport?.id.uuidString.prefix(8) ?? "<nil>") title=\"\(initialReport?.displayTitle ?? "<nil>")\" patientSummary[0..150]=\"\(initialPreview)\"")
                 if report == nil { report = initialReport }
-                let currentPreview = String(report?.patientSummary.prefix(150) ?? "<nil>")
-                    .replacingOccurrences(of: "\n", with: " ⏎ ")
-                print("[Dashboard#init] AFTER task: report.id=\(report?.id.uuidString.prefix(8) ?? "<nil>") patientSummary[0..150]=\"\(currentPreview)\"")
             }
             // ALWAYS sync the local @State to the most recent
             // initialReport. The previous logic only assigned in
@@ -239,8 +230,7 @@ struct DashboardView: View {
             // the bug behind "I scan a multi-page Alzheimer's doc,
             // the model generates correct Alzheimer's content, but
             // the dashboard still shows the previous lipid scan."
-            .onChange(of: initialReport?.id) { oldID, newID in
-                print("[Dashboard#onChange] initialReport id changed \(oldID?.uuidString.prefix(8) ?? "<nil>") → \(newID?.uuidString.prefix(8) ?? "<nil>")")
+            .onChange(of: initialReport?.id) { _, _ in
                 report = initialReport
             }
             // Share button only appears when Dashboard is showing a
