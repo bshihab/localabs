@@ -98,28 +98,7 @@ struct DocumentViewerView: View {
                 emptyState
             }
 
-            VStack(spacing: 8) {
-                modeToggle
-                    .padding(.top, 8)
-                Spacer()
-                // Cross-page selection reminder. Sits just above the
-                // page-nav control so the user reads "selections on
-                // pages 3 and 4" right next to the page indicator
-                // they used to navigate. Tap-to-dismiss; reappears
-                // on the next page change or new selection.
-                if showCrossPageBanner && !otherPagesWithSelections.isEmpty {
-                    crossPageBanner
-                        .padding(.horizontal, 20)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                if scanImages.count > 1 {
-                    pageNavigation
-                        .padding(.horizontal, 20)
-                }
-                askPill
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
-            }
+            bottomControlsStack
 
             if showInteractionHint {
                 interactionHint
@@ -437,6 +416,33 @@ struct DocumentViewerView: View {
             Text("Original scan not available")
                 .font(.headline)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Extracted from `body` because the original ZStack was too
+    /// dense for Swift's type inference (the conditional banner +
+    /// conditional page-nav + ask-pill chained inside a VStack
+    /// inside a ZStack with `.gesture` and `.toolbar` modifiers
+    /// tripped a "compiler can't type-check in reasonable time"
+    /// error). Splitting it out keeps each builder closure small
+    /// enough to infer quickly.
+    private var bottomControlsStack: some View {
+        VStack(spacing: 8) {
+            modeToggle
+                .padding(.top, 8)
+            Spacer()
+            if showCrossPageBanner && !otherPagesWithSelections.isEmpty {
+                crossPageBanner
+                    .padding(.horizontal, 20)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            if scanImages.count > 1 {
+                pageNavigation
+                    .padding(.horizontal, 20)
+            }
+            askPill
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
         }
     }
 
