@@ -142,56 +142,11 @@ struct DocumentViewerView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 8) {
-                    // "Auto-select table on this page" — runs the
-                    // breakdown algorithm over every recognized block
-                    // on the current page (no lasso required) and
-                    // selects the table region automatically. The
-                    // icon is the universal "auto / magic" wand
-                    // because the action is "do the lasso for me,"
-                    // not "browse tables" — the previous tablecells
-                    // glyph read as a tables-list affordance and
-                    // confused first-time users.
-                    Button {
-                        autoSelectTableOnCurrentPage()
-                    } label: {
-                        Image(systemName: "wand.and.stars")
-                            .font(.system(size: 18))
-                            .foregroundStyle(.blue)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Auto-select table on this page")
-                    .disabled(recognizedBlocks.isEmpty)
-
-                    if !selectedBlocks.isEmpty {
-                        Button {
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
-                                selectedBlocks.removeAll()
-                            }
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 22))
-                                .foregroundStyle(.secondary, .tertiary)
-                                .symbolRenderingMode(.hierarchical)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear selection")
-                    }
-                }
+                topTrailingToolbarContent
             }
         }
         .sheet(isPresented: $showChat) {
-            let bd = lassoBreakdown
-            FollowUpChatView(
-                reportID: report.id,
-                selectedText: getSelectedText(),
-                fullReportContext: report.patientSummary,
-                ocrText: report.rawText,
-                isWholeDocumentAsk: selectedBlocks.isEmpty,
-                detectedTable: bd.table,
-                extraText: bd.extraText
-            )
-            .environmentObject(engine)
+            followUpChatSheet
             .presentationBackground(.thinMaterial)
             .presentationDragIndicator(.visible)
             // Without this, the sheet's pull-to-dismiss gesture wins over
@@ -417,6 +372,60 @@ struct DocumentViewerView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    /// Top-trailing toolbar items — wand for auto-select-table
+    /// plus the conditional clear-selection X. Extracted so the
+    /// main body's `.toolbar` modifier stays tiny enough for
+    /// Swift's type inference. The behavior is identical to the
+    /// previous inline version.
+    private var topTrailingToolbarContent: some View {
+        HStack(spacing: 8) {
+            Button {
+                autoSelectTableOnCurrentPage()
+            } label: {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.blue)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Auto-select table on this page")
+            .disabled(recognizedBlocks.isEmpty)
+
+            if !selectedBlocks.isEmpty {
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        selectedBlocks.removeAll()
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 22))
+                        .foregroundStyle(.secondary, .tertiary)
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear selection")
+            }
+        }
+    }
+
+    /// Follow-up chat sheet content. Pulled out of the inline
+    /// `.sheet { ... }` closure on the body so Swift's type
+    /// inference doesn't have to chew through the whole
+    /// FollowUpChatView constructor + chained presentation
+    /// modifiers as part of the body expression.
+    private var followUpChatSheet: some View {
+        let bd = lassoBreakdown
+        return FollowUpChatView(
+            reportID: report.id,
+            selectedText: getSelectedText(),
+            fullReportContext: report.patientSummary,
+            ocrText: report.rawText,
+            isWholeDocumentAsk: selectedBlocks.isEmpty,
+            detectedTable: bd.table,
+            extraText: bd.extraText
+        )
+        .environmentObject(engine)
     }
 
     /// Extracted from `body` because the original ZStack was too
