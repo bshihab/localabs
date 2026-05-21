@@ -88,58 +88,15 @@ struct DocumentViewerView: View {
     private var allBlocks: [TextBlock] { pageBlocks.flatMap { $0 } }
 
     var body: some View {
-        ZStack {
-            Color(.systemGroupedBackground).ignoresSafeArea()
-
-            if let image = currentImage {
-                imageScroller(image: image)
-                    .id(currentPageIndex) // force fresh layout on page change
-            } else {
-                emptyState
+        mainContent
+            .navigationTitle("Scan Viewer")
+            .navigationBarTitleDisplayMode(.inline)
+            .sensoryFeedback(.impact(weight: .medium), trigger: isLassoing) { old, new in
+                lassoStarted(oldValue: old, newValue: new)
             }
-
-            bottomControlsStack
-
-            if showInteractionHint {
-                interactionHint
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                    .allowsHitTesting(false) // taps pass through to the document
-            }
-        }
-        .navigationTitle("Scan Viewer")
-        .navigationBarTitleDisplayMode(.inline)
-        // Lasso-start haptic via SwiftUI's pre-warmed haptic engine.
-        // The previous inline `UIImpactFeedbackGenerator(...).impactOccurred()`
-        // ran from a cold engine and landed ~1s after the actual
-        // touch-down. .sensoryFeedback keeps the engine warm in the
-        // background; the closure gate fires only on the false → true
-        // edge so we don't double-tap when the gesture ends.
-        .sensoryFeedback(.impact(weight: .medium), trigger: isLassoing) { oldValue, newValue in
-            newValue == true && oldValue == false
-        }
-        // Cross-page banner trigger. Re-surfaces the reminder
-        // whenever the user navigates pages OR mutates the
-        // selection set, AS LONG AS we're in Select mode and at
-        // least one other page has selections. Tapping the banner
-        // sets showCrossPageBanner=false; these onChange handlers
-        // bring it back the next time something changes.
-        .onChange(of: currentPageIndex) { _, _ in
-            evaluateCrossPageBanner()
-        }
-        .onChange(of: selectedBlocks) { _, _ in
-            evaluateCrossPageBanner()
-        }
-        .onChange(of: mode) { _, newMode in
-            // Leaving Select mode clears the banner outright;
-            // entering Select mode evaluates fresh.
-            if newMode == .browse {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    showCrossPageBanner = false
-                }
-            } else {
-                evaluateCrossPageBanner()
-            }
-        }
+            .onChange(of: currentPageIndex) { _, _ in evaluateCrossPageBanner() }
+            .onChange(of: selectedBlocks) { _, _ in evaluateCrossPageBanner() }
+            .onChange(of: mode) { _, newMode in handleModeChange(newMode) }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 topTrailingToolbarContent
@@ -371,6 +328,58 @@ struct DocumentViewerView: View {
             Text("Original scan not available")
                 .font(.headline)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Main ZStack content. Extracted so the body expression
+    /// stays trivially type-checkable — the previous inline form
+    /// (ZStack + 3 chained .onChange closures + .toolbar with a
+    /// nested ToolbarItem + .sheet with the FollowUpChatView
+    /// constructor) pushed Swift past its inference budget every
+    /// time we added another small subview. Each piece of UI is
+    /// already its own named view (imageScroller, emptyState,
+    /// bottomControlsStack, interactionHint), so the ZStack here
+    /// is just composition — fast to infer.
+    private var mainContent: some View {
+        ZStack {
+            Color(.systemGroupedBackground).ignoresSafeArea()
+
+            if let image = currentImage {
+                imageScroller(image: image)
+                    .id(currentPageIndex) // force fresh layout on page change
+            } else {
+                emptyState
+            }
+
+            bottomControlsStack
+
+            if showInteractionHint {
+                interactionHint
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    .allowsHitTesting(false) // taps pass through to the document
+            }
+        }
+    }
+
+    /// Predicate for the lasso-start haptic. Pulled out of the
+    /// .sensoryFeedback closure because returning Bool from inside
+    /// a complex view-builder closure was contributing to the
+    /// "can't type-check" error.
+    private func lassoStarted(oldValue: Bool, newValue: Bool) -> Bool {
+        newValue && !oldValue
+    }
+
+    /// Handles the Browse / Select mode toggle's side-effects on
+    /// the cross-page banner. Inlining this as a closure inside
+    /// .onChange added enough complexity to push the body past
+    /// Swift's type-inference budget.
+    private func handleModeChange(_ newMode: ViewerMode) {
+        if newMode == .browse {
+            withAnimation(.easeOut(duration: 0.2)) {
+                showCrossPageBanner = false
+            }
+        } else {
+            evaluateCrossPageBanner()
         }
     }
 
