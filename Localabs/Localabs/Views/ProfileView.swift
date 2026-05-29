@@ -26,6 +26,14 @@ struct ProfileView: View {
                     appleHealthCard
                         .padding(.horizontal)
 
+                    NavigationLink {
+                        HealthAlertsView()
+                    } label: {
+                        healthAlertsCard
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal)
+
                     coreInfoCard
                         .padding(.horizontal)
 
@@ -79,6 +87,7 @@ struct ProfileView: View {
                 Button("Erase Everything", role: .destructive) {
                     UserProfile.reset()
                     LocalStorageService.shared.clearHistory()
+                    HealthAlertService.resetAll()
                     onboardingComplete = false
                 }
                 Button("Cancel", role: .cancel) {}
@@ -89,6 +98,40 @@ struct ProfileView: View {
     }
 
     // MARK: - Cards
+
+    /// Entry point to the Health threshold-alerts settings. Styled
+    /// as a tappable card (chevron affordance) matching the glass
+    /// chrome of the other Profile cards. Shows a count of armed
+    /// alerts so the user can see at a glance whether anything's on.
+    private var healthAlertsCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "bell.badge.fill")
+                .font(.title2)
+                .foregroundStyle(.blue)
+                .frame(width: 32)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Health Alerts")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(armedAlertCount == 0
+                     ? "Get notified when a metric drifts out of range"
+                     : "\(armedAlertCount) metric\(armedAlertCount == 1 ? "" : "s") watched")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var armedAlertCount: Int {
+        HealthAlertConfig.loadAll().filter(\.enabled).count
+    }
 
     private var aiEngineCard: some View {
         VStack(alignment: .leading, spacing: 16) {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject var engine: InferenceEngine
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("onboarding_complete") var onboardingComplete = false
     // Bound so the Resume banner on the Dashboard tab can route the user
     // back to the Scan tab — that's where the live streaming UI lives, so
@@ -47,6 +48,21 @@ struct ContentView: View {
             // sitting on Trends or History wondering where it went.
             .onChange(of: engine.pendingResumeReport?.id) { _, newID in
                 if newID != nil { selectedTab = 0 }
+            }
+            // Tapping a Health threshold-alert notification deep-links
+            // to the Trends tab (tag 1) so the user lands on the data
+            // the alert was about.
+            .onReceive(NotificationCenter.default.publisher(for: .openTrendsFromAlert)) { _ in
+                selectedTab = 1
+            }
+            // Foreground evaluation path: re-check armed Health
+            // alerts whenever the app becomes active. (No background
+            // refresh in v1 — this is the reliable trigger.)
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                Task { @MainActor in
+                    await HealthAlertService.shared.evaluate()
+                }
             }
         } else {
             OnboardingView()

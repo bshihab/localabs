@@ -1,5 +1,13 @@
 import SwiftUI
 import UIKit
+import UserNotifications
+
+extension Notification.Name {
+    /// Posted when the user taps a Health threshold-alert
+    /// notification. ContentView observes it to switch to the
+    /// Trends tab so the user lands on the relevant data.
+    static let openTrendsFromAlert = Notification.Name("localabs.openTrendsFromAlert")
+}
 
 @main
 struct LocalabsApp: App {
@@ -36,14 +44,21 @@ struct LocalabsApp: App {
     }
 }
 
-/// Minimal AppDelegate. Its only job is to forward the
-/// background-URLSession relaunch handler to ModelDownloader so the
-/// shared session can complete event delivery and tell iOS we're done.
-final class LocalabsAppDelegate: NSObject, UIApplicationDelegate {
+/// Minimal AppDelegate. Forwards the background-URLSession relaunch
+/// handler to ModelDownloader, registers the Health-alert background
+/// task, and routes notification taps. Also the
+/// UNUserNotificationCenter delegate so alerts present in-foreground
+/// and taps deep-link to Trends.
+final class LocalabsAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // Become the notification delegate so Health alerts show a
+        // banner even when the app is foregrounded, and taps route
+        // through us to the Trends tab.
+        UNUserNotificationCenter.current().delegate = self
+
         // Cold-start the keyboard subsystem during launch so the
         // first real text-field tap doesn't pay the ~10s
         // "Result accumulator timeout / Reporter disconnected"
@@ -56,6 +71,32 @@ final class LocalabsAppDelegate: NSObject, UIApplicationDelegate {
             Self.prewarmKeyboard()
         }
         return true
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Present Health alerts as a banner + sound even while the app
+    /// is in the foreground — otherwise a notification that fires
+    /// during a foreground evaluation would be silently swallowed.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
+    }
+
+    /// Route a tapped Health alert to the Trends tab.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+        if userInfo["deepLink"] as? String == "trends" {
+            NotificationCenter.default.post(name: .openTrendsFromAlert, object: nil)
+        }
+        completionHandler()
     }
 
     func application(
