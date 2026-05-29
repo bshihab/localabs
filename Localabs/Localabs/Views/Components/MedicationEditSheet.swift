@@ -116,7 +116,7 @@ struct MedicationEditSheet: View {
                         displayedComponents: .hourAndMinute
                     )
                 }
-                .onDelete(perform: frequency == .custom ? deleteTime : nil)
+                .onDelete(perform: timeDeleteAction)
 
                 if frequency == .custom {
                     Button {
@@ -204,9 +204,19 @@ struct MedicationEditSheet: View {
         )
     }
 
-    private func deleteTime(at offsets: IndexSet) {
-        times.remove(atOffsets: offsets)
-        if times.isEmpty { times.append(.init(hour: 8, minute: 0)) }
+    /// The swipe-to-delete handler for reminder times — only enabled
+    /// in Custom mode (the presets manage their own time count).
+    /// Returned as an explicit, fully-typed optional closure rather
+    /// than a `cond ? method : nil` ternary inline in `.onDelete`,
+    /// which tripped a Swift type-checker crash ("Failed to produce
+    /// diagnostic for expression") when inferred from a bare method
+    /// reference.
+    private var timeDeleteAction: ((IndexSet) -> Void)? {
+        guard frequency == .custom else { return nil }
+        return { offsets in
+            times.remove(atOffsets: offsets)
+            if times.isEmpty { times.append(Medication.TimeOfDay(hour: 8, minute: 0)) }
+        }
     }
 
     // MARK: - Seed / save
