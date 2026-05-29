@@ -511,6 +511,9 @@ final class InferenceEngine: ObservableObject {
         let hasResumableState = isInferenceCancelled || !streamingText.isEmpty
         let isHardFailure = report.isIncomplete && !hasResumableState
         if !isInferenceCancelled && !report.isIncomplete && !report.wasRejectedAsNonHealth {
+            // Extract structured lab values for cross-report trends
+            // (#28) before persisting — only for finished reports.
+            report.labValues = await extractLabValues(from: combinedText)
             LocalStorageService.shared.saveReport(report)
         }
         if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -610,6 +613,7 @@ final class InferenceEngine: ObservableObject {
             let hasResumableState = isInferenceCancelled || !streamingText.isEmpty
             let isHardFailure = report.isIncomplete && !hasResumableState
             if !isInferenceCancelled && !report.isIncomplete && !report.wasRejectedAsNonHealth {
+                report.labValues = await extractLabValues(from: combinedText)
                 LocalStorageService.shared.saveReport(report)
             }
             if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -1177,6 +1181,92 @@ final class InferenceEngine: ObservableObject {
         var parsed = StructuredReport.parse(from: collected)
         if parsed.rawText.isEmpty { parsed.rawText = collected }
         return parsed
+    }
+
+    // MARK: - Lab-value extraction (#28)
+
+    /// Pulls structured lab measurements out of OCR text via a focused,
+    /// strict-format model pass — separate from the user-facing
+    /// analysis so neither prompt pollutes the other. Returns the
+    /// values for cross-report trend comparison. Runs only for
+    /// completed reports (the caller gates on that), so it adds a
+    /// second short generation only on successful scans.
+    ///
+    /// The model emits pipe-delimited lines (NAME | VALUE | UNIT |
+    /// RANGE) — far more reliable from a 4B model than JSON. We parse
+    /// defensively and drop any line we can't read as a number, so a
+    /// malformed line never produces a bogus value (the cardinal rule:
+    /// never fabricate a measurement the report doesn't contain).
+    func extractLabValues(from ocrText: String) async -> [LabValue] {
+        guard let context = llamaContext else { return [] }
+        let trimmed = String(ocrText.prefix(3000))  // leave room for output
+        guard !trimmed.isEmpty else { return [] }
+
+        let prompt = """
+        <start_of_turn>user
+        You are a precise data extractor. From the lab report text below, list EVERY lab measurement that has a numeric value. Output ONE per line in EXACTLY this pipe-delimited format and nothing else:
+        NAME | VALUE | UNIT | REFERENCE_RANGE
+
+        Rules:
+        - Copy the test name and number EXACTLY as written. NEVER invent a value that isn't in the text.
+        - If the unit or range is missing, leave that field empty but keep the pipes.
+        - Only include measurements that have a number. Ignore prose, advice, and instructions.
+        - If there are no lab measurements at all, output exactly: NONE
+
+        Examples:
+        LDL Cholesterol | 145 | mg/dL | <100
+        HbA1c | 6.4 | % | 4.0-5.6
+        TSH | 2.1 | mIU/L | 0.4-4.0
+
+        Lab report text:
+        \(trimmed)
+
+        Output:
+        <end_of_turn>
+        <start_of_turn>model
+        """
+
+        var collected = ""
+        for await piece in context.predict(prompt: prompt, maxTokens: 400) {
+            if isInferenceCancelled || Task.isCancelled { break }
+            collected += piece
+        }
+        return Self.parseLabValues(from: collected)
+    }
+
+    /// Parse the pipe-delimited extraction output into LabValues,
+    /// canonicalizing names against the marker catalog and deduping by
+    /// canonical name (first occurrence wins).
+    static func parseLabValues(from output: String) -> [LabValue] {
+        var result: [LabValue] = []
+        var seen = Set<String>()
+        for rawLine in output.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.uppercased() == "NONE" { continue }
+            let parts = line
+                .split(separator: "|", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count >= 2 else { continue }
+            let rawName = parts[0]
+            guard !rawName.isEmpty, rawName.uppercased() != "NAME" else { continue }
+            // Keep only digits, decimal point, and leading minus.
+            let valueStr = parts[1].filter { "0123456789.-".contains($0) }
+            guard let value = Double(valueStr) else { continue }
+            let unit = parts.count > 2 ? parts[2] : ""
+            let range = (parts.count > 3 && !parts[3].isEmpty) ? parts[3] : nil
+            let canonical = LabMarkerCatalog.match(rawName: rawName)?.canonicalName ?? rawName
+            // Dedup by canonical name so a panel that lists a marker
+            // twice doesn't double-count.
+            guard seen.insert(canonical.lowercased()).inserted else { continue }
+            result.append(LabValue(
+                canonicalName: canonical,
+                rawName: rawName,
+                value: value,
+                unit: unit,
+                referenceRange: range
+            ))
+        }
+        return result
     }
 
     // MARK: - Follow-Up Chat

@@ -28,6 +28,13 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     /// saved reports decode unchanged.
     var additionalPagePaths: [String]?
 
+    /// Structured lab measurements extracted from this report (#28).
+    /// Optional so reports saved before extraction existed still decode
+    /// — Swift's synthesized decoder treats a missing optional key as
+    /// nil rather than failing. nil = never extracted; [] = extracted,
+    /// found nothing trackable.
+    var labValues: [LabValue]?
+
     /// True when the analysis pipeline refused this scan because it
     /// didn't contain any lab values, units, or medical vocabulary.
     /// Drives the "No health content detected" popup in ScanView.
@@ -48,7 +55,8 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         medicationNotes: String = "",
         rawText: String = "",
         imagePath: String? = nil,
-        additionalPagePaths: [String]? = nil
+        additionalPagePaths: [String]? = nil,
+        labValues: [LabValue]? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -61,6 +69,7 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         self.rawText = rawText
         self.imagePath = imagePath
         self.additionalPagePaths = additionalPagePaths
+        self.labValues = labValues
     }
 
     /// Title shown in History rows + the Dashboard header. Three tiers:
