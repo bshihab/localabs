@@ -78,7 +78,14 @@ final class LocalabsAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
     /// Present Health alerts as a banner + sound even while the app
     /// is in the foreground — otherwise a notification that fires
     /// during a foreground evaluation would be silently swallowed.
-    func userNotificationCenter(
+    ///
+    /// `nonisolated`: UNUserNotificationCenterDelegate methods are
+    /// non-isolated in the protocol, but the AppDelegate class is
+    /// implicitly @MainActor (via UIApplicationDelegate). Without
+    /// `nonisolated` the conformance crosses actor isolation and
+    /// Swift 6 flags a potential data race. This method only calls
+    /// the completion handler, so no main-actor state is touched.
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
@@ -86,15 +93,23 @@ final class LocalabsAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         completionHandler([.banner, .sound, .list])
     }
 
-    /// Route a tapped Health alert to the Trends tab.
-    func userNotificationCenter(
+    /// Route a tapped Health alert to the Trends tab. `nonisolated`
+    /// for the same reason as above; the only main-actor work (the
+    /// NotificationCenter post that drives the SwiftUI tab switch)
+    /// is hopped onto the main actor explicitly. We read the simple
+    /// Bool out of the non-Sendable response first so nothing
+    /// non-Sendable is captured across the hop.
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let userInfo = response.notification.request.content.userInfo
-        if userInfo["deepLink"] as? String == "trends" {
-            NotificationCenter.default.post(name: .openTrendsFromAlert, object: nil)
+        let isTrendsDeepLink =
+            (response.notification.request.content.userInfo["deepLink"] as? String) == "trends"
+        if isTrendsDeepLink {
+            Task { @MainActor in
+                NotificationCenter.default.post(name: .openTrendsFromAlert, object: nil)
+            }
         }
         completionHandler()
     }
