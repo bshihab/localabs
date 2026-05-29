@@ -36,7 +36,7 @@ The generated `Localabs.xcodeproj` is gitignored — every checkout runs `xcodeg
 
 ### HealthKit caveat
 
-The `com.apple.developer.healthkit` entitlement is currently stripped from `Localabs.entitlements` because free Apple Personal Teams can't sign provisioning profiles that include it. The `HealthKitService` code is wired in and ready — once the project moves to a paid Apple Developer Program account, uncomment the `properties:` block in `project.yml` (commented instructions are there) and run `xcodegen` to regenerate.
+The project now signs with the **Bithunch LLC paid Apple Developer Program** team, so HealthKit is enabled for real: the `com.apple.developer.healthkit` entitlement is active in `Localabs.entitlements` AND wired via the `entitlements.properties` block in `project.yml`. To build with it, `DEVELOPMENT_TEAM` must be set to the Bithunch team ID (in `project.yml` so it survives `xcodegen`), and the HealthKit capability must be enabled on the `com.bilalshihab.Localabs` App ID (Xcode auto-manages this when "Automatically manage signing" is on). `HealthKitService` reads are live once the user grants permission in Profile → Apple Health.
 
 ## The analysis pipeline
 
@@ -44,7 +44,7 @@ The `com.apple.developer.healthkit` entitlement is currently stripped from `Loca
 
 1. **OCR** — Apple Vision (`VisionOCRService`) runs on each downsampled image. Downsampling happens at intake via `InferenceEngine.downsampledImage(from:)` (uses `ImageIO`'s thumbnail decoder so the full-resolution bitmap never gets allocated — multi-photo scans of 12MP iPhone photos would otherwise OOM the moment the AI model allocated its KV cache).
 2. **Save scans** — JPEG'd to `Documents/scans/` so `DocumentViewerView` can re-display them later.
-3. **Apple Health context** — 30-day averages for resting HR, HRV, sleep. Falls back to demo data when HealthKit isn't authorized (which is currently always, until the paid dev account is active).
+3. **Apple Health context** — 30-day averages for resting HR, HRV, sleep. Falls back to demo data when HealthKit isn't authorized (e.g. the user declined the Profile → Apple Health permission prompt).
 4. **Inference** — `runInference` builds a structured prompt (system role + profile + Health metrics + RAG context from past reports + the OCR'd text), streams Localabs' output token-by-token. The streaming text is re-parsed on every token into a `StructuredReport` so the live section cards in `ScanView` can fill in as the model writes.
 5. **Parse & save** — final output is parsed into the 5 section fields and persisted to `LocalStorageService` (UserDefaults-backed).
 
