@@ -27,6 +27,11 @@ struct DashboardView: View {
     /// Notes section, prefilled with the report link so the new med
     /// traces back to this scan.
     @State private var showAddMed = false
+    /// Cross-report lab trends for this report's markers (#28),
+    /// loaded on appear. Drives the "what changed" / worsening-trend
+    /// card and the full comparison sheet.
+    @State private var labTrends: [LabTrend] = []
+    @State private var showLabTrends = false
 
     var body: some View {
         NavigationStack {
@@ -126,6 +131,11 @@ struct DashboardView: View {
 
                 summaryCard
                     .padding(.horizontal)
+
+                if !labTrends.isEmpty {
+                    labTrendCard
+                        .padding(.horizontal)
+                }
 
                     // Prominent "Regenerate Translation" CTA — sits
                     // between the summary card and Ask More, sized
@@ -245,6 +255,13 @@ struct DashboardView: View {
             .task {
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
                 if report == nil { report = initialReport }
+                reloadLabTrends()
+            }
+            .onChange(of: currentReport?.id) { _, _ in
+                reloadLabTrends()
+            }
+            .sheet(isPresented: $showLabTrends) {
+                LabComparisonView(trends: labTrends)
             }
             // ALWAYS sync the local @State to the most recent
             // initialReport. The previous logic only assigned in
@@ -287,6 +304,73 @@ struct DashboardView: View {
             .sheet(isPresented: $showAddMed) {
                 MedicationEditSheet(sourceReportID: currentReport?.id)
             }
+    }
+
+    // MARK: - Lab trend card (#28)
+
+    /// Tappable card summarizing how this report's markers compare to
+    /// past reports. Turns into a warning when any marker is on a
+    /// sustained worsening streak. Hidden entirely when there's
+    /// nothing to compare (handled at the call site).
+    private var labTrendCard: some View {
+        let worsening = labTrends.filter { $0.isWorseningStreak() }
+        let isWarning = !worsening.isEmpty
+        return Button {
+            showLabTrends = true
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: isWarning ? "exclamationmark.triangle.fill" : "chart.xyaxis.line")
+                        .foregroundStyle(isWarning ? .orange : .blue)
+                    Text(isWarning ? "Markers trending the wrong way" : "Compared to your past reports")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                Text(labTrendSummaryLine)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(isWarning ? Color.orange.opacity(0.10) : Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(isWarning ? Color.orange.opacity(0.30) : Color.clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var labTrendSummaryLine: String {
+        let worsening = labTrends.filter { $0.isWorseningStreak() }
+        if !worsening.isEmpty {
+            let names = worsening.map(\.canonicalName).joined(separator: ", ")
+            return "\(names) — worth discussing with your doctor. Tap to see the trend."
+        }
+        let improved = labTrends.filter { $0.change == .improved }.count
+        let worsened = labTrends.filter { $0.change == .worsened }.count
+        let stable = labTrends.filter { $0.change == .stable }.count
+        var parts: [String] = []
+        if improved > 0 { parts.append("\(improved) improved") }
+        if worsened > 0 { parts.append("\(worsened) worsened") }
+        if stable > 0 { parts.append("\(stable) stable") }
+        return parts.isEmpty
+            ? "\(labTrends.count) marker\(labTrends.count == 1 ? "" : "s") tracked over time"
+            : parts.joined(separator: " · ")
+    }
+
+    private func reloadLabTrends() {
+        guard let report = currentReport else { labTrends = []; return }
+        let history = LocalStorageService.shared.getHistory()
+        labTrends = LabTrendService.comparison(for: report, in: history)
     }
 
     private var currentReport: StructuredReport? {

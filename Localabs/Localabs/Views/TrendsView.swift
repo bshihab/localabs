@@ -29,6 +29,10 @@ struct TrendsView: View {
     /// Meds/Health tab consolidates both. The logs also feed the
     /// Trends + metric chats as silent context.
     @State private var showSymptomLog: Bool = false
+    /// Cross-report lab-value trends (#28), loaded from saved report
+    /// history. Independent of HealthKit.
+    @State private var labTrends: [LabTrend] = []
+    @State private var showLabTrends: Bool = false
 
     struct PresentedMetric: Identifiable {
         var id: String { label }
@@ -81,6 +85,15 @@ struct TrendsView: View {
                                 .padding(.horizontal)
                         }
                     }
+
+                    // Lab-value trends from scanned reports (#28).
+                    // Independent of HealthKit — shows whenever 2+
+                    // reports share a marker, so it appears even when
+                    // Apple Health isn't connected.
+                    if !labTrends.isEmpty {
+                        labValuesSection
+                            .padding(.horizontal)
+                    }
                 }
                 .padding(.top, 8)
                 .padding(.bottom, 100)
@@ -104,6 +117,7 @@ struct TrendsView: View {
                 // while we were away, and SwiftUI @State otherwise
                 // sticks to the value it had at first init.
                 hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
+                labTrends = LabTrendService.trends(from: LocalStorageService.shared.getHistory())
                 await refresh()
             }
             .sheet(isPresented: $showTrendsChat) {
@@ -119,6 +133,9 @@ struct TrendsView: View {
             .sheet(isPresented: $showSymptomLog) {
                 SymptomLogView()
             }
+            .sheet(isPresented: $showLabTrends) {
+                LabComparisonView(trends: labTrends)
+            }
             .sheet(item: $presentedMetric) { metric in
                 MetricDetailView(
                     label: metric.label,
@@ -128,6 +145,46 @@ struct TrendsView: View {
                     siblingMetrics: makeHealthMetricsForChat()
                 )
                 .environmentObject(engine)
+            }
+        }
+    }
+
+    // MARK: - Lab values (#28)
+
+    /// A card listing cross-report lab trends, tappable to open the
+    /// full comparison sheet. Shows the first few markers inline with
+    /// worsening ones surfaced first (LabTrendService already sorts
+    /// that way).
+    private var labValuesSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("YOUR LAB VALUES")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.5)
+                Spacer()
+                Button("See all") { showLabTrends = true }
+                    .font(.subheadline)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(labTrends.prefix(4)) { trend in
+                    LabTrendRow(trend: trend)
+                    if trend.id != labTrends.prefix(4).last?.id {
+                        Divider()
+                    }
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+
+            if labTrends.count > 4 {
+                Text("+ \(labTrends.count - 4) more")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
