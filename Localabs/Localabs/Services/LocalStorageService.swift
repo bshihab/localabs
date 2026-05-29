@@ -133,5 +133,6 @@ class LocalStorageService {
         }
         ChatHistoryService.clear(for: id)
         SymptomEntry.nullifyLinks(toReport: id)
+        Medication.nullifyLinks(toReport: id)
     }
 }

@@ -88,6 +88,7 @@ struct ProfileView: View {
                     UserProfile.reset()
                     LocalStorageService.shared.clearHistory()
                     HealthAlertService.resetAll()
+                    MedicationService.resetAll()
                     onboardingComplete = false
                 }
                 Button("Cancel", role: .cancel) {}

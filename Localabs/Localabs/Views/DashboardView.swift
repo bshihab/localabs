@@ -23,6 +23,10 @@ struct DashboardView: View {
     /// are overwritten with the new run's output), so the user gets a
     /// chance to back out before kicking off the LLM.
     @State private var showRegenConfirm = false
+    /// Drives the "Add to Meds" sheet launched from the Medication
+    /// Notes section, prefilled with the report link so the new med
+    /// traces back to this scan.
+    @State private var showAddMed = false
 
     var body: some View {
         NavigationStack {
@@ -209,6 +213,26 @@ struct DashboardView: View {
                                 title: "Medication Notes",
                                 content: report.medicationNotes
                             )
+
+                            // Entry point into the Meds tab. Opens the
+                            // add sheet linked to this report so a med
+                            // the user sets up traces back to its
+                            // source scan. We don't auto-parse drug
+                            // names out of the freeform notes — the
+                            // user types what they're actually taking,
+                            // keeping Localabs's "never invent a
+                            // medication" contract intact.
+                            Button {
+                                showAddMed = true
+                            } label: {
+                                Label("Add a medication reminder", systemImage: "bell.badge")
+                                    .font(.subheadline.weight(.medium))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.orange)
+                            .padding(.top, 4)
                         }
                         .padding(.horizontal)
                     }
@@ -259,6 +283,9 @@ struct DashboardView: View {
                 if let report = currentReport {
                     ShareSheet(items: buildShareItems(for: report))
                 }
+            }
+            .sheet(isPresented: $showAddMed) {
+                MedicationEditSheet(sourceReportID: currentReport?.id)
             }
     }
 

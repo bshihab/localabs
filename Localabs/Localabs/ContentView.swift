@@ -30,17 +30,23 @@ struct ContentView: View {
                     }
                     .tag(1)
 
+                MedsView()
+                    .tabItem {
+                        Label("Meds", systemImage: "pills.fill")
+                    }
+                    .tag(2)
+
                 HistoryView()
                     .tabItem {
                         Label("History", systemImage: "clock.arrow.circlepath")
                     }
-                    .tag(2)
+                    .tag(3)
 
                 ProfileView()
                     .tabItem {
                         Label("Profile", systemImage: "person.crop.circle")
                     }
-                    .tag(3)
+                    .tag(4)
             }
             .tint(.blue)
             // When a paused analysis exists, jump the user to the Scan
@@ -55,13 +61,20 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .openTrendsFromAlert)) { _ in
                 selectedTab = 1
             }
-            // Foreground evaluation path: re-check armed Health
-            // alerts whenever the app becomes active. (No background
-            // refresh in v1 — this is the reliable trigger.)
+            // Tapping a medication-reminder notification deep-links to
+            // the Meds tab (tag 2) so the user can check off the dose.
+            .onReceive(NotificationCenter.default.publisher(for: .openMedsFromReminder)) { _ in
+                selectedTab = 2
+            }
+            // Foreground path on app activation: re-check armed Health
+            // alerts, and re-sync medication reminders so edits made
+            // while backgrounded (or pending requests iOS dropped) are
+            // restored. (No background refresh in v1.)
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else { return }
                 Task { @MainActor in
                     await HealthAlertService.shared.evaluate()
+                    await MedicationService.syncAll()
                 }
             }
         } else {

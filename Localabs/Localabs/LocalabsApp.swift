@@ -7,6 +7,9 @@ extension Notification.Name {
     /// notification. ContentView observes it to switch to the
     /// Trends tab so the user lands on the relevant data.
     static let openTrendsFromAlert = Notification.Name("localabs.openTrendsFromAlert")
+    /// Posted when the user taps a medication-reminder notification.
+    /// ContentView switches to the Meds tab to check off the dose.
+    static let openMedsFromReminder = Notification.Name("localabs.openMedsFromReminder")
 }
 
 @main
@@ -104,11 +107,17 @@ final class LocalabsAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let isTrendsDeepLink =
-            (response.notification.request.content.userInfo["deepLink"] as? String) == "trends"
-        if isTrendsDeepLink {
+        let deepLink = response.notification.request.content.userInfo["deepLink"] as? String
+        if let deepLink {
             Task { @MainActor in
-                NotificationCenter.default.post(name: .openTrendsFromAlert, object: nil)
+                switch deepLink {
+                case "trends":
+                    NotificationCenter.default.post(name: .openTrendsFromAlert, object: nil)
+                case "meds":
+                    NotificationCenter.default.post(name: .openMedsFromReminder, object: nil)
+                default:
+                    break
+                }
             }
         }
         completionHandler()
