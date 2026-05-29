@@ -18,12 +18,21 @@ struct SymptomQuickAddSheet: View {
     @State private var selectedTags: Set<String> = []
     @State private var customTag: String = ""
     @State private var showSavedConfirmation: Bool = false
+    @FocusState private var tagFieldFocused: Bool
 
     /// Seeded once at init — the recent-tags chip row doesn't need
     /// to react to live changes inside the sheet (the user can't
     /// add new entries from within this sheet, so the recent set
     /// can't change underneath them).
     private let recentTags: [String]
+
+    /// Common symptom tags offered as suggestions so a brand-new
+    /// user (with no logged history yet) still gets one-tap chips.
+    /// Merged after the user's own recent tags, deduped.
+    private static let presetTags = [
+        "Headache", "Fatigue", "Nausea", "Pain", "Dizziness",
+        "Fever", "Cough", "Insomnia", "Anxiety", "Shortness of breath"
+    ]
 
     init(editing: SymptomEntry? = nil) {
         self.editing = editing
@@ -61,40 +70,34 @@ struct SymptomQuickAddSheet: View {
                     )
                 }
 
-                if !displayTags.isEmpty || !customTag.isEmpty {
-                    Section {
+                // Single, stable Section — the text field is ALWAYS
+                // the last child so its view identity never changes
+                // as chips appear/disappear above it. The previous
+                // version swapped between two different Sections
+                // depending on whether the field was empty, which
+                // destroyed and recreated the TextField on the first
+                // keystroke and dropped the keyboard.
+                Section {
+                    if !displayTags.isEmpty {
                         SymptomTagFlow(spacing: 8) {
                             ForEach(displayTags, id: \.self) { tag in
                                 tagChip(tag)
                             }
                         }
+                    }
 
-                        HStack {
-                            TextField("Add a tag…", text: $customTag)
-                                .submitLabel(.done)
-                                .onSubmit(addCustomTag)
-                            Button("Add", action: addCustomTag)
-                                .disabled(trimmedCustomTag.isEmpty)
-                        }
-                    } header: {
-                        Text("Tags")
-                    } footer: {
-                        Text("Optional. Tap to add a recent tag, or type a new one. Tags help Localabs group recurring symptoms across visits.")
+                    HStack {
+                        TextField("Add a tag…", text: $customTag)
+                            .focused($tagFieldFocused)
+                            .submitLabel(.done)
+                            .onSubmit(addCustomTag)
+                        Button("Add", action: addCustomTag)
+                            .disabled(trimmedCustomTag.isEmpty)
                     }
-                } else {
-                    Section {
-                        HStack {
-                            TextField("Add a tag…", text: $customTag)
-                                .submitLabel(.done)
-                                .onSubmit(addCustomTag)
-                            Button("Add", action: addCustomTag)
-                                .disabled(trimmedCustomTag.isEmpty)
-                        }
-                    } header: {
-                        Text("Tags")
-                    } footer: {
-                        Text("Optional. Helps group recurring symptoms across visits.")
-                    }
+                } header: {
+                    Text("Tags")
+                } footer: {
+                    Text("Optional. Tap a suggestion or type your own. Tags help Localabs group recurring symptoms across visits.")
                 }
 
                 if showSavedConfirmation {
@@ -158,13 +161,15 @@ struct SymptomQuickAddSheet: View {
 
     // MARK: - Tag chips
 
-    /// Combine selected (sticky on top) with recent (suggestions),
-    /// deduped case-insensitively so "Headache" / "headache" don't
-    /// both appear.
+    /// Chips shown above the text field: the user's selected tags
+    /// (sticky on top), then their own recent tags, then common
+    /// presets — deduped case-insensitively so "Headache" /
+    /// "headache" don't both appear. Presets guarantee a new user
+    /// with no history still gets one-tap suggestions.
     private var displayTags: [String] {
         var seen = Set<String>()
         var ordered: [String] = []
-        for tag in Array(selectedTags).sorted() + recentTags {
+        for tag in Array(selectedTags).sorted() + recentTags + Self.presetTags {
             if seen.insert(tag.lowercased()).inserted {
                 ordered.append(tag)
             }
