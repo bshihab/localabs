@@ -21,6 +21,11 @@ struct HistoryView: View {
     /// we can present a confirmationDialog with the count.
     @State private var deleteTarget: StructuredReport?
     @State private var showBulkDeleteConfirmation = false
+    /// Drives the Symptoms sheet presented from the top-leading
+    /// toolbar slot. Lives on History (not its own tab) for v1 so
+    /// the existing tab bar layout stays intact — the toolbar entry
+    /// point keeps it discoverable without crowding the tab strip.
+    @State private var showSymptomLog = false
 
     var body: some View {
         NavigationStack {
@@ -41,6 +46,22 @@ struct HistoryView: View {
                     .id(report.id)
             }
             .toolbar {
+                // Symptoms entry point sits in top-leading whenever
+                // we're NOT in edit mode — edit mode reuses that slot
+                // for bulk Share / Delete on selected reports.
+                // Always available (even when reports.isEmpty) since
+                // a user can log symptoms before ever scanning a
+                // report — this is one of the few surfaces in the
+                // app that's useful pre-first-scan.
+                if !editMode.isEditing {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showSymptomLog = true
+                        } label: {
+                            Label("Symptoms", systemImage: "heart.text.square")
+                        }
+                    }
+                }
                 if !reports.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(editMode.isEditing ? "Done" : "Select") {
@@ -90,6 +111,9 @@ struct HistoryView: View {
             .environment(\.editMode, $editMode)
             .sheet(isPresented: $showShareSheet) {
                 ShareSheet(items: shareItems)
+            }
+            .sheet(isPresented: $showSymptomLog) {
+                SymptomLogView()
             }
             // Rename alert. Bound to renameTarget so it presents only
             // when the user picks Rename from the context menu, and

@@ -103,12 +103,15 @@ class LocalStorageService {
     // MARK: - Cleanup
     
     /// Clears all history — used by Profile → Reset App & Erase
-    /// Data. Wipes the report list AND every per-report chat
-    /// (chats are keyed by report ID, so without this they'd
-    /// outlive their parent reports as orphan entries).
+    /// Data. Wipes the report list, every per-report chat (chats
+    /// are keyed by report ID, so without this they'd outlive
+    /// their parent reports as orphan entries), and the symptom
+    /// log (also orphaned otherwise — its entries can outlive any
+    /// linked report).
     func clearHistory() {
         UserDefaults.standard.removeObject(forKey: storageKey)
         UserDefaults.standard.removeObject(forKey: "localabs_chat_history")
+        SymptomEntry.resetAll()
     }
     
     /// Deletes a specific report by ID. Also clears any persisted
@@ -117,6 +120,11 @@ class LocalStorageService {
     /// for an in-flight scan that the user discards (via the
     /// Discard CTA on a paused/incomplete run) routes through this
     /// same path, so that case is covered too.
+    ///
+    /// Any symptom entries that pointed at this report get their
+    /// `linkedReportID` nullified rather than deleted — the user
+    /// logged the symptom intending to keep it, so we preserve the
+    /// entry and only drop the source attribution.
     func deleteReport(id: UUID) {
         var history = getHistory()
         history.removeAll { $0.id == id }
@@ -124,5 +132,6 @@ class LocalStorageService {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
         ChatHistoryService.clear(for: id)
+        SymptomEntry.nullifyLinks(toReport: id)
     }
 }
