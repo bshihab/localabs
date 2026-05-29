@@ -4,10 +4,10 @@ import SwiftUI
 /// or a Dashboard report's "Add to Meds" button (new, linked to the
 /// report), and from a Meds card's Edit action (existing).
 ///
-/// The schedule uses a frequency preset (Once/Twice/Three times/
-/// Custom) that seeds sensible default times, which the user can
-/// then adjust individually. Saving re-syncs the medication's
-/// notification reminders.
+/// The schedule is just a list of reminder times the user adds and
+/// removes directly — no frequency preset. Zero times = "as needed"
+/// (tracked, no reminders). Day cadence (daily/weekly/biweekly) is a
+/// separate control. Saving re-syncs the medication's reminders.
 struct MedicationEditSheet: View {
     /// Existing med when editing; nil when adding.
     let editing: Medication?
@@ -22,10 +22,10 @@ struct MedicationEditSheet: View {
 
     @State private var name: String = ""
     @State private var dose: String = ""
-    @State private var frequency: Frequency = .onceDaily
-    @State private var times: [Medication.TimeOfDay] = Frequency.onceDaily.defaultTimes
-    /// Day cadence (every day / weekly / every 2 weeks) — separate
-    /// from `frequency`, which is times-per-day.
+    /// Reminder times. A new med starts with one 8:00 AM time; the
+    /// user adds more or deletes them all (→ "as needed").
+    @State private var times: [Medication.TimeOfDay] = [.init(hour: 8, minute: 0)]
+    /// Day cadence (every day / weekly / every 2 weeks).
     @State private var cadence: Medication.RepeatRule.Cadence = .daily
     /// Selected Calendar weekdays (1 = Sun … 7 = Sat) for weekly /
     /// biweekly cadences.
@@ -39,31 +39,6 @@ struct MedicationEditSheet: View {
         self.editing = editing
         self.sourceReportID = sourceReportID
         self.prefilledName = prefilledName
-    }
-
-    /// Frequency presets. "Custom" lets the user add/remove arbitrary
-    /// times; the others seed common defaults the user can still nudge.
-    enum Frequency: String, CaseIterable, Identifiable {
-        case onceDaily, twiceDaily, threeTimes, asNeeded, custom
-        var id: String { rawValue }
-        var label: String {
-            switch self {
-            case .onceDaily:  return "Once daily"
-            case .twiceDaily: return "Twice daily"
-            case .threeTimes: return "3× daily"
-            case .asNeeded:   return "As needed"
-            case .custom:     return "Custom"
-            }
-        }
-        var defaultTimes: [Medication.TimeOfDay] {
-            switch self {
-            case .onceDaily:  return [.init(hour: 8, minute: 0)]
-            case .twiceDaily: return [.init(hour: 8, minute: 0), .init(hour: 20, minute: 0)]
-            case .threeTimes: return [.init(hour: 8, minute: 0), .init(hour: 13, minute: 0), .init(hour: 20, minute: 0)]
-            case .asNeeded:   return []
-            case .custom:     return [.init(hour: 8, minute: 0)]
-            }
-        }
     }
 
     var body: some View {
@@ -100,45 +75,31 @@ struct MedicationEditSheet: View {
     @ViewBuilder
     private var scheduleSection: some View {
         Section {
-            Picker("Frequency", selection: $frequency) {
-                ForEach(Frequency.allCases) { f in
-                    Text(f.label).tag(f)
-                }
+            // A plain editable list of reminder times. Add as many as
+            // needed; delete them all to make the med "as needed"
+            // (tracked, no reminders). No frequency preset.
+            ForEach(times.indices, id: \.self) { idx in
+                DatePicker(
+                    "Reminder \(times.count > 1 ? "\(idx + 1)" : "")",
+                    selection: timeBinding(idx),
+                    displayedComponents: .hourAndMinute
+                )
             }
-            .onChange(of: frequency) { _, newValue in
-                // Reseed times from the preset, unless Custom
-                // (which keeps whatever the user has built).
-                if newValue != .custom {
-                    times = newValue.defaultTimes
-                } else if times.isEmpty {
-                    times = [.init(hour: 8, minute: 0)]
-                }
+            .onDelete { offsets in
+                times.remove(atOffsets: offsets)
             }
 
-            if frequency != .asNeeded {
-                ForEach(times.indices, id: \.self) { idx in
-                    DatePicker(
-                        "Reminder \(times.count > 1 ? "\(idx + 1)" : "")",
-                        selection: timeBinding(idx),
-                        displayedComponents: .hourAndMinute
-                    )
-                }
-                .onDelete(perform: timeDeleteAction)
-
-                if frequency == .custom {
-                    Button {
-                        times.append(.init(hour: 12, minute: 0))
-                    } label: {
-                        Label("Add another time", systemImage: "plus.circle")
-                    }
-                }
+            Button {
+                times.append(Medication.TimeOfDay(hour: 12, minute: 0))
+            } label: {
+                Label("Add a time", systemImage: "plus.circle")
             }
         } header: {
-            Text("Schedule")
+            Text("Times")
         } footer: {
-            Text(frequency == .asNeeded
-                 ? "Tracked without reminders. You can still log doses on the Meds tab."
-                 : "A reminder notification fires daily at each time.")
+            Text(times.isEmpty
+                 ? "No reminder times — this medication is tracked as needed. You can still check off doses on the Meds tab."
+                 : "A reminder notification fires at each time, on the days set below.")
         }
     }
 
@@ -147,7 +108,7 @@ struct MedicationEditSheet: View {
         // Only meaningful when there are reminder times. An "as
         // needed" med (no times) is tracked but never scheduled, so
         // the day cadence is moot.
-        if frequency != .asNeeded {
+        if !times.isEmpty {
             Section {
                 Picker("Repeats", selection: $cadence) {
                     Text("Every day").tag(Medication.RepeatRule.Cadence.daily)
@@ -247,21 +208,6 @@ struct MedicationEditSheet: View {
         )
     }
 
-    /// The swipe-to-delete handler for reminder times — only enabled
-    /// in Custom mode (the presets manage their own time count).
-    /// Returned as an explicit, fully-typed optional closure rather
-    /// than a `cond ? method : nil` ternary inline in `.onDelete`,
-    /// which tripped a Swift type-checker crash ("Failed to produce
-    /// diagnostic for expression") when inferred from a bare method
-    /// reference.
-    private var timeDeleteAction: ((IndexSet) -> Void)? {
-        guard frequency == .custom else { return nil }
-        return { offsets in
-            times.remove(atOffsets: offsets)
-            if times.isEmpty { times.append(Medication.TimeOfDay(hour: 8, minute: 0)) }
-        }
-    }
-
     // MARK: - Seed / save
 
     private func seed() {
@@ -274,14 +220,6 @@ struct MedicationEditSheet: View {
                 hasEndDate = true
                 endDate = end
             }
-            // Infer the frequency preset from the saved time count.
-            switch med.times.count {
-            case 0:  frequency = .asNeeded
-            case 1:  frequency = .onceDaily
-            case 2:  frequency = .twiceDaily
-            case 3:  frequency = .threeTimes
-            default: frequency = .custom
-            }
             cadence = med.repeatRule.cadence
             selectedWeekdays = Set(med.repeatRule.weekdays)
         } else if !prefilledName.isEmpty {
@@ -293,12 +231,12 @@ struct MedicationEditSheet: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return }
 
-        // "As needed" (no times) is always daily-cadence — the day
-        // rule is moot without reminders. Otherwise build the rule
-        // from the cadence + selected weekdays, defaulting an empty
-        // weekly/biweekly selection to today's weekday as a backstop.
+        // No times = "as needed", which is always daily-cadence (the
+        // day rule is moot without reminders). Otherwise build the
+        // rule from the cadence + selected weekdays, defaulting an
+        // empty weekly/biweekly selection to today's weekday.
         let repeatRule: Medication.RepeatRule
-        if frequency == .asNeeded || cadence == .daily {
+        if times.isEmpty || cadence == .daily {
             repeatRule = .daily
         } else {
             let days = selectedWeekdays.isEmpty
@@ -311,7 +249,7 @@ struct MedicationEditSheet: View {
             id: editing?.id ?? UUID(),
             name: trimmedName,
             dose: dose.trimmingCharacters(in: .whitespacesAndNewlines),
-            times: frequency == .asNeeded ? [] : times.sorted(),
+            times: times.sorted(),
             repeatRule: repeatRule,
             startDate: editing?.startDate ?? Date(),
             endDate: hasEndDate ? endDate : nil,
