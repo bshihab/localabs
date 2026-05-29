@@ -24,6 +24,12 @@ struct MedicationEditSheet: View {
     @State private var dose: String = ""
     @State private var frequency: Frequency = .onceDaily
     @State private var times: [Medication.TimeOfDay] = Frequency.onceDaily.defaultTimes
+    /// Day cadence (every day / weekly / every 2 weeks) — separate
+    /// from `frequency`, which is times-per-day.
+    @State private var cadence: Medication.RepeatRule.Cadence = .daily
+    /// Selected Calendar weekdays (1 = Sun … 7 = Sat) for weekly /
+    /// biweekly cadences.
+    @State private var selectedWeekdays: Set<Int> = []
     @State private var hasEndDate: Bool = false
     @State private var endDate: Date = Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date()
     @State private var notes: String = ""
@@ -65,6 +71,7 @@ struct MedicationEditSheet: View {
             Form {
                 medicationSection
                 scheduleSection
+                daysSection
                 durationSection
                 notesSection
                 if showSavedConfirmation { savedConfirmationSection }
@@ -132,6 +139,42 @@ struct MedicationEditSheet: View {
             Text(frequency == .asNeeded
                  ? "Tracked without reminders. You can still log doses on the Meds tab."
                  : "A reminder notification fires daily at each time.")
+        }
+    }
+
+    @ViewBuilder
+    private var daysSection: some View {
+        // Only meaningful when there are reminder times. An "as
+        // needed" med (no times) is tracked but never scheduled, so
+        // the day cadence is moot.
+        if frequency != .asNeeded {
+            Section {
+                Picker("Repeats", selection: $cadence) {
+                    Text("Every day").tag(Medication.RepeatRule.Cadence.daily)
+                    Text("Weekly").tag(Medication.RepeatRule.Cadence.weekly)
+                    Text("Every 2 weeks").tag(Medication.RepeatRule.Cadence.biweekly)
+                }
+                .onChange(of: cadence) { _, newValue in
+                    // Never leave a weekly/biweekly med with no days —
+                    // default to today's weekday so it's always valid.
+                    if newValue != .daily && selectedWeekdays.isEmpty {
+                        selectedWeekdays = [Calendar.current.component(.weekday, from: Date())]
+                    }
+                }
+
+                if cadence != .daily {
+                    WeekdayCirclePicker(selected: $selectedWeekdays)
+                        .padding(.vertical, 6)
+                }
+            } header: {
+                Text("Days")
+            } footer: {
+                Text(cadence == .biweekly
+                     ? "Pick the weekdays. Biweekly reminders are scheduled a few cycles ahead and top up each time you open the app."
+                     : cadence == .weekly
+                       ? "Pick the days of the week this medication is taken. The times above apply to each selected day."
+                       : "Reminders fire every day at the times above.")
+            }
         }
     }
 
@@ -239,6 +282,8 @@ struct MedicationEditSheet: View {
             case 3:  frequency = .threeTimes
             default: frequency = .custom
             }
+            cadence = med.repeatRule.cadence
+            selectedWeekdays = Set(med.repeatRule.weekdays)
         } else if !prefilledName.isEmpty {
             name = prefilledName
         }
@@ -248,11 +293,26 @@ struct MedicationEditSheet: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else { return }
 
+        // "As needed" (no times) is always daily-cadence — the day
+        // rule is moot without reminders. Otherwise build the rule
+        // from the cadence + selected weekdays, defaulting an empty
+        // weekly/biweekly selection to today's weekday as a backstop.
+        let repeatRule: Medication.RepeatRule
+        if frequency == .asNeeded || cadence == .daily {
+            repeatRule = .daily
+        } else {
+            let days = selectedWeekdays.isEmpty
+                ? [Calendar.current.component(.weekday, from: Date())]
+                : Array(selectedWeekdays).sorted()
+            repeatRule = Medication.RepeatRule(cadence: cadence, weekdays: days)
+        }
+
         let med = Medication(
             id: editing?.id ?? UUID(),
             name: trimmedName,
             dose: dose.trimmingCharacters(in: .whitespacesAndNewlines),
             times: frequency == .asNeeded ? [] : times.sorted(),
+            repeatRule: repeatRule,
             startDate: editing?.startDate ?? Date(),
             endDate: hasEndDate ? endDate : nil,
             notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -268,5 +328,40 @@ struct MedicationEditSheet: View {
 
         withAnimation(.easeInOut(duration: 0.15)) { showSavedConfirmation = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { dismiss() }
+    }
+}
+
+/// A row of seven tappable day circles (S M T W T F S) that fill in
+/// when selected. Binds to a set of Calendar weekdays (1 = Sunday …
+/// 7 = Saturday), so the order matches Calendar's convention.
+private struct WeekdayCirclePicker: View {
+    @Binding var selected: Set<Int>
+
+    // Index 0–6 maps to Calendar weekday 1–7 (Sun–Sat). The repeated
+    // S/T letters (Sun/Sat, Tue/Thu) match Apple's own day pickers.
+    private let symbols = ["S", "M", "T", "W", "T", "F", "S"]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<7, id: \.self) { idx in
+                let weekday = idx + 1
+                let isOn = selected.contains(weekday)
+                Button {
+                    if isOn { selected.remove(weekday) } else { selected.insert(weekday) }
+                } label: {
+                    Text(symbols[idx])
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background(
+                            Circle()
+                                .fill(isOn ? Color.accentColor : Color(.tertiarySystemFill))
+                        )
+                        .foregroundStyle(isOn ? Color.white : Color.primary)
+                }
+                .buttonStyle(.plain)
+                .sensoryFeedback(.selection, trigger: isOn)
+            }
+        }
     }
 }

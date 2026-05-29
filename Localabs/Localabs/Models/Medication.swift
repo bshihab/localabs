@@ -18,9 +18,12 @@ struct Medication: Codable, Identifiable, Equatable {
     var name: String
     /// Free-form dose string, e.g. "500 mg", "1 tablet", "10 units".
     var dose: String
-    /// Scheduled times of day for reminders. Each becomes its own
-    /// repeating daily notification. Empty = tracked but no reminders.
+    /// Scheduled times of day for reminders. Each time fires on the
+    /// days selected by `repeatRule`. Empty = tracked but no reminders.
     var times: [TimeOfDay]
+    /// Which days the medication is taken on — every day, specific
+    /// weekdays weekly, or specific weekdays every other week.
+    var repeatRule: RepeatRule
     var startDate: Date
     /// nil = ongoing. When set, the med drops to "Past" after this date.
     var endDate: Date?
@@ -34,6 +37,7 @@ struct Medication: Codable, Identifiable, Equatable {
         name: String,
         dose: String = "",
         times: [TimeOfDay] = [],
+        repeatRule: RepeatRule = .daily,
         startDate: Date = Date(),
         endDate: Date? = nil,
         notes: String = "",
@@ -44,11 +48,95 @@ struct Medication: Codable, Identifiable, Equatable {
         self.name = name
         self.dose = dose
         self.times = times
+        self.repeatRule = repeatRule
         self.startDate = startDate
         self.endDate = endDate
         self.notes = notes
         self.sourceReportID = sourceReportID
         self.createdAt = createdAt
+    }
+
+    // Custom decoder so medications saved before `repeatRule` existed
+    // still load — the missing key defaults to `.daily` rather than
+    // failing the whole decode (which would silently drop every med).
+    enum CodingKeys: String, CodingKey {
+        case id, name, dose, times, repeatRule, startDate, endDate, notes, sourceReportID, createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        dose = try c.decode(String.self, forKey: .dose)
+        times = try c.decode([TimeOfDay].self, forKey: .times)
+        repeatRule = try c.decodeIfPresent(RepeatRule.self, forKey: .repeatRule) ?? .daily
+        startDate = try c.decode(Date.self, forKey: .startDate)
+        endDate = try c.decodeIfPresent(Date.self, forKey: .endDate)
+        notes = try c.decode(String.self, forKey: .notes)
+        sourceReportID = try c.decodeIfPresent(UUID.self, forKey: .sourceReportID)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+    }
+
+    /// How often, in terms of *days*, the medication recurs. The
+    /// times-of-day (`times`) are orthogonal — they say when within a
+    /// given day; this says which days.
+    struct RepeatRule: Codable, Equatable {
+        enum Cadence: String, Codable { case daily, weekly, biweekly }
+        var cadence: Cadence
+        /// Calendar weekdays (1 = Sunday … 7 = Saturday). Ignored for
+        /// `.daily`. For `.weekly`/`.biweekly`, the days the med is taken.
+        var weekdays: [Int]
+
+        static let daily = RepeatRule(cadence: .daily, weekdays: [])
+
+        /// Short human label, e.g. "Every day", "Mon, Thu",
+        /// "Every 2 weeks · Mon".
+        var summary: String {
+            switch cadence {
+            case .daily:
+                return "Every day"
+            case .weekly:
+                return weekdayList
+            case .biweekly:
+                return "Every 2 weeks · \(weekdayList)"
+            }
+        }
+
+        private var weekdayList: String {
+            guard !weekdays.isEmpty else { return "—" }
+            let symbols = Calendar.current.shortWeekdaySymbols  // ["Sun","Mon",…]
+            return weekdays
+                .sorted()
+                .compactMap { wd in
+                    (1...7).contains(wd) ? symbols[wd - 1] : nil
+                }
+                .joined(separator: ", ")
+        }
+    }
+
+    /// Whether the medication is due on a given calendar day, per its
+    /// repeat rule. Daily = always; weekly = the day's weekday is in
+    /// the set; biweekly = weekday is in the set AND the day falls in
+    /// an "on" week relative to `startDate` (week parity). Used for
+    /// both the Today schedule and the adherence streak.
+    func isScheduled(on day: Date) -> Bool {
+        let cal = Calendar.current
+        switch repeatRule.cadence {
+        case .daily:
+            return true
+        case .weekly:
+            let wd = cal.component(.weekday, from: day)
+            return repeatRule.weekdays.contains(wd)
+        case .biweekly:
+            let wd = cal.component(.weekday, from: day)
+            guard repeatRule.weekdays.contains(wd) else { return false }
+            // Week parity: count whole weeks between the start week and
+            // this day's week; even = an "on" week.
+            let startWeek = cal.dateInterval(of: .weekOfYear, for: startDate)?.start ?? startDate
+            let dayWeek = cal.dateInterval(of: .weekOfYear, for: day)?.start ?? day
+            let weeks = cal.dateComponents([.weekOfYear], from: startWeek, to: dayWeek).weekOfYear ?? 0
+            return abs(weeks) % 2 == 0
+        }
     }
 
     /// Active = started on/before today and not past its end date.
@@ -61,22 +149,32 @@ struct Medication: Codable, Identifiable, Equatable {
         return true
     }
 
-    /// One-line human summary of the schedule, e.g. "Twice daily ·
-    /// 8:00 AM, 8:00 PM" or "As needed" when no times are set.
+    /// One-line human summary of the schedule. Combines the day
+    /// cadence with the times of day, e.g.:
+    ///   daily   → "Twice daily · 8:00 AM, 8:00 PM"
+    ///   weekly  → "Mon, Thu · 8:00 AM, 8:00 PM"
+    ///   biweekly→ "Every 2 weeks · Mon · 8:00 AM"
+    /// "As needed" when no times are set.
     var scheduleSummary: String {
         guard !times.isEmpty else { return "As needed" }
-        let freq: String
-        switch times.count {
-        case 1:  freq = "Once daily"
-        case 2:  freq = "Twice daily"
-        case 3:  freq = "Three times daily"
-        default: freq = "\(times.count)× daily"
-        }
-        let formatted = times
+        let formattedTimes = times
             .sorted()
             .map(\.displayString)
             .joined(separator: ", ")
-        return "\(freq) · \(formatted)"
+
+        switch repeatRule.cadence {
+        case .daily:
+            let freq: String
+            switch times.count {
+            case 1:  freq = "Once daily"
+            case 2:  freq = "Twice daily"
+            case 3:  freq = "Three times daily"
+            default: freq = "\(times.count)× daily"
+            }
+            return "\(freq) · \(formattedTimes)"
+        case .weekly, .biweekly:
+            return "\(repeatRule.summary) · \(formattedTimes)"
+        }
     }
 
     /// A time of day for a reminder. Stored as hour/minute so it's
@@ -234,33 +332,42 @@ enum MedicationAdherence {
         persist(set)
     }
 
-    /// Consecutive-day streak counting back from today. A day counts
-    /// toward the streak only if every scheduled dose that day was
-    /// marked taken. Today is included only once all of today's doses
-    /// are done (so an in-progress day doesn't break the streak —
-    /// it just doesn't extend it yet). Returns 0 for meds with no
-    /// scheduled times (nothing to adhere to).
+    /// Consecutive-scheduled-day streak counting back from today. Only
+    /// days the med is actually due (per its repeat rule) count; days
+    /// it isn't scheduled are skipped over, not treated as misses — so
+    /// a Mon/Thu med doesn't lose its streak on a Tuesday. A scheduled
+    /// day extends the streak only if every dose that day was taken.
+    /// Today, if scheduled but not yet fully taken, is skipped (doesn't
+    /// break the streak — just doesn't extend it yet). Returns 0 for
+    /// meds with no scheduled times.
     static func streak(for med: Medication) -> Int {
         guard !med.times.isEmpty else { return 0 }
         let cal = Calendar.current
         var streak = 0
         var day = cal.startOfDay(for: Date())
+        let start = cal.startOfDay(for: med.startDate)
 
-        // If today isn't fully done, start counting from yesterday so
-        // a partial today doesn't zero out an otherwise-good streak.
-        if !allDosesTaken(for: med, on: day) {
+        // Skip an in-progress today: if today is scheduled but not yet
+        // fully taken, step back a day before counting so it doesn't
+        // zero out an otherwise-good streak.
+        if med.isScheduled(on: day) && !allDosesTaken(for: med, on: day) {
             day = cal.date(byAdding: .day, value: -1, to: day) ?? day
         }
 
-        let start = cal.startOfDay(for: med.startDate)
-        while day >= start {
-            if allDosesTaken(for: med, on: day) {
-                streak += 1
-                guard let prev = cal.date(byAdding: .day, value: -1, to: day) else { break }
-                day = prev
-            } else {
-                break
+        // Walk back up to ~1 year. Non-scheduled days are skipped;
+        // a scheduled day with a miss ends the streak.
+        var guardCounter = 0
+        while day >= start && guardCounter < 400 {
+            guardCounter += 1
+            if med.isScheduled(on: day) {
+                if allDosesTaken(for: med, on: day) {
+                    streak += 1
+                } else {
+                    break
+                }
             }
+            guard let prev = cal.date(byAdding: .day, value: -1, to: day) else { break }
+            day = prev
         }
         return streak
     }

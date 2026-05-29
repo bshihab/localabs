@@ -53,7 +53,7 @@ struct MedsView: View {
             ) {
                 if let id = pendingDeleteID {
                     Button("Remove", role: .destructive) {
-                        MedicationService.cancel(medID: id)
+                        Task { await MedicationService.cancel(medID: id) }
                         Medication.delete(id: id)
                         pendingDeleteID = nil
                         reload()
@@ -105,10 +105,12 @@ struct MedsView: View {
     }
 
     /// Builds the dose occurrences for today in a given day-part,
-    /// sorted by time. Only active meds with scheduled times appear.
+    /// sorted by time. Only active meds that are actually due today
+    /// (per their repeat rule) and have scheduled times appear.
     private func todayDoses(in part: Medication.DayPart) -> [TodayDose] {
+        let today = Date()
         var result: [TodayDose] = []
-        for med in activeMeds {
+        for med in activeMeds where med.isScheduled(on: today) {
             for (idx, time) in med.times.enumerated() where time.dayPart == part {
                 result.append(TodayDose(
                     medID: med.id,
