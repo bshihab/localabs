@@ -126,6 +126,41 @@ extension SymptomEntry {
         if changed { persist(entries) }
     }
 
+    /// Formatted block of recently-logged symptoms for injection
+    /// into chat prompts — the symptom-log equivalent of
+    /// `UserProfile.promptContextBullets`. Defaults to the last 14
+    /// days (the window that's clinically relevant for "what's been
+    /// going on lately" without dragging in stale entries) and caps
+    /// the count so a prolific logger can't blow the 4096-token
+    /// context window. Returns an empty string when there's nothing
+    /// to add, so callers can drop the whole section cleanly rather
+    /// than render an empty header.
+    ///
+    /// Designed to be used SILENTLY by the model as background
+    /// context — same contract as the profile bullets. The caller's
+    /// prompt wording tells the model not to restate these as
+    /// findings.
+    static func promptContextBlock(withinDays days: Int = 14, maxEntries: Int = 12) -> String {
+        let cutoff = Calendar.current.date(
+            byAdding: .day,
+            value: -days,
+            to: Date()
+        ) ?? .distantPast
+        let recent = loadAll()
+            .filter { $0.timestamp >= cutoff }
+            .prefix(maxEntries)
+        guard !recent.isEmpty else { return "" }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        let lines = recent.map { entry -> String in
+            let date = formatter.string(from: entry.timestamp)
+            let tags = entry.tags.isEmpty ? "" : " [\(entry.tags.joined(separator: ", "))]"
+            return "- \(date): \(entry.text) (\(entry.intensity.label.lowercased()))\(tags)"
+        }
+        return lines.joined(separator: "\n        ")
+    }
+
     /// Tags the user has used before, most-recent-use first.
     /// Surfaced as suggestion chips in the quick-add sheet so they
     /// can re-tap "headache" with one tap instead of retyping.

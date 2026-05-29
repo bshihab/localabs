@@ -22,6 +22,13 @@ struct TrendsView: View {
     /// Snapshot captured at present-time so the chat sees the same
     /// data the user was looking at.
     @State private var showTrendsChat: Bool = false
+    /// Symptom log entry point. Lives on the Trends tab (in addition
+    /// to the History toolbar) because Trends is the "your body over
+    /// time" surface users open most — pairing logged symptoms with
+    /// health metrics is the natural place to surface it until the
+    /// Meds/Health tab consolidates both. The logs also feed the
+    /// Trends + metric chats as silent context.
+    @State private var showSymptomLog: Bool = false
 
     struct PresentedMetric: Identifiable {
         var id: String { label }
@@ -82,6 +89,15 @@ struct TrendsView: View {
             .background(.background)
             .navigationTitle("Health Trends")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSymptomLog = true
+                    } label: {
+                        Label("Symptoms", systemImage: "heart.text.square")
+                    }
+                }
+            }
             .task(id: rangeDays) {
                 // Pull the auth flag fresh every time the view appears
                 // or the range changes — Profile may have flipped it
@@ -99,6 +115,9 @@ struct TrendsView: View {
                 // work with.
                 TrendsChatView(healthMetrics: makeHealthMetricsForChat())
                     .environmentObject(engine)
+            }
+            .sheet(isPresented: $showSymptomLog) {
+                SymptomLogView()
             }
             .sheet(item: $presentedMetric) { metric in
                 MetricDetailView(
