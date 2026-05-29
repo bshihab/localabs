@@ -1231,7 +1231,78 @@ final class InferenceEngine: ObservableObject {
             if isInferenceCancelled || Task.isCancelled { break }
             collected += piece
         }
-        return Self.parseLabValues(from: collected)
+
+        // The LLM pass is the primary extractor (it gets units +
+        // ranges right and handles odd layouts). But it's non-
+        // deterministic on a 4B model — the same report can extract
+        // slightly differently across scans, occasionally missing a
+        // marker entirely (which then drops out of cross-report
+        // trends). So we ALSO run a deterministic catalog scan over
+        // the OCR text and merge in any KNOWN marker the LLM missed.
+        // This guarantees a report mentioning, say, glucose always
+        // contributes to the glucose trend regardless of LLM variance
+        // — and it keys off the test name in the text, never the
+        // file name or report title.
+        var values = Self.parseLabValues(from: collected)
+        let present = Set(values.map { $0.canonicalName.lowercased() })
+        let scanned = Self.scanCatalogMarkers(in: ocrText)
+            .filter { !present.contains($0.canonicalName.lowercased()) }
+        values.append(contentsOf: scanned)
+        return values
+    }
+
+    /// Deterministic fallback extractor: for every marker in the
+    /// catalog, find its name in the report text and read the first
+    /// number that follows (the result value — reference ranges come
+    /// after it in standard lab layouts). Catches markers the LLM
+    /// extraction missed. Units/ranges are left empty here; the LLM
+    /// pass fills those for markers it caught, and this only supplies
+    /// the ones it didn't.
+    static func scanCatalogMarkers(in text: String) -> [LabValue] {
+        let lower = text.lowercased()
+        var result: [LabValue] = []
+        var seen = Set<String>()
+
+        for marker in LabMarkerCatalog.markers {
+            // Try the most specific alias first.
+            for alias in marker.aliases.sorted(by: { $0.count > $1.count }) {
+                guard let range = lower.range(of: alias) else { continue }
+                // Scan a short window after the name for the first numeric run.
+                let tail = String(text[range.upperBound...].prefix(40))
+                guard let value = firstNumber(in: tail) else { continue }
+                if seen.insert(marker.canonicalName.lowercased()).inserted {
+                    result.append(LabValue(
+                        canonicalName: marker.canonicalName,
+                        rawName: alias,
+                        value: value,
+                        unit: "",
+                        referenceRange: nil
+                    ))
+                }
+                break  // found this marker; move on
+            }
+        }
+        return result
+    }
+
+    /// First run of digits (with an optional single decimal point) in
+    /// a string. Ignores a leading sign — lab results are non-negative.
+    static func firstNumber(in s: String) -> Double? {
+        var num = ""
+        var started = false
+        var sawDot = false
+        for ch in s {
+            if ch.isNumber {
+                num.append(ch); started = true
+            } else if ch == "." && started && !sawDot {
+                num.append(ch); sawDot = true
+            } else if started {
+                break
+            }
+        }
+        // Strip a trailing dot ("6." → "6").
+        if num.hasSuffix(".") { num.removeLast() }
+        return Double(num)
     }
 
     /// Parse the pipe-delimited extraction output into LabValues,

@@ -36,11 +36,18 @@ struct LabTrend: Identifiable {
         return latest.value - previous.value
     }
 
-    /// Classification of the most recent change.
+    /// Classification of the marker's movement. Uses the OVERALL
+    /// change (first reading → latest) rather than just the last step,
+    /// so the chip matches the visible trajectory and the worsening-
+    /// streak warning. Previously this compared only the last two
+    /// points, which could read "Stable" for a marker that had clearly
+    /// declined across all readings (e.g. eGFR 92→88→84, where the
+    /// final 88→84 step alone fell inside the tolerance).
     var change: Change? {
-        guard let delta, let latest else { return nil }
+        guard let first = points.first, let latest, points.count >= 2 else { return nil }
+        let overall = latest.value - first.value
         let tolerance = abs(latest.value) * marker.stableTolerance
-        return concern.classify(delta: delta, tolerance: tolerance)
+        return concern.classify(delta: overall, tolerance: tolerance)
     }
 
     /// True when the marker has moved in the concerning direction on
