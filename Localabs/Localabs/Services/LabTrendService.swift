@@ -76,38 +76,43 @@ struct LabTrend: Identifiable {
 @MainActor
 enum LabTrendService {
 
-    /// All markers measured in 2+ reports, as trends. Markers seen only
-    /// once are omitted (nothing to compare). Sorted so worsening
-    /// trends surface first, then by name.
+    /// All markers measured in 2+ reports, as trends. Tracks EVERY
+    /// marker — not just catalog ones. A catalog match supplies the
+    /// canonical name (so "LDL" / "LDL Cholesterol" unify) and the
+    /// concern direction (for worsening warnings); a marker outside
+    /// the catalog still trends, joined by its own name, with a
+    /// neutral direction (we don't presume which way is "bad"). Markers
+    /// seen only once are omitted. Sorted so worsening trends surface
+    /// first.
     static func trends(from history: [StructuredReport]) -> [LabTrend] {
         // Oldest → newest so each trend's points are chronological.
         let ordered = history.sorted { $0.timestamp < $1.timestamp }
 
-        // canonicalName → accumulating points + unit/concern.
-        var byMarker: [String: (unit: String, concern: ConcernDirection, points: [LabTrend.Point])] = [:]
+        // join-key (lowercased canonical/raw name) → accumulator.
+        var byMarker: [String: (display: String, unit: String, concern: ConcernDirection, points: [LabTrend.Point])] = [:]
 
         for report in ordered {
             guard let values = report.labValues else { continue }
             for value in values {
-                // Only track values that map to a catalog marker.
-                guard let marker = LabMarkerCatalog.match(rawName: value.rawName)
-                        ?? LabMarkerCatalog.markers.first(where: { $0.canonicalName == value.canonicalName })
-                else { continue }
+                let resolved = resolve(value)
+                let key = resolved.name.lowercased()
                 let point = LabTrend.Point(reportID: report.id, date: report.timestamp, value: value.value)
-                if var existing = byMarker[marker.canonicalName] {
+                if var existing = byMarker[key] {
                     existing.points.append(point)
-                    byMarker[marker.canonicalName] = existing
+                    // Prefer a non-empty unit if we had none yet.
+                    if existing.unit.isEmpty && !value.unit.isEmpty { existing.unit = value.unit }
+                    byMarker[key] = existing
                 } else {
-                    byMarker[marker.canonicalName] = (value.unit, marker.concern, [point])
+                    byMarker[key] = (resolved.name, value.unit, resolved.concern, [point])
                 }
             }
         }
 
-        let trends = byMarker
-            .filter { $0.value.points.count >= 2 }
-            .map { name, data in
+        let trends = byMarker.values
+            .filter { $0.points.count >= 2 }
+            .map { data in
                 LabTrend(
-                    canonicalName: name,
+                    canonicalName: data.display,
                     unit: data.unit,
                     concern: data.concern,
                     points: data.points.sorted { $0.date < $1.date }
@@ -122,17 +127,27 @@ enum LabTrendService {
         }
     }
 
+    /// Resolve a lab value to a display name + concern direction. A
+    /// catalog match gives the canonical name + real concern; anything
+    /// else keeps its stored canonical/raw name and a neutral concern.
+    private static func resolve(_ value: LabValue) -> (name: String, concern: ConcernDirection) {
+        if let marker = LabMarkerCatalog.match(rawName: value.rawName)
+            ?? LabMarkerCatalog.markers.first(where: { $0.canonicalName == value.canonicalName }) {
+            return (marker.canonicalName, marker.concern)
+        }
+        return (value.canonicalName, .midOptimal)
+    }
+
     /// Compare a specific (usually just-scanned) report against the
     /// rest of history: for every marker in `report` that also appears
     /// in an earlier report, the resulting trend. Used for the
     /// Dashboard "what changed since last time" banner.
     static func comparison(for report: StructuredReport, in history: [StructuredReport]) -> [LabTrend] {
         guard let values = report.labValues, !values.isEmpty else { return [] }
-        let markersInReport = Set(
-            values.compactMap { LabMarkerCatalog.match(rawName: $0.rawName)?.canonicalName }
-        )
+        // Keys for every marker in this report (catalog or not).
+        let markersInReport = Set(values.map { resolve($0).name.lowercased() })
         guard !markersInReport.isEmpty else { return [] }
-        return trends(from: history).filter { markersInReport.contains($0.canonicalName) }
+        return trends(from: history).filter { markersInReport.contains($0.canonicalName.lowercased()) }
     }
 
     /// Markers from this report that are on a sustained worsening

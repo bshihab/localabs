@@ -1244,11 +1244,80 @@ final class InferenceEngine: ObservableObject {
         // — and it keys off the test name in the text, never the
         // file name or report title.
         var values = Self.parseLabValues(from: collected)
-        let present = Set(values.map { $0.canonicalName.lowercased() })
-        let scanned = Self.scanCatalogMarkers(in: ocrText)
-            .filter { !present.contains($0.canonicalName.lowercased()) }
-        values.append(contentsOf: scanned)
+        // Merge in deterministic extractions for anything the LLM
+        // missed. Two passes, both merge-only (never overwrite):
+        //   1. scanLabLines — GENERAL: catches any "name … number unit"
+        //      line, so it works for ANY marker, not just catalogued
+        //      ones (a real lab value almost always has a unit, which
+        //      is a strong, low-false-positive signal).
+        //   2. scanCatalogMarkers — backstop for the key chronic
+        //      markers even in odd/fused layouts the line scan misses.
+        func mergeMissing(_ extra: [LabValue]) {
+            let present = Set(values.map { $0.canonicalName.lowercased() })
+            values.append(contentsOf: extra.filter { !present.contains($0.canonicalName.lowercased()) })
+        }
+        mergeMissing(Self.scanLabLines(in: ocrText))
+        mergeMissing(Self.scanCatalogMarkers(in: ocrText))
         return values
+    }
+
+    /// Units that reliably signal "the number before/after me is a lab
+    /// result." Used by scanLabLines to tell lab values apart from
+    /// other numbers on the page (dates, page numbers, addresses).
+    /// Lowercased, punctuation-normalized.
+    private static let knownLabUnits: Set<String> = [
+        "mg/dl", "g/dl", "mg/l", "ng/dl", "ng/ml", "pg/ml", "mcg/dl", "ug/dl",
+        "%", "mmol/l", "umol/l", "miu/l", "uiu/ml", "µiu/ml", "iu/l", "u/l",
+        "meq/l", "ml/min", "mm/hr", "mmhg", "fl", "pg", "g/l", "k/ul", "m/ul",
+        "10^3/ul", "10^6/ul", "cells/ul", "/ul", "mg/dl.", "ratio"
+    ]
+
+    /// GENERAL deterministic lab-line parser. For each line, finds a
+    /// plain number immediately followed by a known unit, treats the
+    /// text before the number as the test name, and emits a LabValue.
+    /// Requiring a known unit keeps false positives low. Works for any
+    /// marker; catalog matching only supplies the canonical name when
+    /// there is one. Space-separated layouts (PDF text, most OCR) are
+    /// handled; fused "6.4%" tokens are left to the catalog backstop.
+    static func scanLabLines(in text: String) -> [LabValue] {
+        var result: [LabValue] = []
+        var seen = Set<String>()
+        for rawLine in text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            let tokens = line.split(separator: " ").map(String.init)
+            guard tokens.count >= 2 else { continue }
+            for i in 1..<tokens.count {
+                guard let value = plainNumber(tokens[i]) else { continue }
+                let unitTok = (i + 1 < tokens.count ? tokens[i + 1] : "")
+                    .lowercased()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "()[],;"))
+                guard knownLabUnits.contains(unitTok) else { continue }
+                let name = tokens[0..<i].joined(separator: " ")
+                    .trimmingCharacters(in: CharacterSet(charactersIn: " :.-\t"))
+                guard name.count >= 2, name.contains(where: \.isLetter) else { continue }
+                let canonical = LabMarkerCatalog.match(rawName: name)?.canonicalName ?? name
+                guard seen.insert(canonical.lowercased()).inserted else { continue }
+                result.append(LabValue(
+                    canonicalName: canonical,
+                    rawName: name,
+                    value: value,
+                    unit: unitTok,
+                    referenceRange: nil
+                ))
+                break  // one value per line
+            }
+        }
+        return result
+    }
+
+    /// A token that is ENTIRELY a number (optional single decimal),
+    /// after stripping surrounding punctuation. Rejects ranges like
+    /// "70-100" and fused tokens like "6.4%" so we don't misread them.
+    static func plainNumber(_ token: String) -> Double? {
+        let t = token.trimmingCharacters(in: CharacterSet(charactersIn: "()[]{},;:"))
+        guard !t.isEmpty, t.contains(where: \.isNumber) else { return nil }
+        guard t.allSatisfy({ $0.isNumber || $0 == "." }) else { return nil }
+        return Double(t)
     }
 
     /// Deterministic fallback extractor: for every marker in the
