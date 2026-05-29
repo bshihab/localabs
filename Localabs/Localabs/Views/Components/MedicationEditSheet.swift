@@ -92,7 +92,7 @@ struct MedicationEditSheet: View {
                                 displayedComponents: .hourAndMinute
                             )
                         }
-                        .onDelete(frequency == .custom ? deleteTime : nil)
+                        .onDelete(perform: frequency == .custom ? deleteTime : nil)
 
                         if frequency == .custom {
                             Button {
