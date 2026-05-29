@@ -63,103 +63,128 @@ struct MedicationEditSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Medication") {
-                    TextField("Name (e.g. Metformin)", text: $name)
-                    TextField("Dose (e.g. 500 mg, 1 tablet)", text: $dose)
-                }
-
-                Section {
-                    Picker("Frequency", selection: $frequency) {
-                        ForEach(Frequency.allCases) { f in
-                            Text(f.label).tag(f)
-                        }
-                    }
-                    .onChange(of: frequency) { _, newValue in
-                        // Reseed times from the preset, unless Custom
-                        // (which keeps whatever the user has built).
-                        if newValue != .custom {
-                            times = newValue.defaultTimes
-                        } else if times.isEmpty {
-                            times = [.init(hour: 8, minute: 0)]
-                        }
-                    }
-
-                    if frequency != .asNeeded {
-                        ForEach(times.indices, id: \.self) { idx in
-                            DatePicker(
-                                "Reminder \(times.count > 1 ? "\(idx + 1)" : "")",
-                                selection: timeBinding(idx),
-                                displayedComponents: .hourAndMinute
-                            )
-                        }
-                        .onDelete(perform: frequency == .custom ? deleteTime : nil)
-
-                        if frequency == .custom {
-                            Button {
-                                times.append(.init(hour: 12, minute: 0))
-                            } label: {
-                                Label("Add another time", systemImage: "plus.circle")
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Schedule")
-                } footer: {
-                    Text(frequency == .asNeeded
-                         ? "Tracked without reminders. You can still log doses on the Meds tab."
-                         : "A reminder notification fires daily at each time.")
-                }
-
-                Section {
-                    Toggle("Set an end date", isOn: $hasEndDate.animation())
-                    if hasEndDate {
-                        DatePicker(
-                            "Ends",
-                            selection: $endDate,
-                            in: Date()...,
-                            displayedComponents: .date
-                        )
-                    }
-                } header: {
-                    Text("Duration")
-                } footer: {
-                    Text(hasEndDate
-                         ? "After this date the medication moves to your Past list and reminders stop."
-                         : "Ongoing — reminders continue until you remove or end the medication.")
-                }
-
-                Section("Notes (optional)") {
-                    TextField("e.g. Take with food", text: $notes, axis: .vertical)
-                        .lineLimit(1...4)
-                }
-
-                if showSavedConfirmation {
-                    Section {
-                        HStack(spacing: 10) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("Saved")
-                            Spacer()
-                        }
-                    }
-                    .transition(.opacity)
-                }
+                medicationSection
+                scheduleSection
+                durationSection
+                notesSection
+                if showSavedConfirmation { savedConfirmationSection }
             }
             .navigationTitle(editing == nil ? "Add Medication" : "Edit Medication")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .fontWeight(.semibold)
-                }
-            }
+            .toolbar { toolbarContent }
             .onAppear(perform: seed)
         }
         .presentationDetents([.large])
+    }
+
+    // The Form is split into computed sub-views. A single Form
+    // literal with this many conditionals + bindings overwhelms the
+    // SwiftUI type-checker (it surfaces as a misleading "ambiguous
+    // toolbar" error); breaking it up keeps each expression small
+    // enough to infer.
+
+    private var medicationSection: some View {
+        Section("Medication") {
+            TextField("Name (e.g. Metformin)", text: $name)
+            TextField("Dose (e.g. 500 mg, 1 tablet)", text: $dose)
+        }
+    }
+
+    @ViewBuilder
+    private var scheduleSection: some View {
+        Section {
+            Picker("Frequency", selection: $frequency) {
+                ForEach(Frequency.allCases) { f in
+                    Text(f.label).tag(f)
+                }
+            }
+            .onChange(of: frequency) { _, newValue in
+                // Reseed times from the preset, unless Custom
+                // (which keeps whatever the user has built).
+                if newValue != .custom {
+                    times = newValue.defaultTimes
+                } else if times.isEmpty {
+                    times = [.init(hour: 8, minute: 0)]
+                }
+            }
+
+            if frequency != .asNeeded {
+                ForEach(times.indices, id: \.self) { idx in
+                    DatePicker(
+                        "Reminder \(times.count > 1 ? "\(idx + 1)" : "")",
+                        selection: timeBinding(idx),
+                        displayedComponents: .hourAndMinute
+                    )
+                }
+                .onDelete(perform: frequency == .custom ? deleteTime : nil)
+
+                if frequency == .custom {
+                    Button {
+                        times.append(.init(hour: 12, minute: 0))
+                    } label: {
+                        Label("Add another time", systemImage: "plus.circle")
+                    }
+                }
+            }
+        } header: {
+            Text("Schedule")
+        } footer: {
+            Text(frequency == .asNeeded
+                 ? "Tracked without reminders. You can still log doses on the Meds tab."
+                 : "A reminder notification fires daily at each time.")
+        }
+    }
+
+    @ViewBuilder
+    private var durationSection: some View {
+        Section {
+            Toggle("Set an end date", isOn: $hasEndDate.animation())
+            if hasEndDate {
+                DatePicker(
+                    "Ends",
+                    selection: $endDate,
+                    in: Date()...,
+                    displayedComponents: .date
+                )
+            }
+        } header: {
+            Text("Duration")
+        } footer: {
+            Text(hasEndDate
+                 ? "After this date the medication moves to your Past list and reminders stop."
+                 : "Ongoing — reminders continue until you remove or end the medication.")
+        }
+    }
+
+    private var notesSection: some View {
+        Section("Notes (optional)") {
+            TextField("e.g. Take with food", text: $notes, axis: .vertical)
+                .lineLimit(1...4)
+        }
+    }
+
+    private var savedConfirmationSection: some View {
+        Section {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("Saved")
+                Spacer()
+            }
+        }
+        .transition(.opacity)
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button("Save") { save() }
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .fontWeight(.semibold)
+        }
     }
 
     // MARK: - Time editing
