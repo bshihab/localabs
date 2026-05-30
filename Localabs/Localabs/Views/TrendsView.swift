@@ -33,6 +33,19 @@ struct TrendsView: View {
     /// history. Independent of HealthKit.
     @State private var labTrends: [LabTrend] = []
     @State private var showLabTrends: Bool = false
+    /// Which data source the tab is showing — Apple Health metrics or
+    /// lab-report trends. Replaces the old single long scroll.
+    @State private var dataSource: DataSource = .health
+
+    enum DataSource: String, CaseIterable {
+        case health, labs
+        var label: String {
+            switch self {
+            case .health: return "Apple Health"
+            case .labs:   return "Lab Reports"
+            }
+        }
+    }
 
     struct PresentedMetric: Identifiable {
         var id: String { label }
@@ -61,38 +74,13 @@ struct TrendsView: View {
                 // .navigationBarTitleDisplayMode(.large) — the
                 // system handles the shrink + blur automatically.
                 VStack(alignment: .leading, spacing: 22) {
-                    if !hasRequestedHealth {
-                        notConnectedCard
-                            .padding(.horizontal)
+                    dataSourcePicker
+                        .padding(.horizontal)
+
+                    if dataSource == .health {
+                        healthContent
                     } else {
-                        contextHeader
-                            .padding(.horizontal)
-
-                        askLocalabsCTA
-                            .padding(.horizontal)
-
-                        rangePicker
-                            .padding(.horizontal)
-
-                        if isLoading && snapshot == nil {
-                            ProgressView("Loading from Apple Health…")
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 40)
-                        } else if let snapshot, snapshotHasAnyData(snapshot) {
-                            renderedCards(for: snapshot)
-                        } else {
-                            emptyDataHint
-                                .padding(.horizontal)
-                        }
-                    }
-
-                    // Lab-value trends from scanned reports (#28).
-                    // Independent of HealthKit — shows whenever 2+
-                    // reports share a marker, so it appears even when
-                    // Apple Health isn't connected.
-                    if !labTrends.isEmpty {
-                        labValuesSection
-                            .padding(.horizontal)
+                        labContent
                     }
                 }
                 .padding(.top, 8)
@@ -164,31 +152,15 @@ struct TrendsView: View {
     /// that way).
     private var labValuesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Visual break from the Apple Health cards above — this
-            // section is a different data source (your scanned lab
-            // reports), so it gets its own labeled divider.
-            Divider()
-                .padding(.bottom, 4)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack {
-                    Label("FROM YOUR LAB REPORTS", systemImage: "doc.text.magnifyingglass")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .tracking(1.0)
-                    Spacer()
-                    Button("See all") { showLabTrends = true }
-                        .font(.subheadline)
-                }
-                Text("Lab values tracked across your scans — separate from Apple Health.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
+            Text("LAB VALUES OVER TIME")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .tracking(1.0)
 
             VStack(spacing: 0) {
-                ForEach(labTrends.prefix(4)) { trend in
+                ForEach(labTrends) { trend in
                     LabTrendRow(trend: trend)
-                    if trend.id != labTrends.prefix(4).last?.id {
+                    if trend.id != labTrends.last?.id {
                         Divider()
                     }
                 }
@@ -198,13 +170,87 @@ struct TrendsView: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(Color(.secondarySystemBackground))
             )
+        }
+    }
 
-            if labTrends.count > 4 {
-                Text("+ \(labTrends.count - 4) more")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    // MARK: - Data-source toggle + content branches
+
+    /// Liquid Glass segmented control switching between Apple Health
+    /// metrics and lab-report trends — same glass treatment as the
+    /// range picker. Replaces the old single long scroll where both
+    /// stacked.
+    private var dataSourcePicker: some View {
+        GlassEffectContainer(spacing: 4) {
+            HStack(spacing: 4) {
+                ForEach(DataSource.allCases, id: \.self) { source in
+                    dataSourceSegment(source)
+                }
             }
         }
+    }
+
+    @ViewBuilder
+    private func dataSourceSegment(_ source: DataSource) -> some View {
+        if dataSource == source {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { dataSource = source }
+            } label: { rangeLabel(source.label) }
+            .buttonStyle(.glassProminent)
+        } else {
+            Button {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { dataSource = source }
+            } label: { rangeLabel(source.label) }
+            .buttonStyle(.glass)
+        }
+    }
+
+    /// Apple Health branch — the existing metric grid + range picker.
+    @ViewBuilder
+    private var healthContent: some View {
+        if !hasRequestedHealth {
+            notConnectedCard.padding(.horizontal)
+        } else {
+            contextHeader.padding(.horizontal)
+            askLocalabsCTA.padding(.horizontal)
+            rangePicker.padding(.horizontal)
+            if isLoading && snapshot == nil {
+                ProgressView("Loading from Apple Health…")
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+            } else if let snapshot, snapshotHasAnyData(snapshot) {
+                renderedCards(for: snapshot)
+            } else {
+                emptyDataHint.padding(.horizontal)
+            }
+        }
+    }
+
+    /// Lab-report branch — all cross-report lab trends, or an empty
+    /// state prompting the user to scan two reports that share a marker.
+    @ViewBuilder
+    private var labContent: some View {
+        if labTrends.isEmpty {
+            labTrendsEmptyState.padding(.horizontal)
+        } else {
+            labValuesSection.padding(.horizontal)
+        }
+    }
+
+    private var labTrendsEmptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "chart.xyaxis.line")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+                .opacity(0.6)
+            Text("No lab trends yet")
+                .font(.headline)
+            Text("Scan two or more lab reports that share a marker — like cholesterol or A1c — and Localabs will track how it changes over time here.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 50)
     }
 
     // MARK: - Range picker
@@ -396,11 +442,10 @@ struct TrendsView: View {
         ]
 
         VStack(alignment: .leading, spacing: 18) {
-            // Auto-generated insights — pulled from any section's
-            // metrics that have data. Shown above the grid so notable
-            // changes catch the eye before the user starts scrolling.
-            insightsSection(allEntries: activity + mobility + cardio + sleep + vitals + body + logged)
-
+            // (The "What's notable" insights block was removed — it
+            // pushed the actual metric grid below the fold and forced
+            // scrolling. The data-source segmented control at the top
+            // is the new way to focus.)
             section(title: "ACTIVITY", icon: "figure.walk", tint: .blue, metrics: activity)
             section(title: "MOBILITY", icon: "figure.walk.motion", tint: .indigo, metrics: mobility)
             section(title: "CARDIO & RECOVERY", icon: "heart.fill", tint: .red, metrics: cardio)
