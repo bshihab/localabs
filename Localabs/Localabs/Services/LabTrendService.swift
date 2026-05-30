@@ -66,43 +66,33 @@ struct LabTrend: Identifiable {
         }
     }
 
-    /// Classification of the marker's movement, first → latest.
-    /// Prefers the range-crossing signal (badness) when the report
-    /// printed a reference range; falls back to a percentage tolerance
-    /// on the raw change only when no range is available.
+    /// Classification of the marker's movement, first → latest, judged
+    /// against the reference range (badness). With no range available
+    /// there's no clinical basis to call a move good or bad, so it
+    /// reads as a neutral "Changed" (or "Stable" if it didn't move) —
+    /// no arbitrary percentage guess.
     var change: Change? {
         guard let first = points.first, let latest, points.count >= 2 else { return nil }
-        if hasRange {
-            let bl = badness(latest.value)
-            let bf = badness(first.value)
-            let tol = max(0.0001, abs(latest.value) * 0.02)  // ignore tiny wiggle
-            if abs(bl - bf) <= tol { return .stable }
-            return bl > bf ? .worsened : .improved
+        guard hasRange else {
+            return latest.value == first.value ? .stable : .changed
         }
-        let overall = latest.value - first.value
-        let tolerance = abs(latest.value) * marker.stableTolerance
-        return concern.classify(delta: overall, tolerance: tolerance)
+        let bl = badness(latest.value)
+        let bf = badness(first.value)
+        let tol = max(0.0001, abs(latest.value) * 0.02)  // ignore tiny wiggle
+        if abs(bl - bf) <= tol { return .stable }
+        return bl > bf ? .worsened : .improved
     }
 
     /// A sustained worsening: badness increases on each of the last
-    /// `n` steps AND the latest reading is actually out of range. When
-    /// no range is available, falls back to the old monotonic-direction
-    /// rule. Requires at least `n`+1 points.
+    /// `n` steps AND the latest reading is actually out of range.
+    /// Requires a reference range (no range → no worsening verdict)
+    /// and at least `n`+1 points.
     func isWorseningStreak(minSteps n: Int = 2) -> Bool {
-        guard points.count >= n + 1 else { return false }
+        guard hasRange, points.count >= n + 1 else { return false }
         let recent = Array(points.suffix(n + 1))
-        if hasRange {
-            let bs = recent.map { badness($0.value) }
-            let rising = zip(bs, bs.dropFirst()).allSatisfy { $1 > $0 }
-            return rising && badness(latest?.value ?? 0) > 0
-        }
-        guard concern != .midOptimal else { return false }
-        let deltas = zip(recent, recent.dropFirst()).map { $1.value - $0.value }
-        switch concern {
-        case .higherWorse: return deltas.allSatisfy { $0 > 0 }
-        case .lowerWorse:  return deltas.allSatisfy { $0 < 0 }
-        case .midOptimal:  return false
-        }
+        let bs = recent.map { badness($0.value) }
+        let rising = zip(bs, bs.dropFirst()).allSatisfy { $1 > $0 }
+        return rising && badness(latest?.value ?? 0) > 0
     }
 
     /// Human-readable reference range for display, e.g. "70–100",
@@ -119,13 +109,6 @@ struct LabTrend: Identifiable {
     static func fmt(_ v: Double) -> String {
         v.rounded() == v ? String(format: "%.0f", v) : String(format: "%.1f", v)
     }
-
-    /// The catalog marker backing this trend (for the percentage
-    /// fallback tolerance).
-    private var marker: LabMarker {
-        LabMarkerCatalog.markers.first { $0.canonicalName == canonicalName }
-            ?? LabMarker(canonicalName: canonicalName, aliases: [], concern: concern, stableTolerance: 0.05)
-    }
 }
 
 /// Builds cross-report lab trends from saved report history. Pure
@@ -134,13 +117,12 @@ struct LabTrend: Identifiable {
 enum LabTrendService {
 
     /// All markers measured in 2+ reports, as trends. Tracks EVERY
-    /// marker — not just catalog ones. A catalog match supplies the
-    /// canonical name (so "LDL" / "LDL Cholesterol" unify) and the
-    /// concern direction (for worsening warnings); a marker outside
-    /// the catalog still trends, joined by its own name, with a
-    /// neutral direction (we don't presume which way is "bad"). Markers
-    /// seen only once are omitted. Sorted so worsening trends surface
-    /// first.
+    /// marker, joined by normalized name. The reference range and the
+    /// concern direction come from the model (per `LabValue`), not a
+    /// hardcoded catalog — the most recent report's values win when
+    /// they differ. A value with no model-supplied concern direction
+    /// trends without a good/bad verdict. Markers seen only once are
+    /// omitted. Sorted so worsening trends surface first.
     private struct DayPoint {
         let value: Double
         let scanTime: Date
@@ -154,9 +136,12 @@ enum LabTrendService {
         // One entry per calendar day — collapses duplicate reports
         // (e.g. re-scanning the same report) into a single point.
         var byDay: [Date: DayPoint] = [:]
-        // Reference range from the most recent report that printed one.
+        // Reference range from the most recent report that supplied one.
         var refLower: Double?
         var refUpper: Double?
+        // Newest scan time seen, so the latest report's concern /
+        // range win when they differ across reports.
+        var newestScan: Date = .distantPast
     }
 
     static func trends(from history: [StructuredReport]) -> [LabTrend] {
@@ -166,24 +151,30 @@ enum LabTrendService {
         let ordered = history.sorted { $0.effectiveDate < $1.effectiveDate }
         let cal = Calendar.current
 
-        // join-key (lowercased canonical/raw name) → accumulator.
+        // normalized-name join key → accumulator.
         var byMarker: [String: MarkerAccumulator] = [:]
 
         for report in ordered {
             guard let values = report.labValues else { continue }
             for value in values {
-                let resolved = resolve(value)
-                let key = resolved.name.lowercased()
+                let key = value.joinKey
                 let day = cal.startOfDay(for: report.effectiveDate)
 
                 var acc = byMarker[key] ?? MarkerAccumulator(
-                    display: resolved.name, unit: value.unit, concern: resolved.concern
+                    display: value.canonicalName,
+                    unit: value.unit,
+                    concern: value.concernDirection ?? .midOptimal
                 )
                 if acc.unit.isEmpty && !value.unit.isEmpty { acc.unit = value.unit }
-                // Capture the lab's reference range; since reports are
-                // processed oldest→newest, the newest range wins.
-                let (lo, hi) = LabValue.parseRange(value.referenceRange)
-                if lo != nil || hi != nil { acc.refLower = lo; acc.refUpper = hi }
+                // The most recent report's clinical metadata wins: update
+                // the concern direction and range when this report is the
+                // newest seen for the marker and it supplied that info.
+                if report.timestamp >= acc.newestScan {
+                    acc.newestScan = report.timestamp
+                    if let c = value.concernDirection { acc.concern = c }
+                    let (lo, hi) = LabValue.parseRange(value.referenceRange)
+                    if lo != nil || hi != nil { acc.refLower = lo; acc.refUpper = hi }
+                }
 
                 // Dedupe by day: if this marker already has a reading
                 // for this date (a duplicate / re-scanned report), keep
@@ -229,27 +220,24 @@ enum LabTrendService {
         }
     }
 
-    /// Resolve a lab value to a display name + concern direction. A
-    /// catalog match gives the canonical name + real concern; anything
-    /// else keeps its stored canonical/raw name and a neutral concern.
-    private static func resolve(_ value: LabValue) -> (name: String, concern: ConcernDirection) {
-        if let marker = LabMarkerCatalog.match(rawName: value.rawName)
-            ?? LabMarkerCatalog.markers.first(where: { $0.canonicalName == value.canonicalName }) {
-            return (marker.canonicalName, marker.concern)
-        }
-        return (value.canonicalName, .midOptimal)
-    }
-
     /// Compare a specific (usually just-scanned) report against the
     /// rest of history: for every marker in `report` that also appears
     /// in an earlier report, the resulting trend. Used for the
     /// Dashboard "what changed since last time" banner.
     static func comparison(for report: StructuredReport, in history: [StructuredReport]) -> [LabTrend] {
         guard let values = report.labValues, !values.isEmpty else { return [] }
-        // Keys for every marker in this report (catalog or not).
-        let markersInReport = Set(values.map { resolve($0).name.lowercased() })
+        let markersInReport = Set(values.map { $0.joinKey })
         guard !markersInReport.isEmpty else { return [] }
-        return trends(from: history).filter { markersInReport.contains($0.canonicalName.lowercased()) }
+        return trends(from: history).filter { markersInReport.contains(normalize($0.canonicalName)) }
+    }
+
+    /// Same normalization as `LabValue.joinKey`, for matching a trend's
+    /// display name back to report join keys.
+    private static func normalize(_ s: String) -> String {
+        s.lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     /// Markers from this report that are on a sustained worsening

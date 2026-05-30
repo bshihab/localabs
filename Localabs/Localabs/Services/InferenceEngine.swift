@@ -1208,19 +1208,21 @@ final class InferenceEngine: ObservableObject {
 
         let prompt = """
         <start_of_turn>user
-        You are a precise data extractor. From the lab report text below, list EVERY lab measurement that has a numeric value. Output ONE per line in EXACTLY this pipe-delimited format and nothing else:
-        NAME | VALUE | UNIT | REFERENCE_RANGE
+        You are a precise medical data extractor. From the lab report text below, list EVERY lab measurement that has a numeric value. Output ONE per line in EXACTLY this pipe-delimited format and nothing else:
+        NAME | VALUE | UNIT | RANGE | WORSE
 
-        Rules:
-        - Copy the test name and number EXACTLY as written. NEVER invent a value that isn't in the text.
-        - If the unit or range is missing, leave that field empty but keep the pipes.
+        Field rules:
+        - NAME, VALUE, UNIT: copy the test name, number, and unit EXACTLY as written. NEVER invent a value that isn't in the text.
+        - RANGE: copy the report's reference range for this test if it is printed. If the report does NOT print a range, fill in the standard adult reference range for this test from your medical knowledge (e.g. LDL <100, HbA1c 4.0-5.6). Always provide a range.
+        - WORSE: which direction is clinically worse for this test — write HIGH if a higher value is worse (e.g. LDL, glucose, blood pressure), LOW if a lower value is worse (e.g. HDL, eGFR, hemoglobin), or MID if both unusually high AND low are concerning (e.g. TSH, sodium, potassium). Use your medical knowledge.
         - Only include measurements that have a number. Ignore prose, advice, and instructions.
         - If there are no lab measurements at all, output exactly: NONE
 
         Examples:
-        LDL Cholesterol | 145 | mg/dL | <100
-        HbA1c | 6.4 | % | 4.0-5.6
-        TSH | 2.1 | mIU/L | 0.4-4.0
+        LDL Cholesterol | 145 | mg/dL | <100 | HIGH
+        HDL Cholesterol | 38 | mg/dL | >40 | LOW
+        HbA1c | 6.4 | % | 4.0-5.6 | HIGH
+        TSH | 2.1 | mIU/L | 0.4-4.0 | MID
 
         Lab report text:
         \(trimmed)
@@ -1239,32 +1241,19 @@ final class InferenceEngine: ObservableObject {
             collected += piece
         }
 
-        // The LLM pass is the primary extractor (it gets units +
-        // ranges right and handles odd layouts). But it's non-
-        // deterministic on a 4B model — the same report can extract
-        // slightly differently across scans, occasionally missing a
-        // marker entirely (which then drops out of cross-report
-        // trends). So we ALSO run a deterministic catalog scan over
-        // the OCR text and merge in any KNOWN marker the LLM missed.
-        // This guarantees a report mentioning, say, glucose always
-        // contributes to the glucose trend regardless of LLM variance
-        // — and it keys off the test name in the text, never the
-        // file name or report title.
+        // The model is the primary extractor — it provides the value,
+        // unit, reference range (printed or from medical knowledge),
+        // and the clinical concern direction. Greedy decoding makes it
+        // reproducible. As a recall backstop we also run a GENERAL
+        // deterministic line scan (structural — finds any "name … number
+        // unit/range" line, no hardcoded disease knowledge) and merge in
+        // any value the model missed. Those backstop values carry no
+        // concern direction (the deterministic pass makes no clinical
+        // judgment); they trend without a good/bad verdict.
         var values = Self.parseLabValues(from: collected)
-        // Merge in deterministic extractions for anything the LLM
-        // missed. Two passes, both merge-only (never overwrite):
-        //   1. scanLabLines — GENERAL: catches any "name … number unit"
-        //      line, so it works for ANY marker, not just catalogued
-        //      ones (a real lab value almost always has a unit, which
-        //      is a strong, low-false-positive signal).
-        //   2. scanCatalogMarkers — backstop for the key chronic
-        //      markers even in odd/fused layouts the line scan misses.
-        func mergeMissing(_ extra: [LabValue]) {
-            let present = Set(values.map { $0.canonicalName.lowercased() })
-            values.append(contentsOf: extra.filter { !present.contains($0.canonicalName.lowercased()) })
-        }
-        mergeMissing(Self.scanLabLines(in: ocrText))
-        mergeMissing(Self.scanCatalogMarkers(in: ocrText))
+        let present = Set(values.map { $0.joinKey })
+        let scanned = Self.scanLabLines(in: ocrText).filter { !present.contains($0.joinKey) }
+        values.append(contentsOf: scanned)
         return values
     }
 
@@ -1324,15 +1313,21 @@ final class InferenceEngine: ObservableObject {
                     unit = ""
                 }
 
-                let canonical = LabMarkerCatalog.match(rawName: name)?.canonicalName ?? name
-                guard seen.insert(canonical.lowercased()).inserted else { continue }
-                result.append(LabValue(
-                    canonicalName: canonical,
+                // No clinical catalog — join on the name as written.
+                // Capture a printed reference range if one is on the
+                // line, but make no concern-direction judgment (that's
+                // the model's job).
+                let rangeTok = tokens.first(where: { looksLikeRange($0) })
+                let candidate = LabValue(
+                    canonicalName: name,
                     rawName: name,
                     value: value,
                     unit: unit,
-                    referenceRange: nil
-                ))
+                    referenceRange: rangeTok,
+                    concernDirection: nil
+                )
+                guard seen.insert(candidate.joinKey).inserted else { continue }
+                result.append(candidate)
                 break  // one value per line
             }
         }
@@ -1418,63 +1413,11 @@ final class InferenceEngine: ObservableObject {
         return Double(t)
     }
 
-    /// Deterministic fallback extractor: for every marker in the
-    /// catalog, find its name in the report text and read the first
-    /// number that follows (the result value — reference ranges come
-    /// after it in standard lab layouts). Catches markers the LLM
-    /// extraction missed. Units/ranges are left empty here; the LLM
-    /// pass fills those for markers it caught, and this only supplies
-    /// the ones it didn't.
-    static func scanCatalogMarkers(in text: String) -> [LabValue] {
-        let lower = text.lowercased()
-        var result: [LabValue] = []
-        var seen = Set<String>()
 
-        for marker in LabMarkerCatalog.markers {
-            // Try the most specific alias first.
-            for alias in marker.aliases.sorted(by: { $0.count > $1.count }) {
-                guard let range = lower.range(of: alias) else { continue }
-                // Scan a short window after the name for the first numeric run.
-                let tail = String(text[range.upperBound...].prefix(40))
-                guard let value = firstNumber(in: tail) else { continue }
-                if seen.insert(marker.canonicalName.lowercased()).inserted {
-                    result.append(LabValue(
-                        canonicalName: marker.canonicalName,
-                        rawName: alias,
-                        value: value,
-                        unit: "",
-                        referenceRange: nil
-                    ))
-                }
-                break  // found this marker; move on
-            }
-        }
-        return result
-    }
-
-    /// First run of digits (with an optional single decimal point) in
-    /// a string. Ignores a leading sign — lab results are non-negative.
-    static func firstNumber(in s: String) -> Double? {
-        var num = ""
-        var started = false
-        var sawDot = false
-        for ch in s {
-            if ch.isNumber {
-                num.append(ch); started = true
-            } else if ch == "." && started && !sawDot {
-                num.append(ch); sawDot = true
-            } else if started {
-                break
-            }
-        }
-        // Strip a trailing dot ("6." → "6").
-        if num.hasSuffix(".") { num.removeLast() }
-        return Double(num)
-    }
-
-    /// Parse the pipe-delimited extraction output into LabValues,
-    /// canonicalizing names against the marker catalog and deduping by
-    /// canonical name (first occurrence wins).
+    /// Parse the pipe-delimited extraction output
+    /// (NAME | VALUE | UNIT | RANGE | WORSE) into LabValues, deduping
+    /// by normalized name (first occurrence wins). The range and
+    /// concern-direction come straight from the model.
     static func parseLabValues(from output: String) -> [LabValue] {
         var result: [LabValue] = []
         var seen = Set<String>()
@@ -1492,17 +1435,20 @@ final class InferenceEngine: ObservableObject {
             guard let value = Double(valueStr) else { continue }
             let unit = parts.count > 2 ? parts[2] : ""
             let range = (parts.count > 3 && !parts[3].isEmpty) ? parts[3] : nil
-            let canonical = LabMarkerCatalog.match(rawName: rawName)?.canonicalName ?? rawName
-            // Dedup by canonical name so a panel that lists a marker
-            // twice doesn't double-count.
-            guard seen.insert(canonical.lowercased()).inserted else { continue }
-            result.append(LabValue(
-                canonicalName: canonical,
+            let concern = parts.count > 4 ? ConcernDirection.from(token: parts[4]) : nil
+
+            let candidate = LabValue(
+                canonicalName: rawName,
                 rawName: rawName,
                 value: value,
                 unit: unit,
-                referenceRange: range
-            ))
+                referenceRange: range,
+                concernDirection: concern
+            )
+            // Dedup by normalized name so a panel that lists a marker
+            // twice doesn't double-count.
+            guard seen.insert(candidate.joinKey).inserted else { continue }
+            result.append(candidate)
         }
         return result
     }
