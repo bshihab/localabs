@@ -1256,6 +1256,11 @@ final class InferenceEngine: ObservableObject {
             if isInferenceCancelled || Task.isCancelled { break }
             collected += piece
         }
+        // Diagnostic: the raw extraction output, so we can see exactly
+        // what the model emitted per field (esp. whether it filled in a
+        // range when the report omitted one). Visible in the Xcode
+        // console after a scan.
+        print("[LabExtract] raw model output:\n\(collected)\n[LabExtract] end")
 
         // The model is the primary extractor — it provides the value,
         // unit, reference range (printed or from medical knowledge),
