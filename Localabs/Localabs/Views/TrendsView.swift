@@ -170,6 +170,24 @@ struct TrendsView: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(Color(.secondarySystemBackground))
             )
+
+            // Explain where the "normal" range comes from + that it's
+            // personalized to the user's age/sex when a report omits one.
+            Text(labRangeFootnote)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// Footnote under the lab trends explaining the source of the
+    /// normal range — and nudging the user to fill in age/sex if they
+    /// haven't, since that's what personalizes the filled-in ranges.
+    private var labRangeFootnote: String {
+        let profile = UserProfile.load()
+        if profile.hasDemographicsForStatusLabels {
+            return "Normal ranges are taken from each report, or — when a report doesn't list one — set by the on-device AI for your age and sex. Informational only; not a diagnosis."
+        } else {
+            return "Normal ranges are taken from each report. Add your age and biological sex in Profile so ranges can be personalized when a report doesn't list one. Informational only; not a diagnosis."
         }
     }
 

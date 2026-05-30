@@ -1206,6 +1206,22 @@ final class InferenceEngine: ObservableObject {
         let trimmed = String(ocrText.prefix(3000))  // leave room for output
         guard !trimmed.isEmpty else { return [] }
 
+        // Feed the patient's age + sex so the model can pick the right
+        // sex/age-specific reference range when a report doesn't print
+        // one (e.g. HDL normal is >40 for men but >50 for women,
+        // creatinine differs by sex). When a range IS printed the lab
+        // already adjusted it, so this only matters for the fill-in case.
+        let profile = UserProfile.load()
+        var demoParts: [String] = []
+        if !profile.age.trimmingCharacters(in: .whitespaces).isEmpty {
+            demoParts.append("age \(profile.age.trimmingCharacters(in: .whitespaces))")
+        }
+        let sex = profile.biologicalSex.trimmingCharacters(in: .whitespaces)
+        if !sex.isEmpty { demoParts.append(sex.lowercased()) }
+        let patientLine = demoParts.isEmpty
+            ? ""
+            : "\nPatient: \(demoParts.joined(separator: ", ")). Use this for any age/sex-specific reference range."
+
         let prompt = """
         <start_of_turn>user
         You are a precise medical data extractor. From the lab report text below, list EVERY lab measurement that has a numeric value. Output ONE per line in EXACTLY this pipe-delimited format and nothing else:
@@ -1213,7 +1229,7 @@ final class InferenceEngine: ObservableObject {
 
         Field rules:
         - NAME, VALUE, UNIT: copy the test name, number, and unit EXACTLY as written. NEVER invent a value that isn't in the text.
-        - RANGE: copy the report's reference range for this test if it is printed. If the report does NOT print a range, fill in the standard adult reference range for this test from your medical knowledge (e.g. LDL <100, HbA1c 4.0-5.6). Always provide a range.
+        - RANGE: copy the report's reference range for this test if it is printed. If the report does NOT print a range, fill in the standard reference range for this test from your medical knowledge, ADJUSTED FOR THE PATIENT'S AGE AND SEX where it matters (e.g. HDL normal is >40 for men but >50 for women; creatinine differs by sex). Always provide a range.
         - WORSE: which direction is clinically worse for this test — write HIGH if a higher value is worse (e.g. LDL, glucose, blood pressure), LOW if a lower value is worse (e.g. HDL, eGFR, hemoglobin), or MID if both unusually high AND low are concerning (e.g. TSH, sodium, potassium). Use your medical knowledge.
         - Only include measurements that have a number. Ignore prose, advice, and instructions.
         - If there are no lab measurements at all, output exactly: NONE
@@ -1223,7 +1239,7 @@ final class InferenceEngine: ObservableObject {
         HDL Cholesterol | 38 | mg/dL | >40 | LOW
         HbA1c | 6.4 | % | 4.0-5.6 | HIGH
         TSH | 2.1 | mIU/L | 0.4-4.0 | MID
-
+        \(patientLine)
         Lab report text:
         \(trimmed)
 
