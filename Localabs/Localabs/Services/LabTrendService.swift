@@ -84,40 +84,74 @@ enum LabTrendService {
     /// neutral direction (we don't presume which way is "bad"). Markers
     /// seen only once are omitted. Sorted so worsening trends surface
     /// first.
+    private struct DayPoint {
+        let value: Double
+        let scanTime: Date
+        let reportID: UUID
+        let date: Date
+    }
+    private struct MarkerAccumulator {
+        var display: String
+        var unit: String
+        var concern: ConcernDirection
+        // One entry per calendar day — collapses duplicate reports
+        // (e.g. re-scanning the same report) into a single point.
+        var byDay: [Date: DayPoint] = [:]
+    }
+
     static func trends(from history: [StructuredReport]) -> [LabTrend] {
         // Oldest → newest BY REPORT DATE (the date printed on the
         // report), not scan time — so scanning an old report after a
         // newer one still orders the progression correctly.
         let ordered = history.sorted { $0.effectiveDate < $1.effectiveDate }
+        let cal = Calendar.current
 
         // join-key (lowercased canonical/raw name) → accumulator.
-        var byMarker: [String: (display: String, unit: String, concern: ConcernDirection, points: [LabTrend.Point])] = [:]
+        var byMarker: [String: MarkerAccumulator] = [:]
 
         for report in ordered {
             guard let values = report.labValues else { continue }
             for value in values {
                 let resolved = resolve(value)
                 let key = resolved.name.lowercased()
-                let point = LabTrend.Point(reportID: report.id, date: report.effectiveDate, value: value.value)
-                if var existing = byMarker[key] {
-                    existing.points.append(point)
-                    // Prefer a non-empty unit if we had none yet.
-                    if existing.unit.isEmpty && !value.unit.isEmpty { existing.unit = value.unit }
-                    byMarker[key] = existing
+                let day = cal.startOfDay(for: report.effectiveDate)
+
+                var acc = byMarker[key] ?? MarkerAccumulator(
+                    display: resolved.name, unit: value.unit, concern: resolved.concern
+                )
+                if acc.unit.isEmpty && !value.unit.isEmpty { acc.unit = value.unit }
+
+                // Dedupe by day: if this marker already has a reading
+                // for this date (a duplicate / re-scanned report), keep
+                // the one from the most-recently-scanned report rather
+                // than adding a second point at the same date.
+                let candidate = DayPoint(
+                    value: value.value,
+                    scanTime: report.timestamp,
+                    reportID: report.id,
+                    date: report.effectiveDate
+                )
+                if let existing = acc.byDay[day] {
+                    if report.timestamp >= existing.scanTime { acc.byDay[day] = candidate }
                 } else {
-                    byMarker[key] = (resolved.name, value.unit, resolved.concern, [point])
+                    acc.byDay[day] = candidate
                 }
+                byMarker[key] = acc
             }
         }
 
+        // A trend needs 2+ DISTINCT DATES. Re-scanning the same report
+        // (one date) therefore never creates or extends a trend.
         let trends = byMarker.values
-            .filter { $0.points.count >= 2 }
-            .map { data in
+            .filter { $0.byDay.count >= 2 }
+            .map { acc in
                 LabTrend(
-                    canonicalName: data.display,
-                    unit: data.unit,
-                    concern: data.concern,
-                    points: data.points.sorted { $0.date < $1.date }
+                    canonicalName: acc.display,
+                    unit: acc.unit,
+                    concern: acc.concern,
+                    points: acc.byDay.values
+                        .map { LabTrend.Point(reportID: $0.reportID, date: $0.date, value: $0.value) }
+                        .sorted { $0.date < $1.date }
                 )
             }
 
