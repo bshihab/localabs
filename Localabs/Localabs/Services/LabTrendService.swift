@@ -85,8 +85,10 @@ enum LabTrendService {
     /// seen only once are omitted. Sorted so worsening trends surface
     /// first.
     static func trends(from history: [StructuredReport]) -> [LabTrend] {
-        // Oldest → newest so each trend's points are chronological.
-        let ordered = history.sorted { $0.timestamp < $1.timestamp }
+        // Oldest → newest BY REPORT DATE (the date printed on the
+        // report), not scan time — so scanning an old report after a
+        // newer one still orders the progression correctly.
+        let ordered = history.sorted { $0.effectiveDate < $1.effectiveDate }
 
         // join-key (lowercased canonical/raw name) → accumulator.
         var byMarker: [String: (display: String, unit: String, concern: ConcernDirection, points: [LabTrend.Point])] = [:]
@@ -96,7 +98,7 @@ enum LabTrendService {
             for value in values {
                 let resolved = resolve(value)
                 let key = resolved.name.lowercased()
-                let point = LabTrend.Point(reportID: report.id, date: report.timestamp, value: value.value)
+                let point = LabTrend.Point(reportID: report.id, date: report.effectiveDate, value: value.value)
                 if var existing = byMarker[key] {
                     existing.points.append(point)
                     // Prefer a non-empty unit if we had none yet.

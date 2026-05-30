@@ -35,6 +35,14 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     /// found nothing trackable.
     var labValues: [LabValue]?
 
+    /// The date printed ON the report (collection / draw date), parsed
+    /// from the OCR text at scan time. This — not the scan time — is
+    /// the clinically correct ordering for trends: scanning an old
+    /// report after a newer one should still place it earlier in the
+    /// progression. nil when no date could be parsed; `effectiveDate`
+    /// falls back to `timestamp` in that case.
+    var reportDate: Date?
+
     /// True when the analysis pipeline refused this scan because it
     /// didn't contain any lab values, units, or medical vocabulary.
     /// Drives the "No health content detected" popup in ScanView.
@@ -56,7 +64,8 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         rawText: String = "",
         imagePath: String? = nil,
         additionalPagePaths: [String]? = nil,
-        labValues: [LabValue]? = nil
+        labValues: [LabValue]? = nil,
+        reportDate: Date? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -70,7 +79,12 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         self.imagePath = imagePath
         self.additionalPagePaths = additionalPagePaths
         self.labValues = labValues
+        self.reportDate = reportDate
     }
+
+    /// The date to use for trend ordering: the date printed on the
+    /// report when we could parse it, otherwise the scan time.
+    var effectiveDate: Date { reportDate ?? timestamp }
 
     /// Title shown in History rows + the Dashboard header. Three tiers:
     ///   1. User-set `title` from the History row's Rename action

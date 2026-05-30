@@ -511,9 +511,12 @@ final class InferenceEngine: ObservableObject {
         let hasResumableState = isInferenceCancelled || !streamingText.isEmpty
         let isHardFailure = report.isIncomplete && !hasResumableState
         if !isInferenceCancelled && !report.isIncomplete && !report.wasRejectedAsNonHealth {
-            // Extract structured lab values for cross-report trends
-            // (#28) before persisting — only for finished reports.
+            // Extract structured lab values + the report's own date
+            // for cross-report trends (#28) before persisting — only
+            // for finished reports. The date orders trends by when the
+            // bloodwork was done, not when it was scanned.
             report.labValues = await extractLabValues(from: combinedText)
+            report.reportDate = Self.extractReportDate(from: combinedText)
             LocalStorageService.shared.saveReport(report)
         }
         if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -614,6 +617,7 @@ final class InferenceEngine: ObservableObject {
             let isHardFailure = report.isIncomplete && !hasResumableState
             if !isInferenceCancelled && !report.isIncomplete && !report.wasRejectedAsNonHealth {
                 report.labValues = await extractLabValues(from: combinedText)
+                report.reportDate = Self.extractReportDate(from: combinedText)
                 LocalStorageService.shared.saveReport(report)
             }
             if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -1354,6 +1358,54 @@ final class InferenceEngine: ObservableObject {
             }
         }
         return false
+    }
+
+    /// Parse the report's collection/draw date from the OCR text so
+    /// trends order by WHEN THE BLOODWORK WAS DONE, not when it was
+    /// scanned. Deterministic (NSDataDetector + keyword scoring), no
+    /// LLM. Strategy:
+    ///   - find every date in the text,
+    ///   - skip ones that are a date of birth (preceded by birth/DOB),
+    ///   - skip future dates,
+    ///   - score by nearby keywords: collection/draw/specimen highest,
+    ///     then report/result/printed, then any other date,
+    ///   - return the highest-scoring (tie-break: most recent).
+    /// nil when no usable date is found; the report then falls back to
+    /// scan time via `effectiveDate`.
+    static func extractReportDate(from text: String) -> Date? {
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else {
+            return nil
+        }
+        let ns = text as NSString
+        let matches = detector.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return nil }
+
+        let cutoff = Date().addingTimeInterval(86_400)  // allow 1 day of clock skew
+        let collectKeywords = ["collect", "drawn", "draw", "specimen", "service date", "accession"]
+        let reportKeywords = ["report", "result", "printed", "received", "date"]
+        let dobKeywords = ["birth", "dob", "d.o.b", "born"]
+
+        var best: (date: Date, score: Int)?
+        for m in matches {
+            guard let d = m.date, d <= cutoff else { continue }
+            let start = max(0, m.range.location - 40)
+            let ctx = ns.substring(with: NSRange(location: start, length: m.range.location - start)).lowercased()
+            if dobKeywords.contains(where: { ctx.contains($0) }) { continue }
+
+            let score: Int
+            if collectKeywords.contains(where: { ctx.contains($0) }) { score = 3 }
+            else if reportKeywords.contains(where: { ctx.contains($0) }) { score = 2 }
+            else { score = 1 }
+
+            if let current = best {
+                if score > current.score || (score == current.score && d > current.date) {
+                    best = (d, score)
+                }
+            } else {
+                best = (d, score)
+            }
+        }
+        return best?.date
     }
 
     /// A token that is ENTIRELY a number (optional single decimal),
