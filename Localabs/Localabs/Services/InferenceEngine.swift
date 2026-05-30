@@ -1254,6 +1254,14 @@ final class InferenceEngine: ObservableObject {
         let scanned = Self.scanLabLines(in: ocrText).filter { !present.contains($0.joinKey) }
         values.append(contentsOf: scanned)
 
+        // Drop document-metadata rows that aren't lab tests at all
+        // (Phone, DOB, MRN, Account #, etc.). The deterministic scanner
+        // has no medical sense — a phone number "555-123-4567" looks
+        // like a reference range to it — so we filter obvious non-lab
+        // field names here. This is metadata filtering, not disease
+        // hardcoding.
+        values = values.filter { !Self.isLikelyNonLabField($0.canonicalName) }
+
         // PASS 2 — enrich with medical knowledge (range when the report
         // omitted one, + concern direction), age/sex aware. Separated
         // from transcription so the model isn't juggling two jobs.
@@ -1330,6 +1338,29 @@ final class InferenceEngine: ObservableObject {
             if let d = m.dir { v.concernDirection = d }
             return v
         }
+    }
+
+    /// Whole-word labels that mark a row as document metadata, not a
+    /// lab test — so a phone number, DOB, MRN, etc. doesn't get tracked
+    /// as a fake marker. Matched as whole words (not substrings) so
+    /// "thyroid" isn't caught by "id", etc.
+    private static let nonLabFieldWords: Set<String> = [
+        "phone", "fax", "tel", "telephone", "mobile", "cell",
+        "dob", "birth", "date", "mrn", "account", "acct", "id", "ssn",
+        "zip", "address", "age", "sex", "gender", "patient", "physician",
+        "provider", "ordering", "ordered", "npi", "accession", "page",
+        "room", "bed", "insurance", "policy", "member", "claim", "name",
+        "collected", "received", "reported", "printed", "specimen"
+    ]
+
+    /// True when a test name is really a document-metadata field rather
+    /// than a lab measurement.
+    static func isLikelyNonLabField(_ name: String) -> Bool {
+        let words = name
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        return words.contains { nonLabFieldWords.contains($0) }
     }
 
     /// Units that reliably signal "the number before/after me is a lab
@@ -1411,21 +1442,25 @@ final class InferenceEngine: ObservableObject {
 
     /// True when a token reads as a reference range: "<100", ">40",
     /// "≤5", "≥1", or a number-dash-number span like "70-100" /
-    /// "3.5-5.0" (hyphen or en/em dash).
+    /// "3.5-5.0". A range has EXACTLY two numeric parts — so a phone
+    /// number like "555-123-4567" (three dash-separated groups) is
+    /// rejected, not mistaken for a range.
     static func looksLikeRange(_ token: String) -> Bool {
         let t = token.trimmingCharacters(in: CharacterSet(charactersIn: "()[],;"))
         if let first = t.first, "<>≤≥".contains(first),
            t.dropFirst().contains(where: \.isNumber) {
             return true
         }
-        for sep in ["-", "–", "—"] {
-            if let r = t.range(of: sep) {
-                let before = t[..<r.lowerBound]
-                let after = t[r.upperBound...]
-                if before.contains(where: \.isNumber) && after.contains(where: \.isNumber) {
-                    return true
-                }
+        for sep in ["–", "—", "-"] where t.contains(sep) {
+            let comps = t.components(separatedBy: sep)
+            // Exactly two parts, both parseable as plain numbers.
+            if comps.count == 2,
+               comps.allSatisfy({ Double($0.trimmingCharacters(in: .whitespaces)) != nil }) {
+                return true
             }
+            // A dash that isn't a clean two-number split (phone numbers,
+            // dates) — not a range.
+            return false
         }
         return false
     }
