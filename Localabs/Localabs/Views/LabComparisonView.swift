@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 /// Shows how the user's lab markers have moved across reports (#28).
 /// Presented as a sheet from the Dashboard "what changed" card and
@@ -68,6 +69,8 @@ struct LabTrendRow: View {
                 statusChip
             }
 
+            chart
+
             Text(trajectoryText)
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -79,6 +82,55 @@ struct LabTrendRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Line + point chart of the marker over its report dates —
+    /// same visual language as the Apple Health metric charts.
+    private var chart: some View {
+        Chart(trend.points) { point in
+            AreaMark(
+                x: .value("Date", point.date),
+                y: .value(trend.canonicalName, point.value)
+            )
+            .foregroundStyle(LinearGradient(
+                colors: [lineColor.opacity(0.30), lineColor.opacity(0.02)],
+                startPoint: .top,
+                endPoint: .bottom
+            ))
+            .interpolationMethod(.catmullRom)
+
+            LineMark(
+                x: .value("Date", point.date),
+                y: .value(trend.canonicalName, point.value)
+            )
+            .foregroundStyle(lineColor)
+            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .interpolationMethod(.catmullRom)
+
+            PointMark(
+                x: .value("Date", point.date),
+                y: .value(trend.canonicalName, point.value)
+            )
+            .foregroundStyle(lineColor)
+            .symbolSize(28)
+        }
+        .chartYAxis(.hidden)
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: min(trend.points.count, 4))) { value in
+                AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                    .font(.caption2)
+            }
+        }
+        .frame(height: 90)
+    }
+
+    /// Chart line color follows the marker's status, matching the chip.
+    private var lineColor: Color {
+        switch trend.change {
+        case .improved: return .green
+        case .worsened: return .orange
+        default:        return .blue
+        }
     }
 
     /// "130 → 145 → 160 mg/dL"

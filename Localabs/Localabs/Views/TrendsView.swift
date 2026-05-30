@@ -164,14 +164,25 @@ struct TrendsView: View {
     /// that way).
     private var labValuesSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("YOUR LAB VALUES")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .tracking(1.5)
-                Spacer()
-                Button("See all") { showLabTrends = true }
-                    .font(.subheadline)
+            // Visual break from the Apple Health cards above — this
+            // section is a different data source (your scanned lab
+            // reports), so it gets its own labeled divider.
+            Divider()
+                .padding(.bottom, 4)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Label("FROM YOUR LAB REPORTS", systemImage: "doc.text.magnifyingglass")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .tracking(1.0)
+                    Spacer()
+                    Button("See all") { showLabTrends = true }
+                        .font(.subheadline)
+                }
+                Text("Lab values tracked across your scans — separate from Apple Health.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
 
             VStack(spacing: 0) {
