@@ -102,6 +102,13 @@ struct TrendsView: View {
             .background(.background)
             .navigationTitle("Health Trends")
             .navigationBarTitleDisplayMode(.large)
+            // Recompute on every appearance so deleting a report
+            // elsewhere (History) is reflected here even if this tab
+            // was already loaded in the background. Cheap — a
+            // UserDefaults read + in-memory grouping.
+            .onAppear {
+                labTrends = LabTrendService.trends(from: LocalStorageService.shared.getHistory())
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

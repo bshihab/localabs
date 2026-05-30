@@ -260,6 +260,10 @@ struct DashboardView: View {
             .onChange(of: currentReport?.id) { _, _ in
                 reloadLabTrends()
             }
+            // Recompute on every appearance too, so deleting another
+            // report (e.g. from History) is reflected here without
+            // needing the current report to change.
+            .onAppear { reloadLabTrends() }
             .sheet(isPresented: $showLabTrends) {
                 LabComparisonView(trends: labTrends)
             }
