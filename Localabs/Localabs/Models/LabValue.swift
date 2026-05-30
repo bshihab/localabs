@@ -39,6 +39,46 @@ struct LabValue: Codable, Hashable, Identifiable {
     }
 }
 
+extension LabValue {
+    /// Parse a reference-range string into numeric bounds. Handles
+    /// two-sided ("70-100", "3.5–5.0", "70 to 100"), one-sided
+    /// ("<100", "≤100", ">40", "≥40"), and returns (nil, nil) when
+    /// unparseable. Lab values are non-negative, so the dash is safe
+    /// to treat as a separator.
+    static func parseRange(_ raw: String?) -> (lower: Double?, upper: Double?) {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else {
+            return (nil, nil)
+        }
+        let s = raw.lowercased()
+        if let f = s.first, "<≤".contains(f) {
+            return (nil, firstDouble(s.dropFirst()))
+        }
+        if let f = s.first, ">≥".contains(f) {
+            return (firstDouble(s.dropFirst()), nil)
+        }
+        for sep in ["–", "—", " to ", "-"] {
+            if let r = s.range(of: sep) {
+                let lo = firstDouble(s[..<r.lowerBound])
+                let hi = firstDouble(s[r.upperBound...])
+                if lo != nil || hi != nil { return (lo, hi) }
+            }
+        }
+        return (nil, nil)
+    }
+
+    /// First run of digits (optional single decimal) in a substring.
+    private static func firstDouble<S: StringProtocol>(_ s: S) -> Double? {
+        var num = ""
+        var dot = false
+        for ch in s {
+            if ch.isNumber { num.append(ch) }
+            else if ch == "." && !dot { num.append(ch); dot = true }
+            else if !num.isEmpty { break }
+        }
+        return Double(num)
+    }
+}
+
 /// Which direction of movement is clinically concerning for a marker —
 /// used to classify a cross-report change as improving or worsening.
 enum ConcernDirection: String, Codable {

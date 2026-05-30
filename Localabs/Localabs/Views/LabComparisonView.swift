@@ -71,9 +71,17 @@ struct LabTrendRow: View {
 
             chart
 
-            Text(trajectoryText)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(trajectoryText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                if let range = trend.referenceRangeLabel {
+                    Spacer(minLength: 4)
+                    Text("Normal: \(range)\(trend.unit.isEmpty ? "" : " \(trend.unit)")")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                }
+            }
 
             if trend.isWorseningStreak() {
                 Label("Trending the wrong way across your last \(trend.points.count) reports", systemImage: "exclamationmark.triangle.fill")
@@ -85,9 +93,25 @@ struct LabTrendRow: View {
     }
 
     /// Line + point chart of the marker over its report dates —
-    /// same visual language as the Apple Health metric charts.
+    /// same visual language as the Apple Health metric charts, with
+    /// the lab's normal range drawn as dashed boundary lines.
     private var chart: some View {
-        Chart(trend.points) { point in
+        Chart {
+            // Normal-range boundary lines (the lab's own reference
+            // range). Dashed, muted green, so the user can see at a
+            // glance whether a reading is inside or outside normal.
+            if let lo = trend.referenceLower {
+                RuleMark(y: .value("Lower", lo))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .foregroundStyle(.green.opacity(0.5))
+            }
+            if let hi = trend.referenceUpper {
+                RuleMark(y: .value("Upper", hi))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .foregroundStyle(.green.opacity(0.5))
+            }
+
+            ForEach(trend.points) { point in
             AreaMark(
                 x: .value("Date", point.date),
                 y: .value(trend.canonicalName, point.value)
@@ -113,7 +137,8 @@ struct LabTrendRow: View {
             )
             .foregroundStyle(lineColor)
             .symbolSize(28)
-        }
+            }  // ForEach
+        }  // Chart
         .chartYAxis(.hidden)
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: min(trend.points.count, 4))) { value in

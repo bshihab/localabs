@@ -11,6 +11,12 @@ struct LabTrend: Identifiable {
     /// Chronological points (oldest → newest), one per report that
     /// measured this marker.
     let points: [Point]
+    /// The lab's own reference range for this marker, taken from the
+    /// most recent report that printed one. Drives both the
+    /// classification (range-crossing) and the shaded band on the
+    /// chart. nil bounds → no range available → percentage fallback.
+    let referenceLower: Double?
+    let referenceUpper: Double?
 
     struct Point: Identifiable {
         var id: UUID { reportID }
@@ -19,43 +25,78 @@ struct LabTrend: Identifiable {
         let value: Double
     }
 
-    /// How the latest reading compares to the one before it.
+    /// How the latest reading compares to the first.
     enum Change {
         case improved
         case worsened
         case stable
-        case changed   // moved, but direction-of-concern is ambiguous (midOptimal)
+        case changed   // moved, but direction-of-concern is ambiguous (midOptimal, no range)
     }
 
     var latest: Point? { points.last }
     var previous: Point? { points.count >= 2 ? points[points.count - 2] : nil }
 
-    /// Signed change from the previous reading to the latest.
     var delta: Double? {
         guard let latest, let previous else { return nil }
         return latest.value - previous.value
     }
 
-    /// Classification of the marker's movement. Uses the OVERALL
-    /// change (first reading → latest) rather than just the last step,
-    /// so the chip matches the visible trajectory and the worsening-
-    /// streak warning. Previously this compared only the last two
-    /// points, which could read "Stable" for a marker that had clearly
-    /// declined across all readings (e.g. eGFR 92→88→84, where the
-    /// final 88→84 step alone fell inside the tolerance).
+    var hasRange: Bool { referenceLower != nil || referenceUpper != nil }
+
+    /// How far a value sits OUTSIDE its reference range in the
+    /// clinically concerning direction — 0 when in range (or out only
+    /// in a harmless direction). This is the signal classification
+    /// uses, so movement is judged against the lab's own normal range,
+    /// not an arbitrary percentage. For higher-worse markers only
+    /// being above the upper bound counts; for lower-worse, only below
+    /// the lower bound; for mid-optimal, either side.
+    func badness(_ value: Double) -> Double {
+        switch concern {
+        case .higherWorse:
+            guard let upper = referenceUpper else { return 0 }
+            return max(0, value - upper)
+        case .lowerWorse:
+            guard let lower = referenceLower else { return 0 }
+            return max(0, lower - value)
+        case .midOptimal:
+            var b = 0.0
+            if let upper = referenceUpper { b = max(b, value - upper) }
+            if let lower = referenceLower { b = max(b, lower - value) }
+            return b
+        }
+    }
+
+    /// Classification of the marker's movement, first → latest.
+    /// Prefers the range-crossing signal (badness) when the report
+    /// printed a reference range; falls back to a percentage tolerance
+    /// on the raw change only when no range is available.
     var change: Change? {
         guard let first = points.first, let latest, points.count >= 2 else { return nil }
+        if hasRange {
+            let bl = badness(latest.value)
+            let bf = badness(first.value)
+            let tol = max(0.0001, abs(latest.value) * 0.02)  // ignore tiny wiggle
+            if abs(bl - bf) <= tol { return .stable }
+            return bl > bf ? .worsened : .improved
+        }
         let overall = latest.value - first.value
         let tolerance = abs(latest.value) * marker.stableTolerance
         return concern.classify(delta: overall, tolerance: tolerance)
     }
 
-    /// True when the marker has moved in the concerning direction on
-    /// each of the last `n` consecutive readings (a sustained bad
-    /// trend, not a single blip). Requires at least `n`+1 points.
+    /// A sustained worsening: badness increases on each of the last
+    /// `n` steps AND the latest reading is actually out of range. When
+    /// no range is available, falls back to the old monotonic-direction
+    /// rule. Requires at least `n`+1 points.
     func isWorseningStreak(minSteps n: Int = 2) -> Bool {
-        guard concern != .midOptimal, points.count >= n + 1 else { return false }
-        let recent = points.suffix(n + 1)
+        guard points.count >= n + 1 else { return false }
+        let recent = Array(points.suffix(n + 1))
+        if hasRange {
+            let bs = recent.map { badness($0.value) }
+            let rising = zip(bs, bs.dropFirst()).allSatisfy { $1 > $0 }
+            return rising && badness(latest?.value ?? 0) > 0
+        }
+        guard concern != .midOptimal else { return false }
         let deltas = zip(recent, recent.dropFirst()).map { $1.value - $0.value }
         switch concern {
         case .higherWorse: return deltas.allSatisfy { $0 > 0 }
@@ -64,7 +105,23 @@ struct LabTrend: Identifiable {
         }
     }
 
-    /// The catalog marker backing this trend (for tolerance/concern).
+    /// Human-readable reference range for display, e.g. "70–100",
+    /// "<100", ">40". nil when no range is known.
+    var referenceRangeLabel: String? {
+        switch (referenceLower, referenceUpper) {
+        case let (lo?, hi?): return "\(LabTrend.fmt(lo))–\(LabTrend.fmt(hi))"
+        case let (nil, hi?): return "<\(LabTrend.fmt(hi))"
+        case let (lo?, nil): return ">\(LabTrend.fmt(lo))"
+        default:             return nil
+        }
+    }
+
+    static func fmt(_ v: Double) -> String {
+        v.rounded() == v ? String(format: "%.0f", v) : String(format: "%.1f", v)
+    }
+
+    /// The catalog marker backing this trend (for the percentage
+    /// fallback tolerance).
     private var marker: LabMarker {
         LabMarkerCatalog.markers.first { $0.canonicalName == canonicalName }
             ?? LabMarker(canonicalName: canonicalName, aliases: [], concern: concern, stableTolerance: 0.05)
@@ -97,6 +154,9 @@ enum LabTrendService {
         // One entry per calendar day — collapses duplicate reports
         // (e.g. re-scanning the same report) into a single point.
         var byDay: [Date: DayPoint] = [:]
+        // Reference range from the most recent report that printed one.
+        var refLower: Double?
+        var refUpper: Double?
     }
 
     static func trends(from history: [StructuredReport]) -> [LabTrend] {
@@ -120,6 +180,10 @@ enum LabTrendService {
                     display: resolved.name, unit: value.unit, concern: resolved.concern
                 )
                 if acc.unit.isEmpty && !value.unit.isEmpty { acc.unit = value.unit }
+                // Capture the lab's reference range; since reports are
+                // processed oldest→newest, the newest range wins.
+                let (lo, hi) = LabValue.parseRange(value.referenceRange)
+                if lo != nil || hi != nil { acc.refLower = lo; acc.refUpper = hi }
 
                 // Dedupe by day: if this marker already has a reading
                 // for this date (a duplicate / re-scanned report), keep
@@ -151,7 +215,9 @@ enum LabTrendService {
                     concern: acc.concern,
                     points: acc.byDay.values
                         .map { LabTrend.Point(reportID: $0.reportID, date: $0.date, value: $0.value) }
-                        .sorted { $0.date < $1.date }
+                        .sorted { $0.date < $1.date },
+                    referenceLower: acc.refLower,
+                    referenceUpper: acc.refUpper
                 )
             }
 
