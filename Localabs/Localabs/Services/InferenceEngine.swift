@@ -1273,12 +1273,15 @@ final class InferenceEngine: ObservableObject {
     ]
 
     /// GENERAL deterministic lab-line parser. For each line, finds a
-    /// plain number immediately followed by a known unit, treats the
-    /// text before the number as the test name, and emits a LabValue.
-    /// Requiring a known unit keeps false positives low. Works for any
-    /// marker; catalog matching only supplies the canonical name when
-    /// there is one. Space-separated layouts (PDF text, most OCR) are
-    /// handled; fused "6.4%" tokens are left to the catalog backstop.
+    /// plain number, then accepts it as a lab result if it's followed
+    /// by EITHER a known unit OR a reference-range pattern (e.g.
+    /// "70-100", "<100", ">40"). The range signal is structural, not
+    /// vocabulary-based, so this catches values whose unit ISN'T in
+    /// our list — as long as the report prints a reference range,
+    /// which nearly all do. The text before the number becomes the
+    /// test name. Catalog matching only supplies a canonical name when
+    /// one exists. Space-separated layouts (PDF text, most OCR) are
+    /// handled; fused "6.4%" tokens fall to the catalog backstop.
     static func scanLabLines(in text: String) -> [LabValue] {
         var result: [LabValue] = []
         var seen = Set<String>()
@@ -1288,26 +1291,66 @@ final class InferenceEngine: ObservableObject {
             guard tokens.count >= 2 else { continue }
             for i in 1..<tokens.count {
                 guard let value = plainNumber(tokens[i]) else { continue }
-                let unitTok = (i + 1 < tokens.count ? tokens[i + 1] : "")
+
+                let nextTok = (i + 1 < tokens.count ? tokens[i + 1] : "")
                     .lowercased()
                     .trimmingCharacters(in: CharacterSet(charactersIn: "()[],;"))
-                guard knownLabUnits.contains(unitTok) else { continue }
+                let unitKnown = knownLabUnits.contains(nextTok)
+                // Any token after the value that looks like a reference
+                // range (number-number, <number, >number).
+                let hasRange = tokens.indices.contains(where: { $0 > i && looksLikeRange(tokens[$0]) })
+                guard unitKnown || hasRange else { continue }
+
                 let name = tokens[0..<i].joined(separator: " ")
                     .trimmingCharacters(in: CharacterSet(charactersIn: " :.-\t"))
                 guard name.count >= 2, name.contains(where: \.isLetter) else { continue }
+
+                // Unit: the known unit if present, else the following
+                // token when it's a plausible unit (has a letter, short,
+                // not itself a range) so unlisted units still display.
+                let unit: String
+                if unitKnown {
+                    unit = nextTok
+                } else if nextTok.contains(where: \.isLetter), nextTok.count <= 10, !looksLikeRange(nextTok) {
+                    unit = nextTok
+                } else {
+                    unit = ""
+                }
+
                 let canonical = LabMarkerCatalog.match(rawName: name)?.canonicalName ?? name
                 guard seen.insert(canonical.lowercased()).inserted else { continue }
                 result.append(LabValue(
                     canonicalName: canonical,
                     rawName: name,
                     value: value,
-                    unit: unitTok,
+                    unit: unit,
                     referenceRange: nil
                 ))
                 break  // one value per line
             }
         }
         return result
+    }
+
+    /// True when a token reads as a reference range: "<100", ">40",
+    /// "≤5", "≥1", or a number-dash-number span like "70-100" /
+    /// "3.5-5.0" (hyphen or en/em dash).
+    static func looksLikeRange(_ token: String) -> Bool {
+        let t = token.trimmingCharacters(in: CharacterSet(charactersIn: "()[],;"))
+        if let first = t.first, "<>≤≥".contains(first),
+           t.dropFirst().contains(where: \.isNumber) {
+            return true
+        }
+        for sep in ["-", "–", "—"] {
+            if let r = t.range(of: sep) {
+                let before = t[..<r.lowerBound]
+                let after = t[r.upperBound...]
+                if before.contains(where: \.isNumber) && after.contains(where: \.isNumber) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     /// A token that is ENTIRELY a number (optional single decimal),
