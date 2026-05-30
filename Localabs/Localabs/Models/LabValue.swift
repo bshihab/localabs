@@ -92,8 +92,10 @@ extension LabValue {
     /// Normalized cross-report join key: lowercased, whitespace-
     /// collapsed name. Two reports that print the same test name join;
     /// no hardcoded synonym table.
-    var joinKey: String {
-        canonicalName
+    var joinKey: String { LabValue.normalizeKey(canonicalName) }
+
+    static func normalizeKey(_ name: String) -> String {
+        name
             .lowercased()
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }

@@ -1206,40 +1206,28 @@ final class InferenceEngine: ObservableObject {
         let trimmed = String(ocrText.prefix(3000))  // leave room for output
         guard !trimmed.isEmpty else { return [] }
 
-        // Feed the patient's age + sex so the model can pick the right
-        // sex/age-specific reference range when a report doesn't print
-        // one (e.g. HDL normal is >40 for men but >50 for women,
-        // creatinine differs by sex). When a range IS printed the lab
-        // already adjusted it, so this only matters for the fill-in case.
-        let profile = UserProfile.load()
-        var demoParts: [String] = []
-        if !profile.age.trimmingCharacters(in: .whitespaces).isEmpty {
-            demoParts.append("age \(profile.age.trimmingCharacters(in: .whitespaces))")
-        }
-        let sex = profile.biologicalSex.trimmingCharacters(in: .whitespaces)
-        if !sex.isEmpty { demoParts.append(sex.lowercased()) }
-        let patientLine = demoParts.isEmpty
-            ? ""
-            : "\nPatient: \(demoParts.joined(separator: ", ")). Use this for any age/sex-specific reference range."
-
+        // PASS 1 — transcription only. Copy name/value/unit and the
+        // reference range IF the report prints one (empty otherwise).
+        // Deliberately does NOT ask the model to fill in ranges or judge
+        // direction: a 4B model conflates "extract" with "skip rows I
+        // can't fully complete", and was dropping rangeless rows (e.g.
+        // HDL with no printed range). Pure transcription keeps every row.
         let prompt = """
         <start_of_turn>user
-        You are a precise medical data extractor. From the lab report text below, list EVERY lab measurement that has a numeric value. Output ONE per line in EXACTLY this pipe-delimited format and nothing else:
-        NAME | VALUE | UNIT | RANGE | WORSE
+        You are a precise data extractor. From the lab report text below, list EVERY lab measurement that has a numeric value. Output ONE per line in EXACTLY this pipe-delimited format and nothing else:
+        NAME | VALUE | UNIT | RANGE
 
-        Field rules:
-        - NAME, VALUE, UNIT: copy the test name, number, and unit EXACTLY as written. NEVER invent a value that isn't in the text.
-        - RANGE: copy the report's reference range for this test if it is printed. If the report does NOT print a range, fill in the standard reference range for this test from your medical knowledge, ADJUSTED FOR THE PATIENT'S AGE AND SEX where it matters (e.g. HDL normal is >40 for men but >50 for women; creatinine differs by sex). Always provide a range.
-        - WORSE: which direction is clinically worse for this test — write HIGH if a higher value is worse (e.g. LDL, glucose, blood pressure), LOW if a lower value is worse (e.g. HDL, eGFR, hemoglobin), or MID if both unusually high AND low are concerning (e.g. TSH, sodium, potassium). Use your medical knowledge.
+        Rules:
+        - Copy the test name, number, unit, and the report's reference range EXACTLY as written. NEVER invent a value.
+        - If the unit or range is not printed for a row, leave that field EMPTY but keep the pipes — still output the row.
         - Only include measurements that have a number. Ignore prose, advice, and instructions.
         - If there are no lab measurements at all, output exactly: NONE
 
         Examples:
-        LDL Cholesterol | 145 | mg/dL | <100 | HIGH
-        HDL Cholesterol | 38 | mg/dL | >40 | LOW
-        HbA1c | 6.4 | % | 4.0-5.6 | HIGH
-        TSH | 2.1 | mIU/L | 0.4-4.0 | MID
-        \(patientLine)
+        LDL Cholesterol | 145 | mg/dL | <100
+        HDL Cholesterol | 38 | mg/dL |
+        HbA1c | 6.4 | % | 4.0-5.6
+
         Lab report text:
         \(trimmed)
 
@@ -1250,32 +1238,98 @@ final class InferenceEngine: ObservableObject {
 
         var collected = ""
         // Greedy/deterministic decoding: extraction must be reproducible
-        // (same report → same values) so a re-scan can't drop a marker
-        // from a trend. Translation + chat keep the default sampler.
+        // (same report → same values). Translation + chat keep the
+        // default sampler.
         for await piece in context.predict(prompt: prompt, maxTokens: 400, deterministic: true) {
             if isInferenceCancelled || Task.isCancelled { break }
             collected += piece
         }
-        // Diagnostic: the raw extraction output, so we can see exactly
-        // what the model emitted per field (esp. whether it filled in a
-        // range when the report omitted one). Visible in the Xcode
-        // console after a scan.
         print("[LabExtract] raw model output:\n\(collected)\n[LabExtract] end")
 
-        // The model is the primary extractor — it provides the value,
-        // unit, reference range (printed or from medical knowledge),
-        // and the clinical concern direction. Greedy decoding makes it
-        // reproducible. As a recall backstop we also run a GENERAL
-        // deterministic line scan (structural — finds any "name … number
-        // unit/range" line, no hardcoded disease knowledge) and merge in
-        // any value the model missed. Those backstop values carry no
-        // concern direction (the deterministic pass makes no clinical
-        // judgment); they trend without a good/bad verdict.
+        // Merge in a deterministic structural line scan for recall — it
+        // catches any "name number unit/range" row the model dropped, no
+        // hardcoded disease knowledge.
         var values = Self.parseLabValues(from: collected)
         let present = Set(values.map { $0.joinKey })
         let scanned = Self.scanLabLines(in: ocrText).filter { !present.contains($0.joinKey) }
         values.append(contentsOf: scanned)
-        return values
+
+        // PASS 2 — enrich with medical knowledge (range when the report
+        // omitted one, + concern direction), age/sex aware. Separated
+        // from transcription so the model isn't juggling two jobs.
+        return await enrichLabValues(values)
+    }
+
+    /// Second extraction pass: given the extracted test names + the
+    /// patient's age/sex, ask the model for each test's normal range
+    /// (age/sex-adjusted) and which direction is clinically worse —
+    /// pure medical knowledge, no transcription. Fills a value's range
+    /// only when the report didn't print one (the lab's printed range
+    /// wins), and sets the concern direction.
+    func enrichLabValues(_ values: [LabValue]) async -> [LabValue] {
+        guard let context = llamaContext, !values.isEmpty else { return values }
+
+        let profile = UserProfile.load()
+        var demoParts: [String] = []
+        if !profile.age.trimmingCharacters(in: .whitespaces).isEmpty {
+            demoParts.append("age \(profile.age.trimmingCharacters(in: .whitespaces))")
+        }
+        let sex = profile.biologicalSex.trimmingCharacters(in: .whitespaces)
+        if !sex.isEmpty { demoParts.append(sex.lowercased()) }
+        let demoLine = demoParts.isEmpty ? "" : " for a \(demoParts.joined(separator: ", ")) patient"
+
+        let namesBlock = values.map { $0.canonicalName }.joined(separator: "\n")
+        let prompt = """
+        <start_of_turn>user
+        You are a medical reference assistant. For each lab test below, give its normal reference range\(demoLine) and which direction is clinically worse. Output ONE per line in EXACTLY this format and nothing else:
+        NAME | RANGE | WORSE
+
+        - Copy each NAME back exactly as given.
+        - RANGE: the standard reference range as a short string (e.g. <100, 70-100, >40), adjusted for the patient's age and sex where it matters (e.g. HDL is >40 for men but >50 for women; creatinine differs by sex).
+        - WORSE: HIGH if a higher value is worse, LOW if a lower value is worse, MID if both unusually high and low are concerning.
+
+        Examples:
+        LDL Cholesterol | <100 | HIGH
+        HDL Cholesterol | >40 | LOW
+        eGFR | >60 | LOW
+        Creatinine | 0.6-1.2 | HIGH
+        TSH | 0.4-4.0 | MID
+
+        Tests:
+        \(namesBlock)
+
+        Output:
+        <end_of_turn>
+        <start_of_turn>model
+        """
+
+        var collected = ""
+        for await piece in context.predict(prompt: prompt, maxTokens: 300, deterministic: true) {
+            if isInferenceCancelled || Task.isCancelled { break }
+            collected += piece
+        }
+        print("[LabEnrich] raw model output:\n\(collected)\n[LabEnrich] end")
+
+        // Parse NAME | RANGE | WORSE → keyed by normalized name.
+        var meta: [String: (range: String?, dir: ConcernDirection?)] = [:]
+        for rawLine in collected.split(separator: "\n") {
+            let parts = rawLine
+                .split(separator: "|", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count >= 2, !parts[0].isEmpty else { continue }
+            let range = parts[1].isEmpty ? nil : parts[1]
+            let dir = parts.count > 2 ? ConcernDirection.from(token: parts[2]) : nil
+            meta[LabValue.normalizeKey(parts[0])] = (range, dir)
+        }
+
+        return values.map { value in
+            var v = value
+            guard let m = meta[v.joinKey] else { return v }
+            // Report's printed range wins; only fill in when empty.
+            if (v.referenceRange?.isEmpty ?? true), let r = m.range { v.referenceRange = r }
+            if let d = m.dir { v.concernDirection = d }
+            return v
+        }
     }
 
     /// Units that reliably signal "the number before/after me is a lab
@@ -1435,10 +1489,9 @@ final class InferenceEngine: ObservableObject {
     }
 
 
-    /// Parse the pipe-delimited extraction output
-    /// (NAME | VALUE | UNIT | RANGE | WORSE) into LabValues, deduping
-    /// by normalized name (first occurrence wins). The range and
-    /// concern-direction come straight from the model.
+    /// Parse the transcription output (NAME | VALUE | UNIT | RANGE)
+    /// into LabValues, deduping by normalized name. Concern direction
+    /// is left nil here — it's supplied by the enrichment pass.
     static func parseLabValues(from output: String) -> [LabValue] {
         var result: [LabValue] = []
         var seen = Set<String>()
@@ -1456,7 +1509,6 @@ final class InferenceEngine: ObservableObject {
             guard let value = Double(valueStr) else { continue }
             let unit = parts.count > 2 ? parts[2] : ""
             let range = (parts.count > 3 && !parts[3].isEmpty) ? parts[3] : nil
-            let concern = parts.count > 4 ? ConcernDirection.from(token: parts[4]) : nil
 
             let candidate = LabValue(
                 canonicalName: rawName,
@@ -1464,7 +1516,7 @@ final class InferenceEngine: ObservableObject {
                 value: value,
                 unit: unit,
                 referenceRange: range,
-                concernDirection: concern
+                concernDirection: nil
             )
             // Dedup by normalized name so a panel that lists a marker
             // twice doesn't double-count.
