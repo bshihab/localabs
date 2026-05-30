@@ -16,6 +16,14 @@ public final class LlamaContext: @unchecked Sendable {
     private let vocab: OpaquePointer
     private let context: OpaquePointer
     private let sampler: UnsafeMutablePointer<llama_sampler>
+    /// A second, separate sampler chain that decodes GREEDILY (always
+    /// the most-likely token, no temperature/randomness). Used only by
+    /// `predict(deterministic: true)` for the lab-value extraction
+    /// pass, so the same report always extracts to the same values.
+    /// Built as its OWN chain rather than mutating `sampler` per call
+    /// — the existing chain isn't safe to mutate after init (it trips
+    /// ggml_abort under Metal; see the dist-sampler comment below).
+    private let greedySampler: UnsafeMutablePointer<llama_sampler>
 
     public init(modelPath: String) throws {
         llama_backend_init()
@@ -120,10 +128,30 @@ public final class LlamaContext: @unchecked Sendable {
         // Metal — the chain isn't safe to mutate after init.
         llama_sampler_chain_add(sampler, llama_sampler_init_dist(UInt32.random(in: 1...UInt32.max)))
 
+        // Greedy chain for deterministic extraction. Keep the same
+        // repeat-penalty (guards against "value value value" loops) but
+        // end in a greedy sampler (argmax) instead of temp + dist — so
+        // there's no randomness and the same prompt always yields the
+        // same tokens.
+        let gparams = llama_sampler_chain_default_params()
+        guard let greedySampler = llama_sampler_chain_init(gparams) else {
+            llama_sampler_free(sampler)
+            llama_free(context)
+            llama_free_model(model)
+            throw NSError(
+                domain: "LlamaError",
+                code: 5,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to create greedy sampler chain"]
+            )
+        }
+        llama_sampler_chain_add(greedySampler, llama_sampler_init_penalties(64, 1.1, 0.0, 0.0))
+        llama_sampler_chain_add(greedySampler, llama_sampler_init_greedy())
+
         self.model = model
         self.vocab = vocab
         self.context = context
         self.sampler = sampler
+        self.greedySampler = greedySampler
     }
 
     /// Streams generated token pieces. Each yielded String is the next chunk
@@ -142,7 +170,12 @@ public final class LlamaContext: @unchecked Sendable {
     /// InferenceEngine, so this property is effectively main-isolated.
     private var currentPredictTask: Task<Void, Never>?
 
-    public func predict(prompt: String, maxTokens: Int = 1000) -> AsyncStream<String> {
+    /// `deterministic: true` decodes greedily (no randomness) — used
+    /// for the lab-value extraction pass so the same report always
+    /// extracts identically. Defaults to false: translation, chat, and
+    /// regenerate keep the temperature + random-seed sampler, so their
+    /// output still varies as intended.
+    public func predict(prompt: String, maxTokens: Int = 1000, deterministic: Bool = false) -> AsyncStream<String> {
         // Snapshot the prior task synchronously inside predict() (on
         // main) so the new detached task can await it without racing
         // on the property itself.
@@ -156,7 +189,7 @@ public final class LlamaContext: @unchecked Sendable {
                 if let prior {
                     _ = await prior.value
                 }
-                self.runPredict(prompt: prompt, maxTokens: maxTokens) { piece in
+                self.runPredict(prompt: prompt, maxTokens: maxTokens, deterministic: deterministic) { piece in
                     continuation.yield(piece)
                 }
                 continuation.finish()
@@ -168,11 +201,15 @@ public final class LlamaContext: @unchecked Sendable {
         }
     }
 
-    private func runPredict(prompt: String, maxTokens: Int, onToken: (String) -> Void) {
+    private func runPredict(prompt: String, maxTokens: Int, deterministic: Bool, onToken: (String) -> Void) {
+        // Pick the sampler: greedy (deterministic) for extraction, the
+        // temperature+dist chain otherwise.
+        let activeSampler = deterministic ? greedySampler : sampler
+
         // Each call is independent — clear residual state from prior generations.
         // llama.cpp b7484 replaced llama_kv_cache_clear with the unified memory API.
         llama_memory_clear(llama_get_memory(context), true)
-        llama_sampler_reset(sampler)
+        llama_sampler_reset(activeSampler)
 
         let promptCStr = Array(prompt.utf8CString)
         let nCtx = Int32(llama_n_ctx(context))
@@ -213,10 +250,10 @@ public final class LlamaContext: @unchecked Sendable {
         while generated < maxTokens {
             if Task.isCancelled { return }
 
-            let nextToken = llama_sampler_sample(sampler, context, -1)
+            let nextToken = llama_sampler_sample(activeSampler, context, -1)
             if llama_token_is_eog(vocab, nextToken) { return }
 
-            llama_sampler_accept(sampler, nextToken)
+            llama_sampler_accept(activeSampler, nextToken)
 
             // Convert the token id to its UTF-8 piece. 128 chars covers any
             // single sub-word in Gemma's vocab with room to spare.
@@ -239,6 +276,7 @@ public final class LlamaContext: @unchecked Sendable {
 
     deinit {
         llama_sampler_free(sampler)
+        llama_sampler_free(greedySampler)
         llama_free(context)
         llama_free_model(model)
         llama_backend_free()

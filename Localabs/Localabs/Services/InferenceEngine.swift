@@ -1227,7 +1227,10 @@ final class InferenceEngine: ObservableObject {
         """
 
         var collected = ""
-        for await piece in context.predict(prompt: prompt, maxTokens: 400) {
+        // Greedy/deterministic decoding: extraction must be reproducible
+        // (same report → same values) so a re-scan can't drop a marker
+        // from a trend. Translation + chat keep the default sampler.
+        for await piece in context.predict(prompt: prompt, maxTokens: 400, deterministic: true) {
             if isInferenceCancelled || Task.isCancelled { break }
             collected += piece
         }
