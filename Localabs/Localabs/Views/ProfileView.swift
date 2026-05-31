@@ -89,7 +89,7 @@ struct ProfileView: View {
                    !LocalStorageService.shared.getHistory().isEmpty {
                     // The app-wide banner (ContentView) shows progress;
                     // no separate popup needed.
-                    Task { await engine.reExtractAllReports() }
+                    Task { await engine.reEnrichAllReports() }
                 }
             }) {
                 ProfileEditSheet()

@@ -1346,39 +1346,48 @@ final class InferenceEngine: ObservableObject {
         }
     }
 
-    /// Recompute lab values for every saved report — used when the
-    /// user's age or biological sex changes, since the AI-supplied
-    /// reference ranges (and HDL/creatinine-type sex-specific cutoffs)
-    /// were computed for the old demographics. Re-runs the full
-    /// extraction on each report's stored OCR text (`rawText`), which
-    /// re-reads the printed ranges and re-fills the AI ones with the
-    /// now-current profile. Report-printed ranges are unaffected
-    /// (they're re-derived identically); only the demographic-
-    /// dependent fill-ins change. Runs sequentially so the model isn't
-    /// hit concurrently.
-    func reExtractAllReports() async {
+    /// Recompute the AI-supplied reference ranges (and directions) on
+    /// every saved report when the user's age/sex changes — the
+    /// HDL/creatinine-type sex-specific cutoffs were filled in for the
+    /// old demographics.
+    ///
+    /// Crucially this does NOT re-transcribe the reports — it re-runs
+    /// ONLY the enrichment pass over each report's EXISTING lab values.
+    /// Re-transcribing was dropping markers (the model re-reading the
+    /// report from scratch produced fewer rows); keeping the stored
+    /// values and only refreshing their ranges/directions avoids that
+    /// entirely, and is ~2× faster. Lab-printed ranges
+    /// (rangeFromReport == true) are preserved; only the AI-filled ones
+    /// are cleared and recomputed.
+    ///
+    /// Atomic: computes all updates in memory and commits in a single
+    /// write at the end, so a force-quit mid-run leaves the original
+    /// ranges fully intact.
+    func reEnrichAllReports() async {
         guard llamaContext != nil else { return }
-        // Only reports with extractable content need recomputing.
         let targets = LocalStorageService.shared.getHistory().filter {
-            !$0.rawText.isEmpty && !($0.labValues?.isEmpty ?? true)
+            !($0.labValues?.isEmpty ?? true)
         }
         guard !targets.isEmpty else { return }
 
         rangeRecompute = (0, targets.count)
         defer { rangeRecompute = nil }
 
-        // Compute every report's new values in memory first; do NOT
-        // write as we go. This makes the recompute atomic: if the app
-        // is force-quit (or the run is cancelled) before the commit at
-        // the end, storage is untouched and the original ranges remain.
         var updates: [UUID: [LabValue]] = [:]
         for (index, report) in targets.enumerated() {
-            if Task.isCancelled { return }  // nothing committed → original state kept
-            updates[report.id] = await extractLabValues(from: report.rawText)
+            if Task.isCancelled { return }  // nothing committed → original kept
+            guard let stored = report.labValues else { continue }
+            // Clear ONLY the AI-filled ranges so enrichment refills them
+            // for the new age/sex; keep the lab's printed ranges.
+            let cleared = stored.map { v -> LabValue in
+                var v = v
+                if v.rangeFromReport != true { v.referenceRange = nil }
+                return v
+            }
+            updates[report.id] = await enrichLabValues(cleared)
             rangeRecompute = (index + 1, targets.count)
         }
 
-        // All reports recomputed — commit in one atomic write.
         guard !Task.isCancelled else { return }
         LocalStorageService.shared.applyLabValueUpdates(updates)
     }
@@ -1473,7 +1482,8 @@ final class InferenceEngine: ObservableObject {
                     value: value,
                     unit: unit,
                     referenceRange: rangeTok,
-                    concernDirection: nil
+                    concernDirection: nil,
+                    rangeFromReport: rangeTok != nil
                 )
                 guard seen.insert(candidate.joinKey).inserted else { continue }
                 result.append(candidate)
@@ -1594,7 +1604,10 @@ final class InferenceEngine: ObservableObject {
                 value: value,
                 unit: unit,
                 referenceRange: range,
-                concernDirection: nil
+                concernDirection: nil,
+                // A range here was copied from the report → keep it
+                // across age/sex recomputes.
+                rangeFromReport: range != nil
             )
             // Dedup by normalized name so a panel that lists a marker
             // twice doesn't double-count.

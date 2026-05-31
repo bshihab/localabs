@@ -30,6 +30,13 @@ struct LabValue: Codable, Hashable, Identifiable {
     /// parser, which makes no clinical judgment) → the trend shows the
     /// trajectory without a good/bad verdict.
     var concernDirection: ConcernDirection?
+    /// True when `referenceRange` was printed ON the report (the lab
+    /// already age/sex-adjusted it → never recompute it). False/nil when
+    /// the range was supplied by the model's enrichment pass (depends on
+    /// the user's age/sex → must be recomputed if those change). Lets
+    /// the age/sex recompute re-enrich ONLY the AI-filled ranges without
+    /// re-transcribing the whole report (which was dropping markers).
+    var rangeFromReport: Bool?
 
     init(
         id: UUID = UUID(),
@@ -38,7 +45,8 @@ struct LabValue: Codable, Hashable, Identifiable {
         value: Double,
         unit: String,
         referenceRange: String? = nil,
-        concernDirection: ConcernDirection? = nil
+        concernDirection: ConcernDirection? = nil,
+        rangeFromReport: Bool? = nil
     ) {
         self.id = id
         self.canonicalName = canonicalName
@@ -47,6 +55,7 @@ struct LabValue: Codable, Hashable, Identifiable {
         self.unit = unit
         self.referenceRange = referenceRange
         self.concernDirection = concernDirection
+        self.rangeFromReport = rangeFromReport
     }
 }
 
