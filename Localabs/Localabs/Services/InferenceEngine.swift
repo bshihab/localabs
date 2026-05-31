@@ -66,6 +66,12 @@ final class InferenceEngine: ObservableObject {
     /// futile Resume CTA that would just hit the same failure.
     @Published var lastHardFailureMessage: String?
 
+    /// Progress of the age/sex-change reference-range recompute. nil
+    /// when idle; otherwise (done, total). A global banner observes
+    /// this so the user sees progress wherever they navigate, and the
+    /// trend views refresh when it returns to nil.
+    @Published var rangeRecompute: (done: Int, total: Int)?
+
     private var modelURL: URL { selectedModel.localURL }
 
     /// True when the app has received `didEnterBackgroundNotification`
@@ -1352,14 +1358,21 @@ final class InferenceEngine: ObservableObject {
     /// hit concurrently.
     func reExtractAllReports() async {
         guard llamaContext != nil else { return }
-        for report in LocalStorageService.shared.getHistory() {
+        // Only reports with extractable content need recomputing.
+        let targets = LocalStorageService.shared.getHistory().filter {
+            !$0.rawText.isEmpty && !($0.labValues?.isEmpty ?? true)
+        }
+        guard !targets.isEmpty else { return }
+
+        rangeRecompute = (0, targets.count)
+        defer { rangeRecompute = nil }
+
+        for (index, report) in targets.enumerated() {
             if Task.isCancelled { return }
-            guard !report.rawText.isEmpty,
-                  let existing = report.labValues, !existing.isEmpty
-            else { continue }
             var updated = report
             updated.labValues = await extractLabValues(from: report.rawText)
             LocalStorageService.shared.saveReport(updated)
+            rangeRecompute = (index + 1, targets.count)
         }
     }
 

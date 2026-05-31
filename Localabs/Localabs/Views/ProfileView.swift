@@ -16,8 +16,6 @@ struct ProfileView: View {
     /// tell on dismiss whether they changed (and therefore whether the
     /// saved reports' reference ranges need recomputing).
     @State private var demoBeforeEdit: (age: String, sex: String) = ("", "")
-    /// Drives the "ranges are updating" popup after an age/sex change.
-    @State private var showRangeUpdateNotice = false
     @State private var hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
     @State private var healthMetrics: HealthKitService.HealthMetrics?
     @State private var isRequestingHealth = false
@@ -89,16 +87,12 @@ struct ProfileView: View {
                 let sexChanged = profile.biologicalSex.trimmingCharacters(in: .whitespaces) != demoBeforeEdit.sex
                 if ageChanged || sexChanged,
                    !LocalStorageService.shared.getHistory().isEmpty {
-                    showRangeUpdateNotice = true
+                    // The app-wide banner (ContentView) shows progress;
+                    // no separate popup needed.
                     Task { await engine.reExtractAllReports() }
                 }
             }) {
                 ProfileEditSheet()
-            }
-            .alert("Updating your reference ranges", isPresented: $showRangeUpdateNotice) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Because your age or biological sex changed, Localabs is recomputing the normal ranges on your saved reports so your trends match. This runs on-device and may take a moment — your trends will refresh when it's done.")
             }
             .alert("Delete Model File?", isPresented: $confirmDelete) {
                 Button("Delete", role: .destructive) { engine.deleteSelectedModel() }
