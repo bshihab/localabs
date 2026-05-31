@@ -45,6 +45,25 @@ class LocalStorageService {
         return history
     }
     
+    /// Atomically apply lab-value updates to many reports in a SINGLE
+    /// write. Used by the age/sex range recompute so the operation is
+    /// all-or-nothing: the caller computes every report's new values in
+    /// memory first, then commits here once. If the app is force-quit
+    /// before this call, nothing was written and the original ranges
+    /// are fully intact — no half-updated mixed state.
+    func applyLabValueUpdates(_ updates: [UUID: [LabValue]]) {
+        guard !updates.isEmpty else { return }
+        var history = getHistory()
+        for i in history.indices {
+            if let newValues = updates[history[i].id] {
+                history[i].labValues = newValues
+            }
+        }
+        if let data = try? JSONEncoder().encode(history) {
+            UserDefaults.standard.set(data, forKey: storageKey)
+        }
+    }
+
     /// Gets the most recent past translation to provide longitudinal context to Localabs.
     func getMostRecentPastTranslation() -> String? {
         let history = getHistory()

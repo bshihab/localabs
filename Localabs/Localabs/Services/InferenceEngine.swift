@@ -1367,13 +1367,20 @@ final class InferenceEngine: ObservableObject {
         rangeRecompute = (0, targets.count)
         defer { rangeRecompute = nil }
 
+        // Compute every report's new values in memory first; do NOT
+        // write as we go. This makes the recompute atomic: if the app
+        // is force-quit (or the run is cancelled) before the commit at
+        // the end, storage is untouched and the original ranges remain.
+        var updates: [UUID: [LabValue]] = [:]
         for (index, report) in targets.enumerated() {
-            if Task.isCancelled { return }
-            var updated = report
-            updated.labValues = await extractLabValues(from: report.rawText)
-            LocalStorageService.shared.saveReport(updated)
+            if Task.isCancelled { return }  // nothing committed → original state kept
+            updates[report.id] = await extractLabValues(from: report.rawText)
             rangeRecompute = (index + 1, targets.count)
         }
+
+        // All reports recomputed — commit in one atomic write.
+        guard !Task.isCancelled else { return }
+        LocalStorageService.shared.applyLabValueUpdates(updates)
     }
 
     /// Whole-word labels that mark a row as document metadata, not a
