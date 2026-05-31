@@ -523,6 +523,7 @@ final class InferenceEngine: ObservableObject {
             // bloodwork was done, not when it was scanned.
             report.labValues = await extractLabValues(from: combinedText)
             report.reportDate = Self.extractReportDate(from: combinedText)
+            report.reportPatientAge = Self.extractPatientAge(from: combinedText)
             LocalStorageService.shared.saveReport(report)
         }
         if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -624,6 +625,7 @@ final class InferenceEngine: ObservableObject {
             if !isInferenceCancelled && !report.isIncomplete && !report.wasRejectedAsNonHealth {
                 report.labValues = await extractLabValues(from: combinedText)
                 report.reportDate = Self.extractReportDate(from: combinedText)
+                report.reportPatientAge = Self.extractPatientAge(from: combinedText)
                 LocalStorageService.shared.saveReport(report)
             }
             if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -1564,6 +1566,26 @@ final class InferenceEngine: ObservableObject {
             }
         }
         return best?.date
+    }
+
+    /// Pull the patient age printed on the report ("Age: 68", "Age 68")
+    /// if present, for the someone-else's-report suggestion. Conservative
+    /// — only matches a clear "age <number>" with the digits right after
+    /// the word, so "dosage"/"average"/"page" don't false-match. nil when
+    /// no clear age is printed.
+    static func extractPatientAge(from text: String) -> Int? {
+        guard let re = try? NSRegularExpression(
+            pattern: "\\bage\\b[^0-9A-Za-z]{0,6}([0-9]{1,3})",
+            options: [.caseInsensitive]
+        ) else { return nil }
+        let ns = text as NSString
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        where m.numberOfRanges >= 2 {
+            if let age = Int(ns.substring(with: m.range(at: 1))), (0...130).contains(age) {
+                return age
+            }
+        }
+        return nil
     }
 
     /// A token that is ENTIRELY a number (optional single decimal),

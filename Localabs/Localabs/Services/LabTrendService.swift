@@ -145,10 +145,14 @@ enum LabTrendService {
     }
 
     static func trends(from history: [StructuredReport]) -> [LabTrend] {
-        // Oldest → newest BY REPORT DATE (the date printed on the
-        // report), not scan time — so scanning an old report after a
+        // Exclude reports the user marked as someone else's (e.g. a
+        // parent's labs) — mixing two people's values into one trend
+        // would be misleading and unsafe. Then oldest → newest BY
+        // REPORT DATE (not scan time), so an old report scanned after a
         // newer one still orders the progression correctly.
-        let ordered = history.sorted { $0.effectiveDate < $1.effectiveDate }
+        let ordered = history
+            .filter { $0.isOwnReport }
+            .sorted { $0.effectiveDate < $1.effectiveDate }
         let cal = Calendar.current
 
         // normalized-name join key → accumulator.

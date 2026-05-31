@@ -297,6 +297,19 @@ struct HistoryView: View {
                 }
                 .tint(.primary)
 
+                // Toggle whose report this is. "Someone else's" reports
+                // are kept out of the user's trends + chat context.
+                Button {
+                    toggleOwnership(report)
+                } label: {
+                    if report.isOwnReport {
+                        Label("Mark as someone else's", systemImage: "person.2")
+                    } else {
+                        Label("Mark as mine", systemImage: "person")
+                    }
+                }
+                .tint(.primary)
+
                 Button(role: .destructive) {
                     deleteTarget = report
                 } label: {
@@ -329,6 +342,37 @@ struct HistoryView: View {
         }
     }
 
+    /// Small pill showing whose report this is. Only the "Someone
+    /// else's" state is visually loud (amber) — the common "You" case
+    /// is muted so it doesn't clutter the list.
+    @ViewBuilder
+    private func ownershipTag(for report: StructuredReport) -> some View {
+        if report.isOwnReport {
+            Text("You")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(.secondary.opacity(0.15)))
+                .foregroundStyle(.secondary)
+        } else {
+            Label("Someone else", systemImage: "person.2.fill")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(.orange.opacity(0.18)))
+                .foregroundStyle(.orange)
+        }
+    }
+
+    /// Flip a report between "mine" and "someone else's" and persist.
+    /// Excluded reports drop out of trends + chat context immediately.
+    private func toggleOwnership(_ report: StructuredReport) {
+        var updated = report
+        updated.belongsToOther = report.isOwnReport ? true : false
+        LocalStorageService.shared.saveReport(updated)
+        reports = LocalStorageService.shared.getHistory()
+    }
+
     /// History row: LLM-generated title on top, date+time as a small
     /// secondary subheading, then a 2-line preview of the patient
     /// summary so the user can pick the right report at a glance
@@ -350,9 +394,14 @@ struct HistoryView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
 
-                Text(formatDate(report.timestamp))
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(formatDate(report.timestamp))
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
+                    // Ownership tag — "You" vs "Someone else", so it's
+                    // clear at a glance which reports feed your trends.
+                    ownershipTag(for: report)
+                }
 
                 Text(previewText(for: report))
                     .font(.system(size: 13))

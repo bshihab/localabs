@@ -76,9 +76,12 @@ class LocalStorageService {
     /// This is the core of the "RAG" — it retrieves relevant past data so Localabs
     /// can track trends, congratulate improvements, and flag regressions.
     func buildRAGContext(maxReports: Int = 3) -> String {
-        let history = getHistory()
+        // Exclude reports belonging to someone else (e.g. a scanned
+        // parent's labs) — the chat is about the user's own health, so
+        // another person's values must not enter the shared context.
+        let history = getHistory().filter { $0.isOwnReport }
         guard !history.isEmpty else { return "" }
-        
+
         let reportsToUse = Array(history.prefix(maxReports))
         let formatter = DateFormatter()
         formatter.dateStyle = .medium

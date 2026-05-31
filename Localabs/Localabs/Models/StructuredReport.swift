@@ -65,7 +65,9 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         imagePath: String? = nil,
         additionalPagePaths: [String]? = nil,
         labValues: [LabValue]? = nil,
-        reportDate: Date? = nil
+        reportDate: Date? = nil,
+        belongsToOther: Bool? = nil,
+        reportPatientAge: Int? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -80,11 +82,29 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         self.additionalPagePaths = additionalPagePaths
         self.labValues = labValues
         self.reportDate = reportDate
+        self.belongsToOther = belongsToOther
+        self.reportPatientAge = reportPatientAge
     }
 
     /// The date to use for trend ordering: the date printed on the
     /// report when we could parse it, otherwise the scan time.
     var effectiveDate: Date { reportDate ?? timestamp }
+
+    /// True when this report belongs to someone OTHER than the app
+    /// user (e.g. they scanned a parent's labs). Such reports are
+    /// excluded from the user's cross-report trends and from the chat
+    /// context, and tagged in History. nil/false = the user's own.
+    /// Set manually by the user, optionally prompted by an age mismatch.
+    var belongsToOther: Bool?
+
+    /// The patient age printed on the report, if found at scan time.
+    /// Used only to *suggest* (not decide) that a report might be
+    /// someone else's when it clearly can't match the user's age.
+    var reportPatientAge: Int?
+
+    /// Convenience: whether this report counts toward the user's own
+    /// trends / chat context.
+    var isOwnReport: Bool { belongsToOther != true }
 
     /// Title shown in History rows + the Dashboard header. Three tiers:
     ///   1. User-set `title` from the History row's Rename action

@@ -32,6 +32,9 @@ struct DashboardView: View {
     /// card and the full comparison sheet.
     @State private var labTrends: [LabTrend] = []
     @State private var showLabTrends = false
+    /// Drives the "whose report is this?" prompt when the report's
+    /// printed age clearly can't be the user's.
+    @State private var showOwnershipPrompt = false
 
     var body: some View {
         NavigationStack {
@@ -256,9 +259,18 @@ struct DashboardView: View {
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
                 if report == nil { report = initialReport }
                 reloadLabTrends()
+                maybeSuggestOwnership()
             }
             .onChange(of: currentReport?.id) { _, _ in
                 reloadLabTrends()
+                maybeSuggestOwnership()
+            }
+            .alert("Whose report is this?", isPresented: $showOwnershipPrompt) {
+                Button("It's mine") { setReportOwnership(toOther: false) }
+                Button("Someone else's") { setReportOwnership(toOther: true) }
+                Button("Decide later", role: .cancel) {}
+            } message: {
+                Text("This report lists an age that doesn't match your profile. If it's someone else's (like a family member's), Localabs will keep it out of your health trends and chats.")
             }
             // Recompute on every appearance too, so deleting another
             // report (e.g. from History) is reflected here without
@@ -375,6 +387,36 @@ struct DashboardView: View {
         guard let report = currentReport else { labTrends = []; return }
         let history = LocalStorageService.shared.getHistory()
         labTrends = LabTrendService.comparison(for: report, in: history)
+    }
+
+    /// Prompt the user only when the report's printed age clearly can't
+    /// be theirs (mismatch beyond what the report's own date explains)
+    /// AND they haven't already decided whose report it is.
+    private func maybeSuggestOwnership() {
+        guard let report = currentReport,
+              report.belongsToOther == nil,                 // undecided
+              let reportAge = report.reportPatientAge,
+              let profileAge = Int(UserProfile.load().age.trimmingCharacters(in: .whitespaces))
+        else { return }
+        // Expected age on the report = current age minus how long ago
+        // the report was. A gap beyond ~6 years isn't explained by
+        // report recency → likely a different person.
+        let yearsAgo = Calendar.current.dateComponents([.year], from: report.effectiveDate, to: Date()).year ?? 0
+        let expected = profileAge - max(0, yearsAgo)
+        if abs(reportAge - expected) > 6 {
+            showOwnershipPrompt = true
+        }
+    }
+
+    /// Persist the user's answer to the ownership prompt (or the
+    /// "it's mine" case, which just records the decision so we don't
+    /// ask again).
+    private func setReportOwnership(toOther: Bool) {
+        guard var r = currentReport else { return }
+        r.belongsToOther = toOther
+        report = r
+        LocalStorageService.shared.saveReport(r)
+        reloadLabTrends()
     }
 
     private var currentReport: StructuredReport? {
