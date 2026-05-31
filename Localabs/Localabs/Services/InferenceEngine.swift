@@ -1340,6 +1340,29 @@ final class InferenceEngine: ObservableObject {
         }
     }
 
+    /// Recompute lab values for every saved report — used when the
+    /// user's age or biological sex changes, since the AI-supplied
+    /// reference ranges (and HDL/creatinine-type sex-specific cutoffs)
+    /// were computed for the old demographics. Re-runs the full
+    /// extraction on each report's stored OCR text (`rawText`), which
+    /// re-reads the printed ranges and re-fills the AI ones with the
+    /// now-current profile. Report-printed ranges are unaffected
+    /// (they're re-derived identically); only the demographic-
+    /// dependent fill-ins change. Runs sequentially so the model isn't
+    /// hit concurrently.
+    func reExtractAllReports() async {
+        guard llamaContext != nil else { return }
+        for report in LocalStorageService.shared.getHistory() {
+            if Task.isCancelled { return }
+            guard !report.rawText.isEmpty,
+                  let existing = report.labValues, !existing.isEmpty
+            else { continue }
+            var updated = report
+            updated.labValues = await extractLabValues(from: report.rawText)
+            LocalStorageService.shared.saveReport(updated)
+        }
+    }
+
     /// Whole-word labels that mark a row as document metadata, not a
     /// lab test — so a phone number, DOB, MRN, etc. doesn't get tracked
     /// as a fake marker. Matched as whole words (not substrings) so

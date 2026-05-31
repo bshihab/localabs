@@ -12,6 +12,12 @@ struct ProfileView: View {
     @State private var showProfileEdit = false
     @State private var confirmDelete = false
     @State private var confirmReset = false
+    /// Snapshot of age + sex taken when the edit sheet opens, so we can
+    /// tell on dismiss whether they changed (and therefore whether the
+    /// saved reports' reference ranges need recomputing).
+    @State private var demoBeforeEdit: (age: String, sex: String) = ("", "")
+    /// Drives the "ranges are updating" popup after an age/sex change.
+    @State private var showRangeUpdateNotice = false
     @State private var hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
     @State private var healthMetrics: HealthKitService.HealthMetrics?
     @State private var isRequestingHealth = false
@@ -74,8 +80,25 @@ struct ProfileView: View {
                 // ProfileView reflect those edits without waiting
                 // for the next tab switch.
                 profile = UserProfile.load()
+                // If age or biological sex changed, the AI-supplied
+                // reference ranges on saved reports were computed for
+                // the OLD demographics — recompute them all so the
+                // trends' thresholds match the new age/sex. Warn the
+                // user since it re-runs the on-device model per report.
+                let ageChanged = profile.age.trimmingCharacters(in: .whitespaces) != demoBeforeEdit.age
+                let sexChanged = profile.biologicalSex.trimmingCharacters(in: .whitespaces) != demoBeforeEdit.sex
+                if ageChanged || sexChanged,
+                   !LocalStorageService.shared.getHistory().isEmpty {
+                    showRangeUpdateNotice = true
+                    Task { await engine.reExtractAllReports() }
+                }
             }) {
                 ProfileEditSheet()
+            }
+            .alert("Updating your reference ranges", isPresented: $showRangeUpdateNotice) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Because your age or biological sex changed, Localabs is recomputing the normal ranges on your saved reports so your trends match. This runs on-device and may take a moment — your trends will refresh when it's done.")
             }
             .alert("Delete Model File?", isPresented: $confirmDelete) {
                 Button("Delete", role: .destructive) { engine.deleteSelectedModel() }
@@ -503,6 +526,12 @@ struct ProfileView: View {
     private var actionButtons: some View {
         VStack(spacing: 12) {
             Button {
+                // Snapshot age/sex so onDismiss can detect a change
+                // and trigger a reference-range recompute.
+                demoBeforeEdit = (
+                    profile.age.trimmingCharacters(in: .whitespaces),
+                    profile.biologicalSex.trimmingCharacters(in: .whitespaces)
+                )
                 // Dedicated edit sheet that shows existing field
                 // values + any chat-added entries. The full 4-step
                 // welcome / privacy onboarding flow only re-fires
