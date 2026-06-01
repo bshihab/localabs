@@ -43,11 +43,34 @@ struct DashboardView: View {
     @State private var showOwnershipPrompt = false
 
     var body: some View {
-        NavigationStack {
+        // NOTE: no nested NavigationStack here. DashboardView is always
+        // *pushed* into an existing stack (ScanView post-scan, History
+        // detail), so wrapping it in its own stack created a second
+        // navigation bar and left the post-scan back button as a plain
+        // chevron we couldn't customize. Attaching directly to the
+        // parent stack lets `.navigationBarBackButtonHidden` + the
+        // custom "Scan Another" leading item below actually take effect.
+        Group {
             if isRegenerating {
                 regeneratingView
             } else {
                 dashboardContent
+            }
+        }
+        // Post-scan, the parent (ScanView) pushed us — replace the
+        // generic "‹ Back" chevron with an explicit "Scan Another"
+        // affordance so the user doesn't have to discover the back
+        // gesture. From History, leave the normal back button alone.
+        .navigationBarBackButtonHidden(isPostScan)
+        .toolbar {
+            if isPostScan {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Label("Scan Another", systemImage: "doc.text.viewfinder")
+                    }
+                }
             }
         }
         // .alert (centered modal) instead of .confirmationDialog
