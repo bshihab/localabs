@@ -1568,21 +1568,27 @@ final class InferenceEngine: ObservableObject {
         return best?.date
     }
 
-    /// Pull the patient age printed on the report ("Age: 68", "Age 68")
-    /// if present, for the someone-else's-report suggestion. Conservative
-    /// — only matches a clear "age <number>" with the digits right after
-    /// the word, so "dosage"/"average"/"page" don't false-match. nil when
-    /// no clear age is printed.
+    /// Pull the patient age printed on the report, for the someone-
+    /// else's-report suggestion. Handles the common formats:
+    ///   "Age: 45", "Age 45", "Age/Sex: 45/M", "Age/Gender 45 F"
+    ///   "45-year-old", "45 year old", "45 yo", "45 y/o"
+    /// The `\bage\b` word boundary keeps "dosage"/"average"/"page" from
+    /// false-matching. nil when no clear age is printed.
     static func extractPatientAge(from text: String) -> Int? {
-        guard let re = try? NSRegularExpression(
-            pattern: "\\bage\\b[^0-9A-Za-z]{0,6}([0-9]{1,3})",
-            options: [.caseInsensitive]
-        ) else { return nil }
         let ns = text as NSString
-        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length))
-        where m.numberOfRanges >= 2 {
-            if let age = Int(ns.substring(with: m.range(at: 1))), (0...130).contains(age) {
-                return age
+        let patterns = [
+            // "Age" then within a few chars (allowing "/Sex:" etc.) a number.
+            "\\bage\\b.{0,10}?([0-9]{1,3})",
+            // "45-year-old", "45 year old", "45 yo", "45 y/o".
+            "([0-9]{1,3})\\s*(?:-?\\s*year[\\s-]?old|y/?o\\b)"
+        ]
+        for pattern in patterns {
+            guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length))
+            where m.numberOfRanges >= 2 {
+                if let age = Int(ns.substring(with: m.range(at: 1))), (1...120).contains(age) {
+                    return age
+                }
             }
         }
         return nil
