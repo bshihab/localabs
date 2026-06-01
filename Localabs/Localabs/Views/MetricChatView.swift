@@ -241,7 +241,9 @@ struct MetricChatView: View {
                 .lineLimit(1...4)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .glassEffect(.regular, in: Capsule())
+                // Fixed-radius rounded rect, not a Capsule — see
+                // TrendsChatView: a Capsule clips text as the field grows.
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 
             Button {
                 send(inputText)

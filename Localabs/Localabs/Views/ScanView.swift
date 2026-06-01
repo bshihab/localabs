@@ -132,7 +132,7 @@ struct ScanView: View {
                     // a stale `report` value) across consecutive
                     // scans — making a brand-new multi-page scan
                     // appear to display the prior scan's text.
-                    DashboardView(initialReport: report)
+                    DashboardView(initialReport: report, isPostScan: true)
                         .id(report.id)
                 }
             }

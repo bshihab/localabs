@@ -9,6 +9,12 @@ struct DashboardView: View {
     /// History detail) — in those routes we don't show the badge.
     var selectedTab: Binding<Int>?
     var initialReport: StructuredReport?
+    /// True only when this dashboard was pushed right after a scan
+    /// completed (from ScanView). Drives a clear "Scan Another Report"
+    /// button so the user doesn't have to discover the back chevron.
+    /// Not shown when the dashboard is opened from History.
+    var isPostScan: Bool = false
+    @Environment(\.dismiss) private var dismiss
     @State private var report: StructuredReport?
     /// Same struct InferenceEngine reads when building the analysis
     /// prompt — surfacing it here keeps the dashboard's "what
@@ -248,6 +254,22 @@ struct DashboardView: View {
                             .padding(.top, 4)
                         }
                         .padding(.horizontal)
+                    }
+
+                    if isPostScan {
+                        Button {
+                            // Pops back to ScanView's idle state, ready
+                            // for the next document.
+                            dismiss()
+                        } label: {
+                            Label("Scan Another Report", systemImage: "doc.text.viewfinder")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.horizontal)
+                        .padding(.top, 8)
                     }
 
                     Spacer(minLength: 100)

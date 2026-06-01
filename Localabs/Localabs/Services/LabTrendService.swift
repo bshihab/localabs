@@ -249,4 +249,29 @@ enum LabTrendService {
     static func worseningTrends(for report: StructuredReport, in history: [StructuredReport]) -> [LabTrend] {
         comparison(for: report, in: history).filter { $0.isWorseningStreak() }
     }
+
+    /// Compact text summary of the user's lab trends for injection into
+    /// chat prompts — each tracked marker's trajectory over time, so the
+    /// follow-up chat can actually answer "how have my numbers been doing
+    /// compared to my past reports?". Empty when there's nothing to
+    /// compare. Other-person reports are already filtered out by
+    /// `trends`, so this never leaks an excluded report's values.
+    static func promptSummary(from history: [StructuredReport]) -> String {
+        let all = trends(from: history)
+        guard !all.isEmpty else { return "" }
+        return all.map { t -> String in
+            let nums = t.points.map { LabTrend.fmt($0.value) }.joined(separator: " → ")
+            let unit = t.unit.isEmpty ? "" : " \(t.unit)"
+            let range = t.referenceRangeLabel.map { " (normal \($0))" } ?? ""
+            let verdict: String
+            switch t.change {
+            case .improved: verdict = " — improving"
+            case .worsened: verdict = " — worsening"
+            case .stable:   verdict = " — stable"
+            default:        verdict = ""
+            }
+            return "- \(t.canonicalName): \(nums)\(unit)\(range)\(verdict)"
+        }
+        .joined(separator: "\n        ")
+    }
 }

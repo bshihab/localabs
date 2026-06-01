@@ -1334,7 +1334,9 @@ struct FollowUpChatView: View {
                 .lineLimit(1...4)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .glassEffect(.regular, in: Capsule())
+                // Fixed radius instead of Capsule so the field doesn't
+                // over-round and clip text as it grows to multiple lines.
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 
             // Liquid glass send button. Active state tints blue so
             // it reads as "primary action" while still feeling like

@@ -1682,6 +1682,17 @@ final class InferenceEngine: ObservableObject {
     ) -> AsyncStream<String> {
         let profile = UserProfile.load()
 
+        // Cross-report lab trends so the in-report chat can answer
+        // "how have my numbers changed vs my past reports?". Excluded
+        // (other-person) reports are already filtered out.
+        let labTrendsBlock = LabTrendService.promptSummary(from: LocalStorageService.shared.getHistory())
+        let trendsSection = labTrendsBlock.isEmpty ? "" : """
+
+
+        Your lab values across your past reports (oldest → newest) — you DO have this history, so you can compare to previous reports:
+        \(labTrendsBlock)
+        """
+
         let systemHeader = """
         You are an empathetic medical assistant. The user has a lab report and is asking about specific text they highlighted.
 
@@ -1690,6 +1701,7 @@ final class InferenceEngine: ObservableObject {
 
         The user highlighted this specific text from their lab report:
         "\(selectedText)"
+        \(trendsSection)
 
         User's medical context:
         \(profile.promptContextBullets)\(Self.symptomSection(label: "Symptoms the user has logged recently (last 2 weeks). Use SILENTLY as background context — e.g. to connect the highlighted value to how they've been feeling. Do NOT list these back as findings unless the user asks."))
@@ -1715,7 +1727,7 @@ final class InferenceEngine: ObservableObject {
 
         Keep prose answers to 2–4 sentences. Use simple language. If the highlighted text contains a medical term, define it. If it's a lab value, explain whether it's normal and what it means.
 
-        Memory: within this chat you can reference anything the user said earlier in the conversation. You do NOT have persistent memory across different chats — the user's profile (loaded above) is the only thing that carries between sessions. Don't promise to "remember" things long-term; if the user says something they want saved, tell them they can tap the + button next to the message field to add it to their profile.
+        Memory: you have the user's lab-value history across past reports (shown above) — when asked how their numbers have changed, USE it. You can also reference anything said earlier in this chat. You don't carry memory across DIFFERENT chats, but the report history and profile above are always provided to you. If the user says something save-worthy, tell them they can tap the + button next to the message field to add it to their profile.
         """
 
         var prompt = ""

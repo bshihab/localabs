@@ -232,7 +232,11 @@ struct TrendsChatView: View {
                 .lineLimit(1...4)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .glassEffect(.regular, in: Capsule())
+                // Fixed-radius rounded rect, not a Capsule: a Capsule's
+                // corner radius is half its height, so as the field
+                // grows to multiple lines the rounding balloons and
+                // clips the text. A fixed 22pt radius stays consistent.
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 
             // Liquid-glass send button: tinted blue when there's
             // something to send, plain glass when disabled. Matches
