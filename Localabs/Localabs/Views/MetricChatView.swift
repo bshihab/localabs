@@ -29,6 +29,11 @@ struct MetricChatView: View {
     @State private var messages: [ChatMessage] = []
     @State private var inputText: String = ""
     @State private var isThinking: Bool = false
+    /// The in-flight generation, held so we can hard-cancel it the
+    /// instant the chat is dismissed — otherwise the model keeps
+    /// decoding in the background and the per-word haptics keep
+    /// pulsing after the user has left the sheet.
+    @State private var streamTask: Task<Void, Never>?
     /// Drives the "+" quick-add-to-profile sheet from the input bar.
     @State private var showQuickAddSheet = false
 
@@ -102,6 +107,13 @@ struct MetricChatView: View {
             }
         }
         .presentationContentInteraction(.scrolls)
+        // Leaving the chat mid-generation must stop the model cold:
+        // cancel the streaming task so decoding halts and no further
+        // haptics fire.
+        .onDisappear {
+            streamTask?.cancel()
+            streamTask = nil
+        }
     }
 
     // MARK: - Empty state + starter chips
@@ -308,7 +320,7 @@ struct MetricChatView: View {
         let typicalRange = context.map { $0.typicalRangeLabel(age, sex) }
         let deltaText = formattedDelta
 
-        Task {
+        streamTask = Task {
             let stream = engine.askAboutMetric(
                 question: question,
                 history: history,
@@ -331,6 +343,10 @@ struct MetricChatView: View {
             haptic.prepare()
             var receivedFirstPiece = false
             for await piece in stream {
+                // User left the sheet → stop appending and stop the
+                // haptics immediately. The AsyncStream's onTermination
+                // tears down the underlying decode.
+                if Task.isCancelled { break }
                 if !receivedFirstPiece {
                     isThinking = false
                     receivedFirstPiece = true
@@ -343,6 +359,7 @@ struct MetricChatView: View {
                     haptic.prepare()
                 }
             }
+            if Task.isCancelled { return }
             if let idx = messages.firstIndex(where: { $0.id == aiId }) {
                 messages[idx].isStreaming = false
             }
