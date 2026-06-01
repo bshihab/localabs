@@ -1397,13 +1397,19 @@ struct FollowUpChatView: View {
             // "chat hangs forever on typing dots" bug — one of the
             // 7 concurrent HKQueries could fail to return its
             // continuation, and the whole send would stall waiting.
+            // Look up whose report this is, fresh, so a report marked
+            // "someone else's" (e.g. a parent's) is discussed in
+            // isolation — no other reports, no Apple Health, no profile.
+            let isOwn = LocalStorageService.shared.getHistory()
+                .first(where: { $0.id == reportID })?.isOwnReport ?? true
             let stream = engine.askFollowUp(
                 question: question,
                 history: history,
                 selectedText: selectedText,
                 reportContext: fullReportContext,
                 ocrText: ocrText,
-                healthMetrics: healthMetrics
+                healthMetrics: healthMetrics,
+                isOwnReport: isOwn
             )
             // Selection-feedback generator pulses softly on each word
             // boundary so the chat feels like it's typing into the

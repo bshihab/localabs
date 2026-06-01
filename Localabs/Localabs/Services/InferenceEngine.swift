@@ -1678,42 +1678,58 @@ final class InferenceEngine: ObservableObject {
         selectedText: String,
         reportContext: String,
         ocrText: String,
-        healthMetrics: HealthKitService.HealthMetrics
+        healthMetrics: HealthKitService.HealthMetrics,
+        isOwnReport: Bool = true
     ) -> AsyncStream<String> {
-        let profile = UserProfile.load()
+        // Personal context — the user's lab-trend history, profile,
+        // logged symptoms, and Apple Health — is included ONLY for the
+        // user's own reports. For a report the user marked as someone
+        // else's (e.g. a parent's), none of that applies to the report's
+        // subject, so the chat is scoped strictly to this report alone.
+        let personalContext: String
+        if isOwnReport {
+            let profile = UserProfile.load()
+            let labTrendsBlock = LabTrendService.promptSummary(from: LocalStorageService.shared.getHistory())
+            let trendsSection = labTrendsBlock.isEmpty ? "" : """
 
-        // Cross-report lab trends so the in-report chat can answer
-        // "how have my numbers changed vs my past reports?". Excluded
-        // (other-person) reports are already filtered out.
-        let labTrendsBlock = LabTrendService.promptSummary(from: LocalStorageService.shared.getHistory())
-        let trendsSection = labTrendsBlock.isEmpty ? "" : """
+
+            Your lab values across your past reports (oldest → newest) — you DO have this history, so you can compare to previous reports:
+            \(labTrendsBlock)
+            """
+            personalContext = """
+            \(trendsSection)
+
+            User's medical context:
+            \(profile.promptContextBullets)\(Self.symptomSection(label: "Symptoms the user has logged recently (last 2 weeks). Use SILENTLY as background context — e.g. to connect the highlighted value to how they've been feeling. Do NOT list these back as findings unless the user asks."))
+
+            User's recent Apple Health data (30-day averages — use only if relevant to the question):
+            - Resting HR: \(healthMetrics.avgRestingHR.map { "\($0) bpm" } ?? "Unknown")
+            - Sleep: \(healthMetrics.avgSleepHours.map { "\($0) hours" } ?? "Unknown")
+            - HRV: \(healthMetrics.avgHRV.map { "\($0) ms" } ?? "Unknown")
+            - Daily steps: \(healthMetrics.avgSteps.map { String(format: "%.0f", $0) } ?? "Unknown")
+            - Daily walking distance: \(healthMetrics.avgWalkingDistanceMiles.map { String(format: "%.2f mi", $0) } ?? "Unknown")
+            - Walking speed: \(healthMetrics.avgWalkingSpeedMPH.map { String(format: "%.2f mph", $0) } ?? "Unknown")
+            - Daily exercise minutes: \(healthMetrics.avgExerciseMinutes.map { String(format: "%.0f min", $0) } ?? "Unknown")
+
+            Memory: you have the user's lab-value history across past reports (shown above) — when asked how their numbers have changed, USE it. You can also reference anything said earlier in this chat. If the user says something save-worthy, tell them they can tap the + button next to the message field to add it to their profile.
+            """
+        } else {
+            personalContext = """
 
 
-        Your lab values across your past reports (oldest → newest) — you DO have this history, so you can compare to previous reports:
-        \(labTrendsBlock)
-        """
+            IMPORTANT: This report belongs to SOMEONE ELSE — not the app user (for example a family member the user is helping read it). Answer ONLY from THIS report's own content. Do NOT use or mention the app user's other reports, their medical profile, their logged symptoms, or their Apple Health data — none of that describes the person this report is about. Do not compare to any other report.
+            """
+        }
 
         let systemHeader = """
         You are an empathetic medical assistant. The user has a lab report and is asking about specific text they highlighted.
 
-        Context from their full report analysis:
+        Context from the full report analysis:
         "\(String(reportContext.prefix(500)))"
 
-        The user highlighted this specific text from their lab report:
+        The highlighted text from the report:
         "\(selectedText)"
-        \(trendsSection)
-
-        User's medical context:
-        \(profile.promptContextBullets)\(Self.symptomSection(label: "Symptoms the user has logged recently (last 2 weeks). Use SILENTLY as background context — e.g. to connect the highlighted value to how they've been feeling. Do NOT list these back as findings unless the user asks."))
-
-        User's recent Apple Health data (30-day averages — use only if relevant to the question):
-        - Resting HR: \(healthMetrics.avgRestingHR.map { "\($0) bpm" } ?? "Unknown")
-        - Sleep: \(healthMetrics.avgSleepHours.map { "\($0) hours" } ?? "Unknown")
-        - HRV: \(healthMetrics.avgHRV.map { "\($0) ms" } ?? "Unknown")
-        - Daily steps: \(healthMetrics.avgSteps.map { String(format: "%.0f", $0) } ?? "Unknown")
-        - Daily walking distance: \(healthMetrics.avgWalkingDistanceMiles.map { String(format: "%.2f mi", $0) } ?? "Unknown")
-        - Walking speed: \(healthMetrics.avgWalkingSpeedMPH.map { String(format: "%.2f mph", $0) } ?? "Unknown")
-        - Daily exercise minutes: \(healthMetrics.avgExerciseMinutes.map { String(format: "%.0f min", $0) } ?? "Unknown")
+        \(personalContext)
 
         Format your reply with care for readability:
         - Use **bold** for medical terms, lab values, and important numbers.
@@ -1726,8 +1742,6 @@ final class InferenceEngine: ObservableObject {
         - Add an emoji only when it genuinely aids comprehension (✅ normal, ⚠️ worth discussing, 💊 medications). Max 1–2 per reply.
 
         Keep prose answers to 2–4 sentences. Use simple language. If the highlighted text contains a medical term, define it. If it's a lab value, explain whether it's normal and what it means.
-
-        Memory: you have the user's lab-value history across past reports (shown above) — when asked how their numbers have changed, USE it. You can also reference anything said earlier in this chat. You don't carry memory across DIFFERENT chats, but the report history and profile above are always provided to you. If the user says something save-worthy, tell them they can tap the + button next to the message field to add it to their profile.
         """
 
         var prompt = ""
