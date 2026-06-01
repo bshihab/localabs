@@ -406,7 +406,9 @@ struct DashboardView: View {
     }
 
     private func reloadLabTrends() {
-        guard let report = currentReport else { labTrends = []; return }
+        // No "what changed vs your reports" card for a report that
+        // isn't the user's — it isn't part of their trends at all.
+        guard let report = currentReport, report.isOwnReport else { labTrends = []; return }
         let history = LocalStorageService.shared.getHistory()
         labTrends = LabTrendService.comparison(for: report, in: history)
     }

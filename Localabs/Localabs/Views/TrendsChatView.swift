@@ -21,6 +21,11 @@ struct TrendsChatView: View {
     @State private var messages: [ChatMessage] = []
     @State private var inputText: String = ""
     @State private var isThinking: Bool = false
+    /// The in-flight generation. Held so we can hard-cancel it the
+    /// instant the chat is dismissed — otherwise the model keeps
+    /// decoding in the background and the per-word haptics keep
+    /// pulsing even though the user has left the sheet.
+    @State private var streamTask: Task<Void, Never>?
     /// Drives the "+" quick-add-to-profile sheet from the input
     /// bar. See FollowUpChatView for the design rationale (manual
     /// replaces the previous unreliable auto-detection feature).
@@ -94,6 +99,13 @@ struct TrendsChatView: View {
             }
         }
         .presentationContentInteraction(.scrolls)
+        // Leaving the chat mid-generation must stop the model cold:
+        // cancel the streaming task so decoding halts and no further
+        // haptics fire.
+        .onDisappear {
+            streamTask?.cancel()
+            streamTask = nil
+        }
     }
 
     // MARK: - Empty state + starter chips
@@ -291,7 +303,7 @@ struct TrendsChatView: View {
         let aiId = aiMessage.id
         messages.append(aiMessage)
 
-        Task {
+        streamTask = Task {
             let stream = engine.askAboutTrends(
                 question: question,
                 history: history,
@@ -306,6 +318,10 @@ struct TrendsChatView: View {
             haptic.prepare()
             var receivedFirstPiece = false
             for await piece in stream {
+                // User left the sheet → stop appending and stop the
+                // haptics immediately. The AsyncStream's onTermination
+                // tears down the underlying decode.
+                if Task.isCancelled { break }
                 if !receivedFirstPiece {
                     isThinking = false
                     receivedFirstPiece = true
@@ -318,6 +334,7 @@ struct TrendsChatView: View {
                     haptic.prepare()
                 }
             }
+            if Task.isCancelled { return }
             if let idx = messages.firstIndex(where: { $0.id == aiId }) {
                 messages[idx].isStreaming = false
             }
