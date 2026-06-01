@@ -1,7 +1,14 @@
 import Foundation
 
 struct UserProfile: Codable, Equatable {
+    /// Legacy free-text age. Kept as a fallback for profiles created
+    /// before date-of-birth existed; `dateOfBirth` is now the primary
+    /// source so the age stays current without yearly edits.
     var age: String = ""
+    /// Date of birth — the canonical source of age. Optional so older
+    /// profiles (and users who skip it) decode/work via the `age`
+    /// fallback. `ageYears` derives the current age from this.
+    var dateOfBirth: Date?
     var biologicalSex: String = ""
     /// Free-form text when `biologicalSex == "Other"` — captures the
     /// user's own description instead of just storing the literal word.
@@ -50,9 +57,25 @@ struct UserProfile: Codable, Equatable {
     /// in their 20s vs. a 70-year-old read those numbers differently).
     /// Users who skip these fields see no status pills at all.
     var hasDemographicsForStatusLabels: Bool {
-        !age.trimmingCharacters(in: .whitespaces).isEmpty
+        ageYears != nil
             && !biologicalSex.trimmingCharacters(in: .whitespaces).isEmpty
     }
+
+    /// The user's current age in years — derived from `dateOfBirth`
+    /// when set (so it stays correct as time passes), otherwise parsed
+    /// from the legacy `age` text. nil when neither is available.
+    var ageYears: Int? {
+        if let dob = dateOfBirth {
+            let years = Calendar.current.dateComponents([.year], from: dob, to: Date()).year
+            if let y = years, (0...130).contains(y) { return y }
+        }
+        let trimmed = age.trimmingCharacters(in: .whitespaces)
+        if let n = Int(trimmed), (0...130).contains(n) { return n }
+        return nil
+    }
+
+    /// Age as a display string ("52"), or "" when unknown.
+    var ageDisplay: String { ageYears.map(String.init) ?? "" }
 
     /// One of the user-mutable fields on `UserProfile`. Lives here
     /// (instead of in the now-removed `ProfileSuggestion` module)
@@ -210,7 +233,7 @@ struct UserProfile: Codable, Equatable {
     /// tight on users who only filled in a subset.
     var promptContextBullets: String {
         var lines: [String] = []
-        if !age.isEmpty { lines.append("- Age: \(age)") }
+        if let a = ageYears { lines.append("- Age: \(a)") }
         if !biologicalSex.isEmpty {
             let sex = biologicalSex == "Other" && !biologicalSexOther.isEmpty
                 ? "Other (\(biologicalSexOther))"

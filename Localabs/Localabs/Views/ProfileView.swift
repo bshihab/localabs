@@ -83,7 +83,7 @@ struct ProfileView: View {
                 // the OLD demographics — recompute them all so the
                 // trends' thresholds match the new age/sex. Warn the
                 // user since it re-runs the on-device model per report.
-                let ageChanged = profile.age.trimmingCharacters(in: .whitespaces) != demoBeforeEdit.age
+                let ageChanged = profile.ageDisplay != demoBeforeEdit.age
                 let sexChanged = profile.biologicalSex.trimmingCharacters(in: .whitespaces) != demoBeforeEdit.sex
                 if ageChanged || sexChanged,
                    !LocalStorageService.shared.getHistory().isEmpty {
@@ -281,7 +281,7 @@ struct ProfileView: View {
 
     private var coreInfoCard: some View {
         VStack(spacing: 0) {
-            profileRow(label: "Age", value: profile.age.isEmpty ? "Not set" : profile.age)
+            profileRow(label: "Age", value: profile.ageDisplay.isEmpty ? "Not set" : profile.ageDisplay)
             Divider().padding(.horizontal, 16)
             profileRow(label: "Biological Sex", value: biologicalSexDisplay)
             Divider().padding(.horizontal, 16)
@@ -523,7 +523,7 @@ struct ProfileView: View {
                 // Snapshot age/sex so onDismiss can detect a change
                 // and trigger a reference-range recompute.
                 demoBeforeEdit = (
-                    profile.age.trimmingCharacters(in: .whitespaces),
+                    profile.ageDisplay,
                     profile.biologicalSex.trimmingCharacters(in: .whitespaces)
                 )
                 // Dedicated edit sheet that shows existing field

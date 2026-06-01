@@ -1287,8 +1287,8 @@ final class InferenceEngine: ObservableObject {
 
         let profile = UserProfile.load()
         var demoParts: [String] = []
-        if !profile.age.trimmingCharacters(in: .whitespaces).isEmpty {
-            demoParts.append("age \(profile.age.trimmingCharacters(in: .whitespaces))")
+        if let age = profile.ageYears {
+            demoParts.append("age \(age)")
         }
         let sex = profile.biologicalSex.trimmingCharacters(in: .whitespaces)
         if !sex.isEmpty { demoParts.append(sex.lowercased()) }

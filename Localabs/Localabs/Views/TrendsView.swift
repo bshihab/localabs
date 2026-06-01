@@ -492,7 +492,7 @@ struct TrendsView: View {
             return (entry.0, s, HealthInsights.clinicalContext(for: entry.0))
         }
         let profile = UserProfile.load()
-        let age = Int(profile.age)
+        let age = profile.ageYears
         let sex = HealthInsights.BiologicalSex.from(profile.biologicalSex)
         let insights = HealthInsights.computeInsights(from: withData, age: age, sex: sex, maxInsights: 3)
         if !insights.isEmpty {
@@ -612,7 +612,7 @@ struct TrendsView: View {
         // average pills without that context were the original
         // "vague at best, misleading at worst" problem.
         let profile = UserProfile.load()
-        let age = Int(profile.age)
+        let age = profile.ageYears
         let sex = HealthInsights.BiologicalSex.from(profile.biologicalSex)
         let rawStatus = context?.interpret(series.average, age, sex) ?? .unknown
         let status: HealthInsights.Status = profile.hasDemographicsForStatusLabels ? rawStatus : .unknown
@@ -956,7 +956,7 @@ struct MetricDetailView: View {
         // does, the underlying interpret call is given those values
         // so the threshold is age/sex-bracketed instead of generic.
         let profile = UserProfile.load()
-        let age = Int(profile.age)
+        let age = profile.ageYears
         let sex = HealthInsights.BiologicalSex.from(profile.biologicalSex)
         let rawStatus = context?.interpret(series.average, age, sex) ?? .unknown
         let status: HealthInsights.Status = profile.hasDemographicsForStatusLabels ? rawStatus : .unknown
@@ -1223,7 +1223,7 @@ struct MetricDetailView: View {
         // 25-year-old). Without profile demographics it falls back
         // to the adult-typical band.
         let profile = UserProfile.load()
-        let age = Int(profile.age)
+        let age = profile.ageYears
         let sex = HealthInsights.BiologicalSex.from(profile.biologicalSex)
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {

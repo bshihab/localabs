@@ -7,6 +7,17 @@ struct OnboardingView: View {
     @State private var profile = UserProfile.load()
     @State private var agreed = false
 
+    /// Bridges the optional `dateOfBirth` to the DatePicker. Defaults
+    /// to 30 years ago for display; the set only fires when the user
+    /// actually picks a date, so `dateOfBirth` stays nil (and Next
+    /// stays disabled) until they choose one.
+    private var onboardingDOBBinding: Binding<Date> {
+        Binding(
+            get: { profile.dateOfBirth ?? Calendar.current.date(byAdding: .year, value: -30, to: Date()) ?? Date() },
+            set: { profile.dateOfBirth = $0 }
+        )
+    }
+
     var body: some View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
@@ -72,10 +83,14 @@ struct OnboardingView: View {
                     // its own card, only this small surface re-renders
                     // on each character.
                     VStack(spacing: 0) {
-                        labeledRow("Age") {
-                            TextField("25", text: $profile.age)
-                                .keyboardType(.numberPad)
-                                .multilineTextAlignment(.trailing)
+                        labeledRow("Date of Birth") {
+                            DatePicker(
+                                "",
+                                selection: onboardingDOBBinding,
+                                in: ...Date(),
+                                displayedComponents: .date
+                            )
+                            .labelsHidden()
                         }
                     }
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -111,7 +126,7 @@ struct OnboardingView: View {
                 .padding(.top, 20)
             }
 
-            navigationButtons(back: nil, next: { step = 2 }, nextDisabled: profile.age.isEmpty || profile.biologicalSex.isEmpty)
+            navigationButtons(back: nil, next: { step = 2 }, nextDisabled: profile.dateOfBirth == nil || profile.biologicalSex.isEmpty)
         }
     }
 

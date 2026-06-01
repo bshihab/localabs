@@ -299,7 +299,7 @@ struct MetricChatView: View {
         // their card.
         let context = HealthInsights.clinicalContext(for: label)
         let profile = UserProfile.load()
-        let age = Int(profile.age)
+        let age = profile.ageYears
         let sex = HealthInsights.BiologicalSex.from(profile.biologicalSex)
         let hasDemographics = profile.hasDemographicsForStatusLabels
         let rawStatus = context?.interpret(series.average, age, sex) ?? .unknown

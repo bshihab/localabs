@@ -418,7 +418,7 @@ struct DashboardView: View {
         guard let report = currentReport,
               report.belongsToOther == nil,                 // undecided
               let reportAge = report.reportPatientAge,
-              let profileAge = Int(UserProfile.load().age.trimmingCharacters(in: .whitespaces))
+              let profileAge = UserProfile.load().ageYears
         else { return }
         // Expected age on the report = current age minus how long ago
         // the report was. A gap beyond ~6 years isn't explained by

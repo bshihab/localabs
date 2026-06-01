@@ -24,14 +24,38 @@ struct ProfileEditSheet: View {
         _profile = State(initialValue: UserProfile.load())
     }
 
+    /// DatePicker needs a non-optional Date, so this bridges to the
+    /// optional `dateOfBirth`: shows a sensible default (30 years ago)
+    /// when unset, and writes the user's pick back. Touching the picker
+    /// sets dateOfBirth, which then drives `ageYears`.
+    private var dobBinding: Binding<Date> {
+        Binding(
+            get: { profile.dateOfBirth ?? Calendar.current.date(byAdding: .year, value: -30, to: Date()) ?? Date() },
+            set: { profile.dateOfBirth = $0 }
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("e.g. 34", text: $profile.age)
-                        .keyboardType(.numberPad)
+                    DatePicker(
+                        "Date of birth",
+                        selection: dobBinding,
+                        in: ...Date(),
+                        displayedComponents: .date
+                    )
+                    if let age = profile.ageYears {
+                        HStack {
+                            Text("Age")
+                            Spacer()
+                            Text("\(age)").foregroundStyle(.secondary)
+                        }
+                    }
                 } header: {
-                    Text("Age")
+                    Text("Date of Birth")
+                } footer: {
+                    Text("We use your date of birth to keep your age current automatically — no need to update it each year. Age + biological sex pick the right reference ranges for your labs and Health metrics.")
                 }
 
                 Section {

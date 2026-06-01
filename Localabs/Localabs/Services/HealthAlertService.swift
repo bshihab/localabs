@@ -67,7 +67,7 @@ final class HealthAlertService {
 
         let snapshot = await HealthKitService.shared.getTrends(rangeDays: 30)
         let profile = UserProfile.load()
-        let age = Int(profile.age.trimmingCharacters(in: .whitespaces))
+        let age = profile.ageYears
         let sex = HealthInsights.BiologicalSex.from(profile.biologicalSex)
 
         var fired = 0
