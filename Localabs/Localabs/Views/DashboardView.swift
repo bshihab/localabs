@@ -278,6 +278,7 @@ struct DashboardView: View {
             .scrollContentBackground(.hidden)
             .background(.background)
             .task {
+                if dismissIfReportDeleted() { return }
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
                 if report == nil { report = initialReport }
                 reloadLabTrends()
@@ -296,8 +297,12 @@ struct DashboardView: View {
             }
             // Recompute on every appearance too, so deleting another
             // report (e.g. from History) is reflected here without
-            // needing the current report to change.
-            .onAppear { reloadLabTrends() }
+            // needing the current report to change. Also pop back if
+            // THIS report was the one deleted while we were off-screen.
+            .onAppear {
+                if dismissIfReportDeleted() { return }
+                reloadLabTrends()
+            }
             .sheet(isPresented: $showLabTrends) {
                 LabComparisonView(trends: labTrends)
             }
@@ -416,8 +421,30 @@ struct DashboardView: View {
     /// Prompt the user when the report's printed age OR sex clearly
     /// can't be theirs, and they haven't already decided whose report
     /// it is. Either signal alone is enough.
+    /// If the report this dashboard is showing has been deleted (e.g.
+    /// from the History tab) while the view was off-screen, there's
+    /// nothing left to display — pop back to whatever pushed us rather
+    /// than render a phantom report (and, worse, prompt to mark a
+    /// deleted report as someone else's). Skipped while a scan is still
+    /// in flight, since an in-progress report isn't in history yet.
+    /// Returns true if it dismissed, so callers can bail out.
+    @discardableResult
+    private func dismissIfReportDeleted() -> Bool {
+        guard !engine.isProcessing else { return false }
+        guard let id = (report ?? initialReport)?.id else { return false }
+        let exists = LocalStorageService.shared.getHistory().contains { $0.id == id }
+        if !exists {
+            dismiss()
+            return true
+        }
+        return false
+    }
+
     private func maybeSuggestOwnership() {
         guard let report = currentReport, report.belongsToOther == nil else { return }
+        // Never prompt about a report that no longer exists in storage
+        // (deleted from History before this fired).
+        guard LocalStorageService.shared.getHistory().contains(where: { $0.id == report.id }) else { return }
         let profile = UserProfile.load()
 
         // Age mismatch: a gap beyond ~6 years vs the date-adjusted
