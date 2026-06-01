@@ -1576,21 +1576,27 @@ final class InferenceEngine: ObservableObject {
     /// false-matching. nil when no clear age is printed.
     static func extractPatientAge(from text: String) -> Int? {
         let ns = text as NSString
+        // .dotMatchesLineSeparators so "Age" as a column header and the
+        // number in the cell below (common in table layouts) still match.
+        let opts: NSRegularExpression.Options = [.caseInsensitive, .dotMatchesLineSeparators]
         let patterns = [
-            // "Age" then within a few chars (allowing "/Sex:" etc.) a number.
-            "\\bage\\b.{0,10}?([0-9]{1,3})",
+            // "Age" then within a few chars (allowing "/Sex:", newlines,
+            // etc.) a number.
+            "\\bage\\b.{0,12}?([0-9]{1,3})",
             // "45-year-old", "45 year old", "45 yo", "45 y/o".
             "([0-9]{1,3})\\s*(?:-?\\s*year[\\s-]?old|y/?o\\b)"
         ]
         for pattern in patterns {
-            guard let re = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            guard let re = try? NSRegularExpression(pattern: pattern, options: opts) else { continue }
             for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length))
             where m.numberOfRanges >= 2 {
                 if let age = Int(ns.substring(with: m.range(at: 1))), (1...120).contains(age) {
+                    print("[LabExtract] patient age detected: \(age)")
                     return age
                 }
             }
         }
+        print("[LabExtract] no patient age detected in report text")
         return nil
     }
 
