@@ -524,6 +524,7 @@ final class InferenceEngine: ObservableObject {
             report.labValues = await extractLabValues(from: combinedText)
             report.reportDate = Self.extractReportDate(from: combinedText)
             report.reportPatientAge = Self.extractPatientAge(from: combinedText)
+            report.reportPatientSex = Self.extractPatientSex(from: combinedText)
             LocalStorageService.shared.saveReport(report)
         }
         if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -626,6 +627,7 @@ final class InferenceEngine: ObservableObject {
                 report.labValues = await extractLabValues(from: combinedText)
                 report.reportDate = Self.extractReportDate(from: combinedText)
                 report.reportPatientAge = Self.extractPatientAge(from: combinedText)
+            report.reportPatientSex = Self.extractPatientSex(from: combinedText)
                 LocalStorageService.shared.saveReport(report)
             }
             if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -1597,6 +1599,31 @@ final class InferenceEngine: ObservableObject {
             }
         }
         print("[LabExtract] no patient age detected in report text")
+        return nil
+    }
+
+    /// Pull the patient sex printed on the report ("Sex: M",
+    /// "Sex: Female", "Age/Sex: 45/M", "Gender: Female"). Returns
+    /// "Male"/"Female", or nil when not clearly stated. Used only for
+    /// the someone-else's-report suggestion.
+    static func extractPatientSex(from text: String) -> String? {
+        let ns = text as NSString
+        let opts: NSRegularExpression.Options = [.caseInsensitive, .dotMatchesLineSeparators]
+        // "Sex"/"Gender" then within a few chars M/F/Male/Female.
+        guard let re = try? NSRegularExpression(
+            pattern: "\\b(?:sex|gender)\\b.{0,8}?\\b(male|female|m|f)\\b",
+            options: opts
+        ) else { return nil }
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        where m.numberOfRanges >= 2 {
+            let token = ns.substring(with: m.range(at: 1)).lowercased()
+            switch token {
+            case "male", "m":   print("[LabExtract] patient sex detected: Male");   return "Male"
+            case "female", "f": print("[LabExtract] patient sex detected: Female"); return "Female"
+            default: break
+            }
+        }
+        print("[LabExtract] no patient sex detected in report text")
         return nil
     }
 

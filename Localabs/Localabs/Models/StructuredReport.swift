@@ -67,7 +67,8 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         labValues: [LabValue]? = nil,
         reportDate: Date? = nil,
         belongsToOther: Bool? = nil,
-        reportPatientAge: Int? = nil
+        reportPatientAge: Int? = nil,
+        reportPatientSex: String? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -84,6 +85,7 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         self.reportDate = reportDate
         self.belongsToOther = belongsToOther
         self.reportPatientAge = reportPatientAge
+        self.reportPatientSex = reportPatientSex
     }
 
     /// The date to use for trend ordering: the date printed on the
@@ -101,6 +103,12 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     /// Used only to *suggest* (not decide) that a report might be
     /// someone else's when it clearly can't match the user's age.
     var reportPatientAge: Int?
+
+    /// The patient sex printed on the report ("Male"/"Female"), if
+    /// found at scan time. Like `reportPatientAge`, used only to
+    /// suggest the report might be someone else's when it conflicts
+    /// with the user's biological sex.
+    var reportPatientSex: String?
 
     /// Convenience: whether this report counts toward the user's own
     /// trends / chat context.

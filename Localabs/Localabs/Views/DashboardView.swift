@@ -292,7 +292,7 @@ struct DashboardView: View {
                 Button("Someone else's") { setReportOwnership(toOther: true) }
                 Button("Decide later", role: .cancel) {}
             } message: {
-                Text("This report lists an age that doesn't match your profile. If it's someone else's (like a family member's), Localabs will keep it out of your health trends and chats.")
+                Text("This report's age or sex doesn't match your profile. If it's someone else's (like a family member's), Localabs will keep it out of your health trends and chats.")
             }
             // Recompute on every appearance too, so deleting another
             // report (e.g. from History) is reflected here without
@@ -411,21 +411,34 @@ struct DashboardView: View {
         labTrends = LabTrendService.comparison(for: report, in: history)
     }
 
-    /// Prompt the user only when the report's printed age clearly can't
-    /// be theirs (mismatch beyond what the report's own date explains)
-    /// AND they haven't already decided whose report it is.
+    /// Prompt the user when the report's printed age OR sex clearly
+    /// can't be theirs, and they haven't already decided whose report
+    /// it is. Either signal alone is enough.
     private func maybeSuggestOwnership() {
-        guard let report = currentReport,
-              report.belongsToOther == nil,                 // undecided
-              let reportAge = report.reportPatientAge,
-              let profileAge = UserProfile.load().ageYears
-        else { return }
-        // Expected age on the report = current age minus how long ago
-        // the report was. A gap beyond ~6 years isn't explained by
-        // report recency → likely a different person.
-        let yearsAgo = Calendar.current.dateComponents([.year], from: report.effectiveDate, to: Date()).year ?? 0
-        let expected = profileAge - max(0, yearsAgo)
-        if abs(reportAge - expected) > 6 {
+        guard let report = currentReport, report.belongsToOther == nil else { return }
+        let profile = UserProfile.load()
+
+        // Age mismatch: a gap beyond ~6 years vs the date-adjusted
+        // expected age isn't explained by the report's recency.
+        var ageMismatch = false
+        if let reportAge = report.reportPatientAge, let profileAge = profile.ageYears {
+            let yearsAgo = Calendar.current.dateComponents([.year], from: report.effectiveDate, to: Date()).year ?? 0
+            let expected = profileAge - max(0, yearsAgo)
+            ageMismatch = abs(reportAge - expected) > 6
+        }
+
+        // Sex mismatch: report says one binary sex, profile says the
+        // other. Only fires when both are Male/Female (skip "Other"
+        // and unset, which can't be cleanly compared).
+        var sexMismatch = false
+        let profileSex = profile.biologicalSex.trimmingCharacters(in: .whitespaces).lowercased()
+        if let reportSex = report.reportPatientSex?.lowercased(),
+           ["male", "female"].contains(profileSex),
+           ["male", "female"].contains(reportSex) {
+            sexMismatch = profileSex != reportSex
+        }
+
+        if ageMismatch || sexMismatch {
             showOwnershipPrompt = true
         }
     }

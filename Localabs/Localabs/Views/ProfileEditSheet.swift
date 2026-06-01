@@ -54,8 +54,6 @@ struct ProfileEditSheet: View {
                     }
                 } header: {
                     Text("Date of Birth")
-                } footer: {
-                    Text("We use your date of birth to keep your age current automatically — no need to update it each year. Age + biological sex pick the right reference ranges for your labs and Health metrics.")
                 }
 
                 Section {
