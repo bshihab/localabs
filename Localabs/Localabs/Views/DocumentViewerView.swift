@@ -25,7 +25,10 @@ struct DocumentViewerView: View {
     @State private var lassoPoints: [CGPoint] = []
     @State private var isLassoing = false
     @State private var showInteractionHint = false
-    @State private var hintRingProgress: CGFloat = 0
+    /// Direction of the last page navigation, so the page slide
+    /// transition moves the right way (forward = new page enters from
+    /// the trailing edge).
+    @State private var pageNavForward = true
     @State private var mode: ViewerMode = .browse
     /// Drives the floating "you have selections on other pages"
     /// banner. Auto-shows on page change + on every new selection
@@ -355,6 +358,13 @@ struct DocumentViewerView: View {
             if let image = currentImage {
                 imageScroller(image: image)
                     .id(currentPageIndex) // force fresh layout on page change
+                    // Slide pages in from the side the user navigated
+                    // toward, so arrow taps feel like the fluid paging on
+                    // the dashboard preview rather than an instant swap.
+                    .transition(.asymmetric(
+                        insertion: .move(edge: pageNavForward ? .trailing : .leading),
+                        removal: .move(edge: pageNavForward ? .leading : .trailing)
+                    ))
             } else {
                 emptyState
             }
@@ -362,9 +372,22 @@ struct DocumentViewerView: View {
             bottomControlsStack
 
             if showInteractionHint {
+                // Transparent layer above the document: the first touch
+                // anywhere dismisses the tutorial ("touch to begin"),
+                // then it's gone and the document gets all subsequent
+                // touches. Catches taps AND the start of a drag.
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissHintIfShown() }
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in dismissHintIfShown() }
+                    )
+
                 interactionHint
                     .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                    .allowsHitTesting(false) // taps pass through to the document
+                    .allowsHitTesting(false) // the scrim above handles dismissal
             }
         }
     }
@@ -590,41 +613,24 @@ struct DocumentViewerView: View {
         }
     }
 
-    /// Animated tutorial overlay: a finger SF Symbol orbits a continuously-
-    /// traced circle, mimicking the "press & hold then drag" lasso gesture.
-    /// Uses `.symbolEffect(.pulse)` (Apple's built-in SF Symbol animation)
-    /// for the finger, plus a custom Path.trim animation for the ring.
-    /// Disappears on first interaction or after 6 seconds.
+    /// Animated tutorial overlay. A finger smoothly traces a rounded
+    /// rectangle around a couple of mock lab rows, then the enclosed
+    /// rows highlight — looping. Shows the lasso-to-select gesture far
+    /// more concretely than a finger orbiting an empty circle did.
+    /// Disappears on first touch (handled by the scrim in mainContent)
+    /// or after 6 seconds.
     private var interactionHint: some View {
-        VStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .trim(from: 0, to: hintRingProgress)
-                    .stroke(
-                        Color.blue.opacity(0.85),
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: 92, height: 92)
-                    .shadow(color: .blue.opacity(0.45), radius: 8)
+        VStack(spacing: 16) {
+            LassoDemoView()
 
-                Image(systemName: "hand.point.up.left.fill")
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(.blue)
-                    .symbolEffect(.pulse, options: .repeat(.continuous))
-                    .offset(
-                        x: cos(hintRingProgress * 2 * .pi - .pi / 2) * 46,
-                        y: sin(hintRingProgress * 2 * .pi - .pi / 2) * 46
-                    )
-            }
-
-            Text("Tap Select, then drag to circle text")
+            Text("Drag to circle any values")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.primary)
 
-            Text("Or tap any word in either mode")
+            Text("Then ask Localabs about them — or tap a single word")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .padding(22)
         .glassEffect(
@@ -632,11 +638,6 @@ struct DocumentViewerView: View {
             in: RoundedRectangle(cornerRadius: 24, style: .continuous)
         )
         .padding(.horizontal, 50)
-        .onAppear {
-            withAnimation(.linear(duration: 2.4).repeatForever(autoreverses: false)) {
-                hintRingProgress = 1.0
-            }
-        }
     }
 
     /// Called whenever the user interacts in a way that proves they
@@ -651,7 +652,8 @@ struct DocumentViewerView: View {
     private var pageNavigation: some View {
         HStack(spacing: 14) {
             Button {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                pageNavForward = false
+                withAnimation(.smooth(duration: 0.42)) {
                     currentPageIndex = max(0, currentPageIndex - 1)
                     lassoPoints = []
                     isLassoing = false
@@ -668,7 +670,8 @@ struct DocumentViewerView: View {
                 .frame(minWidth: 110)
 
             Button {
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                pageNavForward = true
+                withAnimation(.smooth(duration: 0.42)) {
                     currentPageIndex = min(scanImages.count - 1, currentPageIndex + 1)
                     lassoPoints = []
                     isLassoing = false
@@ -1492,5 +1495,155 @@ struct FollowUpChatView: View {
             )
         }
         ChatHistoryService.save(toSave, for: reportID)
+    }
+}
+
+// MARK: - Lasso tutorial demo
+
+/// The little looping animation inside the "how to circle" hint. A
+/// finger traces a rounded rectangle around two mock lab rows, the
+/// outline drawing smoothly behind it, then the enclosed rows light up
+/// blue — then it resets and repeats. Self-contained: drives its own
+/// loop via `.task` (auto-cancels when the hint disappears).
+private struct LassoDemoView: View {
+    /// 0→1 progress of the lasso outline + the finger riding its edge.
+    @State private var trace: CGFloat = 0
+    /// Whether the enclosed rows are currently highlighted.
+    @State private var highlighted = false
+
+    // Fixed demo canvas + the rectangle the finger traces, both in the
+    // canvas's local top-left coordinate space.
+    private let canvas = CGSize(width: 200, height: 112)
+    private let lasso = CGRect(x: 14, y: 24, width: 172, height: 56)
+    private let radius: CGFloat = 12
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            // Mock "document" rows.
+            VStack(alignment: .leading, spacing: 10) {
+                demoRow(name: "Glucose", value: "98", unit: "mg/dL", lit: highlighted)
+                demoRow(name: "Cholesterol", value: "184", unit: "mg/dL", lit: highlighted)
+                demoRow(name: "Vitamin D", value: "—", unit: "", lit: false)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 27)
+
+            // Highlight fill behind the two enclosed rows.
+            RoundedRectangle(cornerRadius: radius - 1, style: .continuous)
+                .fill(Color.blue.opacity(highlighted ? 0.16 : 0))
+                .frame(width: lasso.width, height: lasso.height)
+                .offset(x: lasso.minX, y: lasso.minY)
+
+            // The traced lasso outline, drawn progressively.
+            LassoOutline(box: lasso, radius: radius)
+                .trim(from: 0, to: trace)
+                .stroke(Color.blue.opacity(0.9),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                .shadow(color: .blue.opacity(0.4), radius: 5)
+
+            // Finger riding the leading edge of the trace. The
+            // Animatable modifier recomputes the on-path point every
+            // frame so the finger follows the rounded rectangle instead
+            // of cutting straight across as `trace` interpolates.
+            Image(systemName: "hand.point.up.left.fill")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.blue)
+                .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
+                .modifier(FingerAlongLasso(progress: trace, box: lasso, radius: radius))
+                .opacity(highlighted ? 0 : 1)
+        }
+        .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.white)
+                .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+        )
+        .task {
+            // Loop: reset instantly → draw the lasso → highlight + hold.
+            // The reset is unanimated so the finger snaps back to the
+            // start rather than sliding backwards along the path.
+            while !Task.isCancelled {
+                highlighted = false
+                trace = 0
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                if Task.isCancelled { return }
+                withAnimation(.easeInOut(duration: 1.5)) { trace = 1 }
+                try? await Task.sleep(nanoseconds: 1_550_000_000)
+                if Task.isCancelled { return }
+                withAnimation(.easeOut(duration: 0.3)) { highlighted = true }
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+    }
+
+    private func demoRow(name: String, value: String, unit: String, lit: Bool) -> some View {
+        HStack(spacing: 5) {
+            Text(name)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(lit ? Color.blue : Color.primary.opacity(0.75))
+            Spacer(minLength: 6)
+            Text(value)
+                .font(.system(size: 11, weight: .bold).monospacedDigit())
+                .foregroundStyle(lit ? Color.blue : Color.primary.opacity(0.85))
+            if !unit.isEmpty {
+                Text(unit)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// Positions a view at the leading edge of the lasso outline trimmed to
+/// `progress`. Conforming to `Animatable` (with `progress` as the
+/// animatable data) makes SwiftUI re-evaluate the point every frame as
+/// `progress` interpolates — so the finger genuinely follows the curve
+/// rather than lerping straight from start to end.
+private struct FingerAlongLasso: ViewModifier, Animatable {
+    var progress: CGFloat
+    let box: CGRect
+    let radius: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let t = max(0.0001, min(1, progress))
+        let point = LassoOutline(box: box, radius: radius)
+            .path(in: .zero)
+            .trimmedPath(from: 0, to: t)
+            .currentPoint ?? CGPoint(x: box.minX + radius, y: box.minY)
+        return content.position(point)
+    }
+}
+
+/// A rounded-rectangle path drawn from the top edge clockwise, used for
+/// the lasso outline. Returns its path in fixed `box` coordinates
+/// (ignores the layout rect) so the stroke trim and the finger's
+/// `trimmedPath(...).currentPoint` stay in perfect sync.
+private struct LassoOutline: Shape {
+    let box: CGRect
+    let radius: CGFloat
+
+    func path(in _: CGRect) -> Path {
+        let r = radius
+        var p = Path()
+        p.move(to: CGPoint(x: box.minX + r, y: box.minY))
+        p.addLine(to: CGPoint(x: box.maxX - r, y: box.minY))
+        p.addQuadCurve(to: CGPoint(x: box.maxX, y: box.minY + r),
+                       control: CGPoint(x: box.maxX, y: box.minY))
+        p.addLine(to: CGPoint(x: box.maxX, y: box.maxY - r))
+        p.addQuadCurve(to: CGPoint(x: box.maxX - r, y: box.maxY),
+                       control: CGPoint(x: box.maxX, y: box.maxY))
+        p.addLine(to: CGPoint(x: box.minX + r, y: box.maxY))
+        p.addQuadCurve(to: CGPoint(x: box.minX, y: box.maxY - r),
+                       control: CGPoint(x: box.minX, y: box.maxY))
+        p.addLine(to: CGPoint(x: box.minX, y: box.minY + r))
+        p.addQuadCurve(to: CGPoint(x: box.minX + r, y: box.minY),
+                       control: CGPoint(x: box.minX, y: box.minY))
+        p.closeSubpath()
+        return p
     }
 }

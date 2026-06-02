@@ -271,6 +271,10 @@ struct DashboardView: View {
                                     .padding(.vertical, 12)
                             }
                             .buttonStyle(.bordered)
+                            // Unified 20pt corner radius across the three
+                            // dashboard action buttons (this, Regenerate,
+                            // Scan Another) so they read as one family.
+                            .buttonBorderShape(.roundedRectangle(radius: 20))
                             .tint(.orange)
                             .padding(.top, 4)
                         }
@@ -300,6 +304,7 @@ struct DashboardView: View {
                                 .padding(.vertical, 14)
                         }
                         .buttonStyle(.borderedProminent)
+                        .buttonBorderShape(.roundedRectangle(radius: 20))
                         .padding(.horizontal)
                         .padding(.top, 8)
                     }
