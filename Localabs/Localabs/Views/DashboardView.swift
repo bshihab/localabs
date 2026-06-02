@@ -407,13 +407,15 @@ struct DashboardView: View {
         return first.size.width / first.size.height
     }
 
-    /// Inline, swipeable preview of the scanned pages. Swiping flips
-    /// pages (a horizontal paging ScrollView — more reliable nested in
-    /// the dashboard's vertical ScrollView than a `.page` TabView was);
-    /// tapping anywhere on a page opens the full document viewer on that
-    /// same page so the user can pinch-zoom, circle values, and ask
-    /// follow-up questions. Only rendered when `previewImages` is
-    /// non-empty (guarded at the call site).
+    /// Inline preview of the scanned pages inside one blue pane. The
+    /// image area is swipe-only (a horizontal paging ScrollView — more
+    /// reliable nested in the dashboard's vertical ScrollView than a
+    /// `.page` TabView was) so dragging never accidentally navigates
+    /// away. The "Ask More" footer at the bottom is the tap target: it
+    /// opens the full document viewer (on the page currently showing) to
+    /// pinch-zoom, circle values, and ask follow-up questions. Only
+    /// rendered when `previewImages` is non-empty (guarded at the call
+    /// site).
     private var scanPreviewCard: some View {
         // Height derived from the measured width + the document's aspect
         // ratio. Before the first width measurement lands we fall back to
@@ -424,10 +426,12 @@ struct DashboardView: View {
             HStack {
                 Label("Original Document", systemImage: "doc.text.image")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(.white)
                 Spacer()
             }
 
+            // Swipe-only — no tap gesture here, so tapping a page just
+            // settles the scroll instead of navigating.
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 0) {
                     ForEach(Array(previewImages.enumerated()), id: \.offset) { idx, img in
@@ -436,11 +440,6 @@ struct DashboardView: View {
                             .scaledToFit()
                             .frame(width: previewWidth, height: pageHeight)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                docViewerPage = idx
-                                showDocViewer = true
-                            }
                             .id(idx)
                     }
                 }
@@ -453,30 +452,62 @@ struct DashboardView: View {
             // to exactly one viewport (clean paging) at the real aspect.
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { previewWidth = $0 }
 
-            // Apple-style page dots.
+            // Apple-style page dots (white on the blue pane).
             if previewImages.count > 1 {
                 HStack(spacing: 7) {
                     ForEach(previewImages.indices, id: \.self) { i in
                         Circle()
                             .fill(i == currentPreviewPage
-                                  ? Color.primary
-                                  : Color.secondary.opacity(0.3))
+                                  ? Color.white
+                                  : Color.white.opacity(0.4))
                             .frame(width: 7, height: 7)
                     }
                 }
                 .animation(.easeInOut(duration: 0.2), value: currentPreviewPage)
             }
 
-            Label(previewImages.count > 1
-                  ? "Swipe pages · tap to circle values and ask questions"
-                  : "Tap to circle values and ask questions",
-                  systemImage: "hand.tap")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
+            // The tap target — opens the viewer on the page in view.
+            Button {
+                docViewerPage = currentPreviewPage
+                showDocViewer = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "hand.point.up.left.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .symbolEffect(.pulse, options: .repeat(.continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Ask More About Your Scan")
+                            .font(.system(size: 16, weight: .bold))
+                        Text("Open to circle any value and dig deeper")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                .foregroundStyle(.white)
+                .padding(.vertical, 12)
+                .padding(.horizontal, 14)
+                .frame(maxWidth: .infinity)
+                .background(
+                    Color.white.opacity(0.16),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(
+            LinearGradient(
+                colors: [Color.blue, Color.blue.opacity(0.82)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .shadow(color: Color.blue.opacity(0.28), radius: 14, y: 6)
     }
 
     /// Load the saved page JPEGs for the inline preview. These are the
