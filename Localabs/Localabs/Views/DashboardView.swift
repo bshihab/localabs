@@ -44,9 +44,12 @@ struct DashboardView: View {
     /// Loaded page images for the inline, swipeable scan preview. Empty
     /// for reports with no saved scan (e.g. a weekly Health review).
     @State private var previewImages: [UIImage] = []
-    /// Which preview page is currently showing — bound to the TabView so
-    /// tapping opens the document viewer on the very page the user sees.
-    @State private var previewPage = 0
+    /// The page currently snapped into view in the horizontal pager.
+    /// Drives the page dots and which page the viewer opens to on tap.
+    @State private var scrolledPreviewPage: Int?
+    /// Measured content width of the pager, used to size each page to the
+    /// scan's true aspect ratio (vs. a fixed, letterboxed height).
+    @State private var previewWidth: CGFloat = 0
     /// Programmatic push into the full-screen document viewer, opened at
     /// `docViewerPage` when the user taps a preview page.
     @State private var showDocViewer = false
@@ -176,21 +179,14 @@ struct DashboardView: View {
 
                 // Swipeable preview of the original scan, right up top so
                 // the user can see the actual document alongside the
-                // translation. Swipe flips pages; tapping any page opens
-                // the full viewer (on that same page) to circle values
-                // and ask follow-up questions. Hidden for incomplete
+                // translation. Swipe flips pages; tapping anywhere on a
+                // page opens the full viewer (on that same page) to circle
+                // values and ask follow-up questions — one integrated
+                // control, no separate button. Hidden for incomplete
                 // reports and reports with no saved scan.
                 if let report = currentReport, !report.isIncomplete, !previewImages.isEmpty {
                     scanPreviewCard
                         .padding(.horizontal)
-
-                    NavigationLink {
-                        DocumentViewerView(report: report)
-                    } label: {
-                        askMoreCTA
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal)
                 }
 
                 if !labTrends.isEmpty {
@@ -396,48 +392,84 @@ struct DashboardView: View {
 
     // MARK: - Scan preview
 
+    /// The visible page index (0-based), derived from the pager's scroll
+    /// position with a sensible default before the first snap settles.
+    private var currentPreviewPage: Int {
+        scrolledPreviewPage ?? 0
+    }
+
+    /// Aspect ratio (width / height) used to size the pager. Taken from
+    /// the first page so the preview matches the real document shape
+    /// instead of a fixed, letterboxed height. Falls back to US-Letter
+    /// portrait when there's nothing loaded yet.
+    private var previewAspect: CGFloat {
+        guard let first = previewImages.first, first.size.height > 0 else { return 8.5 / 11 }
+        return first.size.width / first.size.height
+    }
+
     /// Inline, swipeable preview of the scanned pages. Swiping flips
-    /// pages; tapping any page opens the full document viewer on that
+    /// pages (a horizontal paging ScrollView — more reliable nested in
+    /// the dashboard's vertical ScrollView than a `.page` TabView was);
+    /// tapping anywhere on a page opens the full document viewer on that
     /// same page so the user can pinch-zoom, circle values, and ask
     /// follow-up questions. Only rendered when `previewImages` is
     /// non-empty (guarded at the call site).
     private var scanPreviewCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // Height derived from the measured width + the document's aspect
+        // ratio. Before the first width measurement lands we fall back to
+        // a reasonable portrait height so layout doesn't jump to zero.
+        let pageHeight = previewWidth > 0 ? previewWidth / previewAspect : 460
+
+        return VStack(spacing: 12) {
             HStack {
                 Label("Original Document", systemImage: "doc.text.image")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.primary)
                 Spacer()
-                if previewImages.count > 1 {
-                    Text("\(previewPage + 1) of \(previewImages.count)")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .contentTransition(.numericText(value: Double(previewPage)))
-                }
             }
 
-            TabView(selection: $previewPage) {
-                ForEach(Array(previewImages.enumerated()), id: \.offset) { idx, img in
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .onTapGesture {
-                            docViewerPage = idx
-                            showDocViewer = true
-                        }
-                        .padding(.bottom, previewImages.count > 1 ? 24 : 0) // room for dots
-                        .tag(idx)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 0) {
+                    ForEach(Array(previewImages.enumerated()), id: \.offset) { idx, img in
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: previewWidth, height: pageHeight)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                docViewerPage = idx
+                                showDocViewer = true
+                            }
+                            .id(idx)
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .tabViewStyle(.page(indexDisplayMode: previewImages.count > 1 ? .automatic : .never))
-            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
-            .frame(height: 440)
-            .animation(.easeInOut(duration: 0.2), value: previewPage)
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $scrolledPreviewPage)
+            .frame(height: pageHeight)
+            // Measure the pager's content width so each page can be sized
+            // to exactly one viewport (clean paging) at the real aspect.
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { previewWidth = $0 }
 
-            Label("Swipe to flip pages · tap to circle values and ask questions",
+            // Apple-style page dots.
+            if previewImages.count > 1 {
+                HStack(spacing: 7) {
+                    ForEach(previewImages.indices, id: \.self) { i in
+                        Circle()
+                            .fill(i == currentPreviewPage
+                                  ? Color.primary
+                                  : Color.secondary.opacity(0.3))
+                            .frame(width: 7, height: 7)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: currentPreviewPage)
+            }
+
+            Label(previewImages.count > 1
+                  ? "Swipe pages · tap to circle values and ask questions"
+                  : "Tap to circle values and ask questions",
                   systemImage: "hand.tap")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -460,7 +492,7 @@ struct DashboardView: View {
             }
         }
         previewImages = images
-        if previewPage >= images.count { previewPage = 0 }
+        scrolledPreviewPage = images.isEmpty ? nil : 0
     }
 
     // MARK: - Lab trend card (#28)
@@ -707,12 +739,12 @@ struct DashboardView: View {
 
     // MARK: - Regenerate CTA
 
-    /// Sized roughly to match the askMoreCTA card so the two read as a
-    /// matched pair. Tints purple so it's visually distinct from the
-    /// blue askMoreCTA below. Tapping triggers the regeneration; while
-    /// in flight the card swaps to a determinate progress view bound
-    /// to engine.analysisProgress so the user sees the same live
-    /// feedback as a fresh scan instead of an opaque spinner.
+    /// Lives at the bottom of the dashboard (it's a rare, destructive
+    /// overwrite). Tints purple to read as distinct from the rest of the
+    /// surface. Tapping triggers the regeneration; while in flight the
+    /// card swaps to a determinate progress view bound to
+    /// engine.analysisProgress so the user sees the same live feedback
+    /// as a fresh scan instead of an opaque spinner.
     private func regenerateCTA(for report: StructuredReport) -> some View {
         Group {
             if isRegenerating {
@@ -904,49 +936,6 @@ struct DashboardView: View {
             .glassEffect(.regular.tint(.orange.opacity(0.18)), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-
-    /// Prominent call-to-action that opens the interactive document viewer.
-    /// Bold gradient, white text, animated SF Symbol — sits right under the
-    /// summary card so it's the first thing the user reaches for after
-    /// reading the AI's translation.
-    private var askMoreCTA: some View {
-        HStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.22))
-                    .frame(width: 52, height: 52)
-                Image(systemName: "hand.point.up.left.fill")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(.white)
-                    // SF Symbols' built-in pulse — Apple's own subtle bounce
-                    // that signals "interactive" without being distracting.
-                    .symbolEffect(.pulse, options: .repeat(.continuous))
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Ask More About Your Scan")
-                    .font(.system(size: 19, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("Circle any value or section to dig deeper")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.88))
-            }
-            Spacer(minLength: 8)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(.white.opacity(0.85))
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(
-            LinearGradient(
-                colors: [Color.blue, Color.blue.opacity(0.82)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: Color.blue.opacity(0.28), radius: 14, y: 6)
     }
 
 }
