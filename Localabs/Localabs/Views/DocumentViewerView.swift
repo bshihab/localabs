@@ -278,6 +278,9 @@ struct DocumentViewerView: View {
             HStack(spacing: 4) {
                 modeButton(.browse, label: "Browse", icon: "hand.draw")
                 modeButton(.select, label: "Select", icon: "lasso")
+                    // Publish the Select button's bounds so the tutorial
+                    // bubble can aim its pointer at it on any screen size.
+                    .anchorPreference(key: SelectButtonBoundsKey.self, value: .bounds) { $0 }
             }
         }
     }
@@ -386,12 +389,25 @@ struct DocumentViewerView: View {
             }
 
             bottomControlsStack
-
-            if showInteractionHint {
-                interactionHint
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                    .allowsHitTesting(false) // the scrim handles dismissal
+        }
+        // Position the tutorial bubble from the Select button's ACTUAL
+        // measured frame, so it always sits just below it and the pointer
+        // lands on it regardless of screen size. The bubble stays
+        // horizontally centered (so it never runs off a narrow screen)
+        // while only the pointer shifts to aim at Select.
+        .overlayPreferenceValue(SelectButtonBoundsKey.self) { anchor in
+            GeometryReader { geo in
+                if showInteractionHint, let anchor {
+                    let sel = geo[anchor]
+                    interactionHint(pointerOffset: sel.midX - geo.size.width / 2)
+                        .frame(width: geo.size.width, alignment: .top)
+                        .padding(.top, sel.maxY + 6)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                }
             }
+            // The whole overlay is non-interactive; the scrim beneath
+            // handles dismissal and the controls stay tappable.
+            .allowsHitTesting(false)
         }
     }
 
@@ -622,7 +638,10 @@ struct DocumentViewerView: View {
     /// more concretely than a finger orbiting an empty circle did.
     /// Disappears on first touch (handled by the scrim in mainContent)
     /// or after 6 seconds.
-    private var interactionHint: some View {
+    /// `pointerOffset` is the bubble pointer's horizontal distance from
+    /// the bubble's center — computed at the call site from the measured
+    /// Select-button position so the arrow lands on it at any screen size.
+    private func interactionHint(pointerOffset: CGFloat) -> some View {
         VStack(spacing: 14) {
             LassoDemoView()
 
@@ -643,17 +662,8 @@ struct DocumentViewerView: View {
         .padding(.top, 22 + 12)
         .glassEffect(
             .regular.tint(.blue.opacity(0.12)),
-            // Pointer aimed at the Select button: the Browse|Select
-            // toggle is centered, each half ~104pt wide, so Select's
-            // center sits ~52pt right of the screen (and the bubble's)
-            // center.
-            in: CalloutBubbleShape(pointerOffset: 52, pointerHeight: 12)
+            in: CalloutBubbleShape(pointerOffset: pointerOffset, pointerHeight: 12)
         )
-        .padding(.horizontal, 24)
-        // Anchor near the top, just below the mode toggle, so the
-        // pointer lands on the Select button.
-        .padding(.top, 52)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     /// Called whenever the user interacts in a way that proves they
@@ -1638,6 +1648,16 @@ private struct FingerAlongLasso: ViewModifier, Animatable {
             .trimmedPath(from: 0, to: t)
             .currentPoint ?? CGPoint(x: box.minX + radius, y: box.minY)
         return content.position(point)
+    }
+}
+
+/// Carries the Select button's bounds up to `mainContent` so the
+/// tutorial bubble can position itself just below it and aim its pointer
+/// at its center — at any screen size.
+private struct SelectButtonBoundsKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = nextValue() ?? value
     }
 }
 
