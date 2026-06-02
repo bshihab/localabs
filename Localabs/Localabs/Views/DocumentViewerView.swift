@@ -402,7 +402,10 @@ struct DocumentViewerView: View {
                     interactionHint(pointerOffset: sel.midX - geo.size.width / 2)
                         .frame(width: geo.size.width, alignment: .top)
                         .padding(.top, sel.maxY + 6)
-                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                        // Scale toward the pointer (its top), so it grows
+                        // out of / retracts into the Select button like an
+                        // Apple popover rather than just blinking away.
+                        .transition(.opacity.combined(with: .scale(scale: 0.6, anchor: .top)))
                 }
             }
             // The whole overlay is non-interactive; the scrim beneath
@@ -618,13 +621,13 @@ struct DocumentViewerView: View {
         // tapped) — returning users barely see it before it fades, new
         // users still get the demo. No persistence; cheap to show.
         if !images.isEmpty {
-            withAnimation(.easeOut(duration: 0.4)) {
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
                 showInteractionHint = true
             }
             Task {
                 try? await Task.sleep(nanoseconds: 6_000_000_000)
                 if showInteractionHint {
-                    withAnimation(.easeOut(duration: 0.5)) {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.74)) {
                         showInteractionHint = false
                     }
                 }
@@ -645,11 +648,11 @@ struct DocumentViewerView: View {
         VStack(spacing: 14) {
             LassoDemoView()
 
-            Text("First tap Select up top")
+            Text("Tap this button to select")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.primary)
 
-            Text("Then drag to circle values — circling only works in Select mode. Or tap a single word.")
+            Text("Then drag to circle values. Or tap a single word.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -670,7 +673,7 @@ struct DocumentViewerView: View {
     /// understand the gesture — dismisses the hint immediately.
     private func dismissHintIfShown() {
         guard showInteractionHint else { return }
-        withAnimation(.easeOut(duration: 0.35)) {
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.74)) {
             showInteractionHint = false
         }
     }
