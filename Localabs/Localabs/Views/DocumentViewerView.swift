@@ -369,13 +369,12 @@ struct DocumentViewerView: View {
                 emptyState
             }
 
-            bottomControlsStack
-
+            // Dismiss scrim sits BELOW the controls so a touch on the
+            // document dismisses the tutorial, but taps on the mode
+            // toggle / page arrows / ask pill still reach those controls
+            // (the toggle dismisses the hint itself). The first touch on
+            // the document — tap OR start of a drag — dismisses.
             if showInteractionHint {
-                // Transparent layer above the document: the first touch
-                // anywhere dismisses the tutorial ("touch to begin"),
-                // then it's gone and the document gets all subsequent
-                // touches. Catches taps AND the start of a drag.
                 Color.black.opacity(0.001)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
@@ -384,10 +383,14 @@ struct DocumentViewerView: View {
                         DragGesture(minimumDistance: 0)
                             .onChanged { _ in dismissHintIfShown() }
                     )
+            }
 
+            bottomControlsStack
+
+            if showInteractionHint {
                 interactionHint
                     .transition(.opacity.combined(with: .scale(scale: 0.92)))
-                    .allowsHitTesting(false) // the scrim above handles dismissal
+                    .allowsHitTesting(false) // the scrim handles dismissal
             }
         }
     }
@@ -620,24 +623,37 @@ struct DocumentViewerView: View {
     /// Disappears on first touch (handled by the scrim in mainContent)
     /// or after 6 seconds.
     private var interactionHint: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             LassoDemoView()
 
-            Text("Drag to circle any values")
+            Text("First tap Select up top")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.primary)
 
-            Text("Then ask Localabs about them — or tap a single word")
+            Text("Then drag to circle values — circling only works in Select mode. Or tap a single word.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(22)
+        .frame(maxWidth: 240)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 22)
+        // Extra top room for the bubble's pointer.
+        .padding(.top, 22 + 12)
         .glassEffect(
-            .regular.tint(.blue.opacity(0.10)),
-            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .regular.tint(.blue.opacity(0.12)),
+            // Pointer aimed at the Select button: the Browse|Select
+            // toggle is centered, each half ~104pt wide, so Select's
+            // center sits ~52pt right of the screen (and the bubble's)
+            // center.
+            in: CalloutBubbleShape(pointerOffset: 52, pointerHeight: 12)
         )
-        .padding(.horizontal, 50)
+        .padding(.horizontal, 24)
+        // Anchor near the top, just below the mode toggle, so the
+        // pointer lands on the Select button.
+        .padding(.top, 52)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     /// Called whenever the user interacts in a way that proves they
@@ -1512,9 +1528,11 @@ private struct LassoDemoView: View {
     @State private var highlighted = false
 
     // Fixed demo canvas + the rectangle the finger traces, both in the
-    // canvas's local top-left coordinate space.
+    // canvas's local top-left coordinate space. The lasso is sized to
+    // enclose ONLY the first two rows — its bottom (68) clears the third
+    // row (Vitamin D, starts ~75) so the trace never cuts through it.
     private let canvas = CGSize(width: 200, height: 112)
-    private let lasso = CGRect(x: 14, y: 24, width: 172, height: 56)
+    private let lasso = CGRect(x: 14, y: 18, width: 172, height: 50)
     private let radius: CGFloat = 12
 
     var body: some View {
@@ -1565,13 +1583,14 @@ private struct LassoDemoView: View {
             while !Task.isCancelled {
                 highlighted = false
                 trace = 0
-                try? await Task.sleep(nanoseconds: 350_000_000)
+                try? await Task.sleep(nanoseconds: 400_000_000)
                 if Task.isCancelled { return }
-                withAnimation(.easeInOut(duration: 1.5)) { trace = 1 }
-                try? await Task.sleep(nanoseconds: 1_550_000_000)
+                // Slower trace so the gesture is easy to follow.
+                withAnimation(.easeInOut(duration: 2.2)) { trace = 1 }
+                try? await Task.sleep(nanoseconds: 2_250_000_000)
                 if Task.isCancelled { return }
                 withAnimation(.easeOut(duration: 0.3)) { highlighted = true }
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
             }
         }
     }
@@ -1619,6 +1638,46 @@ private struct FingerAlongLasso: ViewModifier, Animatable {
             .trimmedPath(from: 0, to: t)
             .currentPoint ?? CGPoint(x: box.minX + radius, y: box.minY)
         return content.position(point)
+    }
+}
+
+/// A rounded-rectangle speech bubble with a triangular pointer on its
+/// TOP edge, used to aim the tutorial at the Select button. `pointerOffset`
+/// is the pointer tip's signed horizontal distance from the bubble's
+/// center. The pointer occupies the top `pointerHeight` of the rect, so
+/// the content should carry that much extra top padding.
+private struct CalloutBubbleShape: Shape {
+    var pointerOffset: CGFloat = 0
+    var pointerWidth: CGFloat = 26
+    var pointerHeight: CGFloat = 12
+    var cornerRadius: CGFloat = 24
+
+    func path(in rect: CGRect) -> Path {
+        let r = min(cornerRadius, (rect.height - pointerHeight) / 2)
+        let bodyTop = rect.minY + pointerHeight
+        let tipX = rect.midX + pointerOffset
+        let halfPW = pointerWidth / 2
+
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX + r, y: bodyTop))
+        // top edge → pointer → continue top edge
+        p.addLine(to: CGPoint(x: tipX - halfPW, y: bodyTop))
+        p.addLine(to: CGPoint(x: tipX, y: rect.minY))
+        p.addLine(to: CGPoint(x: tipX + halfPW, y: bodyTop))
+        p.addLine(to: CGPoint(x: rect.maxX - r, y: bodyTop))
+        p.addArc(center: CGPoint(x: rect.maxX - r, y: bodyTop + r), radius: r,
+                 startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - r))
+        p.addArc(center: CGPoint(x: rect.maxX - r, y: rect.maxY - r), radius: r,
+                 startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+        p.addLine(to: CGPoint(x: rect.minX + r, y: rect.maxY))
+        p.addArc(center: CGPoint(x: rect.minX + r, y: rect.maxY - r), radius: r,
+                 startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+        p.addLine(to: CGPoint(x: rect.minX, y: bodyTop + r))
+        p.addArc(center: CGPoint(x: rect.minX + r, y: bodyTop + r), radius: r,
+                 startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+        p.closeSubpath()
+        return p
     }
 }
 
