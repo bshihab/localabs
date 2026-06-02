@@ -8,6 +8,14 @@ struct DocumentViewerView: View {
     let report: StructuredReport
     @EnvironmentObject var engine: InferenceEngine
 
+    /// Open directly on a specific page. The dashboard's swipeable scan
+    /// preview passes the page the user tapped so the viewer lands on
+    /// the same page they were looking at, rather than snapping to page 1.
+    init(report: StructuredReport, initialPage: Int = 0) {
+        self.report = report
+        _currentPageIndex = State(initialValue: max(0, initialPage))
+    }
+
     @State private var scanImages: [UIImage] = []
     @State private var pageBlocks: [[TextBlock]] = []
     @State private var currentPageIndex: Int = 0

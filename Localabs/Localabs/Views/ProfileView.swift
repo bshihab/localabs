@@ -41,6 +41,9 @@ struct ProfileView: View {
                     coreInfoCard
                         .padding(.horizontal)
 
+                    editProfileButton
+                        .padding(.horizontal)
+
                     knownConditionsCard
                         .padding(.horizontal)
 
@@ -517,28 +520,33 @@ struct ProfileView: View {
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
+    /// "Edit Health Profile" — lives directly under the core-info pane
+    /// (age / sex / blood type) so the edit action sits next to the
+    /// fields it changes, rather than at the very bottom of the screen.
+    private var editProfileButton: some View {
+        Button {
+            // Snapshot age/sex so onDismiss can detect a change
+            // and trigger a reference-range recompute.
+            demoBeforeEdit = (
+                profile.ageDisplay,
+                profile.biologicalSex.trimmingCharacters(in: .whitespaces)
+            )
+            // Dedicated edit sheet that shows existing field
+            // values + any chat-added entries. The full 4-step
+            // welcome / privacy onboarding flow only re-fires
+            // if the user taps Reset App below (which clears
+            // `onboarding_complete` and forces it on next launch).
+            showProfileEdit = true
+        } label: {
+            Label("Edit Health Profile", systemImage: "pencil")
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.glass)
+    }
+
     private var actionButtons: some View {
         VStack(spacing: 12) {
-            Button {
-                // Snapshot age/sex so onDismiss can detect a change
-                // and trigger a reference-range recompute.
-                demoBeforeEdit = (
-                    profile.ageDisplay,
-                    profile.biologicalSex.trimmingCharacters(in: .whitespaces)
-                )
-                // Dedicated edit sheet that shows existing field
-                // values + any chat-added entries. The full 4-step
-                // welcome / privacy onboarding flow only re-fires
-                // if the user taps Reset App below (which clears
-                // `onboarding_complete` and forces it on next launch).
-                showProfileEdit = true
-            } label: {
-                Label("Edit Health Profile", systemImage: "pencil")
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-            }
-            .buttonStyle(.glass)
-
             Button(role: .destructive) {
                 confirmReset = true
             } label: {

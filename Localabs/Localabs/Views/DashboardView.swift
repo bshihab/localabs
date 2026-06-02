@@ -41,6 +41,16 @@ struct DashboardView: View {
     /// Drives the "whose report is this?" prompt when the report's
     /// printed age clearly can't be the user's.
     @State private var showOwnershipPrompt = false
+    /// Loaded page images for the inline, swipeable scan preview. Empty
+    /// for reports with no saved scan (e.g. a weekly Health review).
+    @State private var previewImages: [UIImage] = []
+    /// Which preview page is currently showing — bound to the TabView so
+    /// tapping opens the document viewer on the very page the user sees.
+    @State private var previewPage = 0
+    /// Programmatic push into the full-screen document viewer, opened at
+    /// `docViewerPage` when the user taps a preview page.
+    @State private var showDocViewer = false
+    @State private var docViewerPage = 0
 
     var body: some View {
         // NOTE: no nested NavigationStack here. DashboardView is always
@@ -164,22 +174,29 @@ struct DashboardView: View {
                 summaryCard
                     .padding(.horizontal)
 
+                // Swipeable preview of the original scan, right up top so
+                // the user can see the actual document alongside the
+                // translation. Swipe flips pages; tapping any page opens
+                // the full viewer (on that same page) to circle values
+                // and ask follow-up questions. Hidden for incomplete
+                // reports and reports with no saved scan.
+                if let report = currentReport, !report.isIncomplete, !previewImages.isEmpty {
+                    scanPreviewCard
+                        .padding(.horizontal)
+
+                    NavigationLink {
+                        DocumentViewerView(report: report)
+                    } label: {
+                        askMoreCTA
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal)
+                }
+
                 if !labTrends.isEmpty {
                     labTrendCard
                         .padding(.horizontal)
                 }
-
-                    // Prominent "Regenerate Translation" CTA — sits
-                    // between the summary card and Ask More, sized
-                    // slightly smaller than askMoreCTA so the visual
-                    // hierarchy puts the document viewer first. When
-                    // tapped it transforms in place into a progress
-                    // bar bound to engine.analysisProgress so the user
-                    // gets the same live feedback as a fresh analysis.
-                    if let report = currentReport, !report.isIncomplete {
-                        regenerateCTA(for: report)
-                            .padding(.horizontal)
-                    }
 
                     // Apple Health used to inform this analysis —
                     // shows exactly the metrics InferenceEngine read
@@ -202,21 +219,6 @@ struct DashboardView: View {
                     if let tabBinding = selectedTab, engine.isPaused {
                         pausedAnalysisBadge(switchTo: tabBinding)
                             .padding(.horizontal)
-                    }
-
-                    // Pulled out of the AI Insights stack and moved up so
-                    // it's the first action after the summary — the document
-                    // viewer is where most users will spend their time.
-                    // Hidden for incomplete reports (no useful content to
-                    // explore until they Resume).
-                    if let report = currentReport, report.imagePath != nil, !report.isIncomplete {
-                        NavigationLink {
-                            DocumentViewerView(report: report)
-                        } label: {
-                            askMoreCTA
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal)
                     }
 
                     if let report = currentReport, !report.isIncomplete {
@@ -279,6 +281,17 @@ struct DashboardView: View {
                         .padding(.horizontal)
                     }
 
+                    // "Regenerate Translation" lives at the bottom now —
+                    // it's a rare, destructive action (it overwrites the
+                    // current translation), so it belongs below the
+                    // content the user actually reads, not competing with
+                    // the document preview up top.
+                    if let report = currentReport, !report.isIncomplete {
+                        regenerateCTA(for: report)
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                    }
+
                     if isPostScan {
                         Button {
                             // Pops back to ScanView's idle state, ready
@@ -305,11 +318,20 @@ struct DashboardView: View {
                 healthMetrics = await HealthKitService.shared.getHealthMetrics()
                 if report == nil { report = initialReport }
                 reloadLabTrends()
+                loadPreviewImages()
                 maybeSuggestOwnership()
             }
             .onChange(of: currentReport?.id) { _, _ in
                 reloadLabTrends()
+                loadPreviewImages()
                 maybeSuggestOwnership()
+            }
+            // Tapping a preview page pushes the full document viewer
+            // opened on that same page so the user keeps their place.
+            .navigationDestination(isPresented: $showDocViewer) {
+                if let report = currentReport {
+                    DocumentViewerView(report: report, initialPage: docViewerPage)
+                }
             }
             .alert("Whose report is this?", isPresented: $showOwnershipPrompt) {
                 Button("It's mine") { setReportOwnership(toOther: false) }
@@ -370,6 +392,75 @@ struct DashboardView: View {
             .sheet(isPresented: $showAddMed) {
                 MedicationEditSheet(sourceReportID: currentReport?.id)
             }
+    }
+
+    // MARK: - Scan preview
+
+    /// Inline, swipeable preview of the scanned pages. Swiping flips
+    /// pages; tapping any page opens the full document viewer on that
+    /// same page so the user can pinch-zoom, circle values, and ask
+    /// follow-up questions. Only rendered when `previewImages` is
+    /// non-empty (guarded at the call site).
+    private var scanPreviewCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Original Document", systemImage: "doc.text.image")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Spacer()
+                if previewImages.count > 1 {
+                    Text("\(previewPage + 1) of \(previewImages.count)")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText(value: Double(previewPage)))
+                }
+            }
+
+            TabView(selection: $previewPage) {
+                ForEach(Array(previewImages.enumerated()), id: \.offset) { idx, img in
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .onTapGesture {
+                            docViewerPage = idx
+                            showDocViewer = true
+                        }
+                        .padding(.bottom, previewImages.count > 1 ? 24 : 0) // room for dots
+                        .tag(idx)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: previewImages.count > 1 ? .automatic : .never))
+            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+            .frame(height: 440)
+            .animation(.easeInOut(duration: 0.2), value: previewPage)
+
+            Label("Swipe to flip pages · tap to circle values and ask questions",
+                  systemImage: "hand.tap")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(14)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    /// Load the saved page JPEGs for the inline preview. These are the
+    /// already-downsampled scans written at intake, so decoding them for
+    /// a thumbnail strip is cheap. Resets the visible page if the new
+    /// report has fewer pages than wherever we were.
+    private func loadPreviewImages() {
+        let urls = currentReport?.allImageURLs ?? []
+        var images: [UIImage] = []
+        for url in urls {
+            if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
+                images.append(image)
+            }
+        }
+        previewImages = images
+        if previewPage >= images.count { previewPage = 0 }
     }
 
     // MARK: - Lab trend card (#28)
