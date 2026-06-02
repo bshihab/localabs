@@ -623,10 +623,16 @@ struct DashboardView: View {
     }
 
     private func maybeSuggestOwnership() {
-        guard let report = currentReport, report.belongsToOther == nil else { return }
-        // Never prompt about a report that no longer exists in storage
-        // (deleted from History before this fired).
-        guard LocalStorageService.shared.getHistory().contains(where: { $0.id == report.id }) else { return }
+        guard let report = currentReport else { return }
+        // Resolve the ownership decision from STORAGE, not just the
+        // in-memory copy we were handed. A stale report (e.g. from a
+        // History list that hadn't reloaded) can still carry
+        // belongsToOther == nil even though the user already decided —
+        // re-prompting them every time they re-open it. Also doubles as
+        // the "report still exists" guard (deleted reports return nil).
+        guard let stored = LocalStorageService.shared.getHistory().first(where: { $0.id == report.id })
+        else { return }
+        guard stored.belongsToOther == nil else { return }
         let profile = UserProfile.load()
 
         // Age mismatch: a gap beyond ~6 years vs the date-adjusted

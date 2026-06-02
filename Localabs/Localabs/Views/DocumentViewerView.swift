@@ -1604,7 +1604,10 @@ private struct FingerAlongLasso: ViewModifier, Animatable {
     let box: CGRect
     let radius: CGFloat
 
-    var animatableData: CGFloat {
+    // `nonisolated` so the Animatable conformance doesn't cross the
+    // ViewModifier's implicit @MainActor isolation (Swift 6 data-race
+    // check). It only touches value-type stored properties, so it's safe.
+    nonisolated var animatableData: CGFloat {
         get { progress }
         set { progress = newValue }
     }

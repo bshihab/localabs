@@ -164,6 +164,16 @@ struct HistoryView: View {
         .onAppear {
             reports = LocalStorageService.shared.getHistory()
         }
+        // Reload when the detail closes. NavigationStack doesn't re-fire
+        // .onAppear on pop, so without this the list keeps a stale copy
+        // of a report the user just edited in the dashboard — e.g. an
+        // ownership decision wouldn't show in the row tag, and re-opening
+        // would re-prompt with the undecided copy.
+        .onChange(of: selectedReport) { _, newValue in
+            if newValue == nil {
+                reports = LocalStorageService.shared.getHistory()
+            }
+        }
     }
 
     // MARK: - Reports list
