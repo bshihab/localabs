@@ -1037,7 +1037,7 @@ final class InferenceEngine: ObservableObject {
         - Daily steps (30-day avg): \(healthMetrics.avgSteps.map { String(format: "%.0f", $0) } ?? "Unknown")
         - Daily walking/running distance (30-day avg): \(healthMetrics.avgWalkingDistanceMiles.map { String(format: "%.2f mi", $0) } ?? "Unknown")
         - Walking speed (30-day avg): \(healthMetrics.avgWalkingSpeedMPH.map { String(format: "%.2f mph", $0) } ?? "Unknown")
-        - Daily exercise minutes (30-day avg): \(healthMetrics.avgExerciseMinutes.map { String(format: "%.0f min", $0) } ?? "Unknown")
+        - Daily exercise minutes (30-day avg): \(healthMetrics.avgExerciseMinutes.map { String(format: "%.0f min", $0) } ?? "Unknown")\(Self.medicationSection(label: "Medications the user is actively taking (tracked in the app). Use SILENTLY to interpret values — e.g. a statin contextualizes LDL, levothyroxine contextualizes TSH, a diuretic contextualizes potassium/sodium. Do NOT restate these as findings, and NEVER invent or recommend a medication."))
 
         Provide the 5 sections, each starting with the numbered header on its own line:
 
@@ -1705,6 +1705,22 @@ final class InferenceEngine: ObservableObject {
         """
     }
 
+    /// Mirrors `symptomSection` for the user's actively-tracked
+    /// medications (from the Meds tab). Injected into every prompt so
+    /// the model can interpret values in light of what the user takes —
+    /// a statin contextualizes LDL, levothyroxine contextualizes TSH,
+    /// etc. Empty (and omitted) when the user tracks no active meds.
+    private static func medicationSection(label: String) -> String {
+        let block = Medication.promptContextBlock()
+        guard !block.isEmpty else { return "" }
+        return """
+
+
+        \(label)
+        \(block)
+        """
+    }
+
     /// Streams the answer to a highlighted-text follow-up question.
     /// The caller iterates the stream and appends each piece to a chat bubble.
     /// `history` is every prior completed turn in the same chat sheet,
@@ -1739,7 +1755,7 @@ final class InferenceEngine: ObservableObject {
             \(trendsSection)
 
             User's medical context:
-            \(profile.promptContextBullets)\(Self.symptomSection(label: "Symptoms the user has logged recently (last 2 weeks). Use SILENTLY as background context — e.g. to connect the highlighted value to how they've been feeling. Do NOT list these back as findings unless the user asks."))
+            \(profile.promptContextBullets)\(Self.symptomSection(label: "Symptoms the user has logged recently (last 2 weeks). Use SILENTLY as background context — e.g. to connect the highlighted value to how they've been feeling. Do NOT list these back as findings unless the user asks."))\(Self.medicationSection(label: "Medications the user is actively taking. Use SILENTLY to interpret the highlighted value (a statin contextualizes LDL, etc.). Don't restate them unless the user asks, and never recommend a medication."))
 
             User's recent Apple Health data (30-day averages — use only if relevant to the question):
             - Resting HR: \(healthMetrics.avgRestingHR.map { "\($0) bpm" } ?? "Unknown")
@@ -1837,7 +1853,7 @@ final class InferenceEngine: ObservableObject {
         ╚════════════════════════════════════════════════════════════╝
 
         SECONDARY context — the user's personal health profile (for personalizing recommendations to their age/sex/conditions):
-        \(profile.promptContextBullets)\(Self.symptomSection(label: "SECONDARY context — symptoms the user has logged recently (last 2 weeks). Connect these to the trends when relevant, e.g. \"the headaches you logged line up with your elevated resting HR.\" Use silently; don't just list them back."))
+        \(profile.promptContextBullets)\(Self.symptomSection(label: "SECONDARY context — symptoms the user has logged recently (last 2 weeks). Connect these to the trends when relevant, e.g. \"the headaches you logged line up with your elevated resting HR.\" Use silently; don't just list them back."))\(Self.medicationSection(label: "SECONDARY context — medications the user is actively taking. Connect to trends when relevant (e.g. a beta-blocker explaining a lower resting HR). Use silently; never recommend a medication."))
 
         TERTIARY context — the user's past lab reports (reference only; bring them up *only* when a trend specifically connects to a past lab finding, e.g. "your HRV drop lines up with the elevated cortisol in your March panel"):\(ragContext)
 
@@ -1947,7 +1963,7 @@ final class InferenceEngine: ObservableObject {
         - Daily exercise minutes: \(otherHealthMetrics.avgExerciseMinutes.map { String(format: "%.0f min", $0) } ?? "Unknown")
 
         Personal health profile (use to personalize, not as subject):
-        \(profile.promptContextBullets)\(Self.symptomSection(label: "Symptoms the user has logged recently (last 2 weeks). Cross-reference with the focus metric only when relevant. Use silently; don't just list them back."))
+        \(profile.promptContextBullets)\(Self.symptomSection(label: "Symptoms the user has logged recently (last 2 weeks). Cross-reference with the focus metric only when relevant. Use silently; don't just list them back."))\(Self.medicationSection(label: "Medications the user is actively taking. Cross-reference with the focus metric only when relevant (e.g. a beta-blocker and resting HR). Use silently; never recommend a medication."))
 
         TERTIARY context — past lab reports (only mention if the metric question genuinely connects to a past lab finding):\(ragContext)
 

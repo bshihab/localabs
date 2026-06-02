@@ -289,6 +289,66 @@ extension Medication {
     }
 }
 
+// MARK: - LLM prompt context
+
+extension Medication {
+    /// One compact line describing this medication for the on-device
+    /// model's context, e.g.
+    ///   "Atorvastatin 20 mg — once daily, ongoing since Mar 2025"
+    ///   "Amoxicillin 500 mg — three times daily, course Jun 1 – Jun 10 2025"
+    /// The model reads these SILENTLY to interpret lab values (a statin
+    /// contextualizes an LDL trend; a diuretic contextualizes potassium)
+    /// — never to invent or recommend a medication.
+    var promptLine: String {
+        var head = name
+        let d = dose.trimmingCharacters(in: .whitespaces)
+        if !d.isEmpty { head += " \(d)" }
+        var tail: [String] = []
+        let freq = promptFrequencyPhrase
+        if !freq.isEmpty { tail.append(freq) }
+        tail.append(promptDurationPhrase)
+        return "\(head) — \(tail.joined(separator: ", "))"
+    }
+
+    private var promptFrequencyPhrase: String {
+        guard !times.isEmpty else { return "as needed" }
+        switch repeatRule.cadence {
+        case .daily:
+            switch times.count {
+            case 1:  return "once daily"
+            case 2:  return "twice daily"
+            case 3:  return "three times daily"
+            default: return "\(times.count)× daily"
+            }
+        case .weekly:   return "weekly on \(repeatRule.summary)"
+        case .biweekly: return repeatRule.summary  // "Every 2 weeks · Mon"
+        }
+    }
+
+    private var promptDurationPhrase: String {
+        let monthYear = DateFormatter()
+        monthYear.dateFormat = "MMM yyyy"
+        guard let end = endDate else {
+            return "ongoing since \(monthYear.string(from: startDate))"
+        }
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "MMM d yyyy"
+        return "course \(dayFmt.string(from: startDate)) – \(dayFmt.string(from: end))"
+    }
+
+    /// Bullet block of every ACTIVE medication, for injection into the
+    /// model prompt. Empty when the user tracks none, so the caller can
+    /// omit the section entirely. The 8-space indentation on the joiner
+    /// matches the multi-line prompt strings in InferenceEngine.
+    static func promptContextBlock() -> String {
+        let active = loadAll().filter(\.isActive)
+        guard !active.isEmpty else { return "" }
+        return active
+            .map { "- \($0.promptLine)" }
+            .joined(separator: "\n        ")
+    }
+}
+
 /// Tracks which specific dose occurrences (a medication + a calendar
 /// day + a time-index) the user has marked as taken. Kept separate
 /// from the Medication list so checking off a dose is a cheap
