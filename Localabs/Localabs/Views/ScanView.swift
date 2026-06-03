@@ -173,7 +173,7 @@ struct ScanView: View {
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
             }
-            .padding(.top, 20)
+            .padding(.top, 64)
 
             Spacer()
 
@@ -196,7 +196,7 @@ struct ScanView: View {
                     maxSelectionCount: 10,
                     matching: .images
                 ) {
-                    HomePane(title: "From Photos", icon: "photo.on.rectangle", color: .green, subtitle: "Up to 10 images")
+                    HomePane(title: "From Photos", icon: "photo.on.rectangle", color: .black, subtitle: "Up to 10 images")
                 }
                 .disabled(!engine.isModelLoaded)
 
