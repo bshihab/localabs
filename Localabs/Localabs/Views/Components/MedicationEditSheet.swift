@@ -17,6 +17,9 @@ struct MedicationEditSheet: View {
     /// Prefill for the name field (e.g. a drug name the user tapped
     /// in a report). Empty otherwise.
     let prefilledName: String
+    /// Prefill for the dose field (e.g. "500 mg" detected alongside the
+    /// name in a report). Empty otherwise.
+    let prefilledDose: String
 
     @Environment(\.dismiss) private var dismiss
 
@@ -35,10 +38,11 @@ struct MedicationEditSheet: View {
     @State private var notes: String = ""
     @State private var showSavedConfirmation = false
 
-    init(editing: Medication? = nil, sourceReportID: UUID? = nil, prefilledName: String = "") {
+    init(editing: Medication? = nil, sourceReportID: UUID? = nil, prefilledName: String = "", prefilledDose: String = "") {
         self.editing = editing
         self.sourceReportID = sourceReportID
         self.prefilledName = prefilledName
+        self.prefilledDose = prefilledDose
     }
 
     var body: some View {
@@ -222,8 +226,9 @@ struct MedicationEditSheet: View {
             }
             cadence = med.repeatRule.cadence
             selectedWeekdays = Set(med.repeatRule.weekdays)
-        } else if !prefilledName.isEmpty {
-            name = prefilledName
+        } else {
+            if !prefilledName.isEmpty { name = prefilledName }
+            if !prefilledDose.isEmpty { dose = prefilledDose }
         }
     }
 

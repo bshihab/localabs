@@ -33,6 +33,10 @@ struct DashboardView: View {
     /// Notes section, prefilled with the report link so the new med
     /// traces back to this scan.
     @State private var showAddMed = false
+    /// A detected medication the user tapped to add — drives a
+    /// pre-filled MedicationEditSheet. Identifiable-presented so each
+    /// tap opens a fresh sheet seeded with that med's name + dose.
+    @State private var medToAdd: DetectedMedication?
     /// Cross-report lab trends for this report's markers (#28),
     /// loaded on appear. Drives the "what changed" / worsening-trend
     /// card and the full comparison sheet.
@@ -254,14 +258,22 @@ struct DashboardView: View {
                                 content: report.medicationNotes
                             )
 
+                            // One-tap "Add to Meds" suggestions for any
+                            // medications Localabs found EXPLICITLY named
+                            // in this document (copy-only — never invented).
+                            // Tapping a suggestion opens the editor
+                            // pre-filled so the user confirms the schedule
+                            // and dates; nothing is added silently.
+                            if let meds = report.detectedMedications, !meds.isEmpty {
+                                detectedMedsSuggestions(meds)
+                            }
+
                             // Entry point into the Meds tab. Opens the
                             // add sheet linked to this report so a med
                             // the user sets up traces back to its
-                            // source scan. We don't auto-parse drug
-                            // names out of the freeform notes — the
-                            // user types what they're actually taking,
-                            // keeping Localabs's "never invent a
-                            // medication" contract intact.
+                            // source scan. The user confirms what they're
+                            // actually taking, keeping Localabs's "never
+                            // invent a medication" contract intact.
                             Button {
                                 showAddMed = true
                             } label: {
@@ -392,6 +404,13 @@ struct DashboardView: View {
             }
             .sheet(isPresented: $showAddMed) {
                 MedicationEditSheet(sourceReportID: currentReport?.id)
+            }
+            .sheet(item: $medToAdd) { med in
+                MedicationEditSheet(
+                    sourceReportID: currentReport?.id,
+                    prefilledName: med.name,
+                    prefilledDose: med.dose
+                )
             }
     }
 
@@ -529,6 +548,74 @@ struct DashboardView: View {
         }
         previewImages = images
         scrolledPreviewPage = images.isEmpty ? nil : 0
+    }
+
+    // MARK: - Detected-medication suggestions (#33)
+
+    /// "Add to Meds" suggestions for medications Localabs found
+    /// explicitly named in this report. Each is a glass row that opens
+    /// the editor pre-filled with the name + dose — the user always
+    /// confirms the schedule and dates before anything is saved, so
+    /// nothing is added silently and no medication is ever invented.
+    private func detectedMedsSuggestions(_ meds: [DetectedMedication]) -> some View {
+        // Hide suggestions for meds the user has already added to the
+        // Meds tab (matched by name) so a report doesn't keep nagging
+        // to add something that's already tracked.
+        let existing = Set(Medication.loadAll().map { $0.name.lowercased() })
+        let pending = meds.filter { !existing.contains($0.name.lowercased()) }
+
+        return Group {
+            if !pending.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Found in this document — tap to add", systemImage: "sparkles")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 4)
+
+                    ForEach(pending) { med in
+                Button {
+                    medToAdd = med
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "pills.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .frame(width: 34, height: 34)
+                            .background(Color.orange.opacity(0.14), in: Circle())
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(med.name)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.primary)
+                            let detail = [med.dose, med.frequency]
+                                .filter { !$0.isEmpty }
+                                .joined(separator: " · ")
+                            if !detail.isEmpty {
+                                Text(detail)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Spacer(minLength: 8)
+
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.orange)
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity)
+                    .glassEffect(
+                        .regular.tint(.orange.opacity(0.10)),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+                }   // VStack
+            }       // if !pending.isEmpty
+        }           // Group
     }
 
     // MARK: - Lab trend card (#28)

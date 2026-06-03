@@ -68,7 +68,8 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         reportDate: Date? = nil,
         belongsToOther: Bool? = nil,
         reportPatientAge: Int? = nil,
-        reportPatientSex: String? = nil
+        reportPatientSex: String? = nil,
+        detectedMedications: [DetectedMedication]? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -86,6 +87,7 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         self.belongsToOther = belongsToOther
         self.reportPatientAge = reportPatientAge
         self.reportPatientSex = reportPatientSex
+        self.detectedMedications = detectedMedications
     }
 
     /// The date to use for trend ordering: the date printed on the
@@ -109,6 +111,14 @@ struct StructuredReport: Codable, Identifiable, Hashable {
     /// suggest the report might be someone else's when it conflicts
     /// with the user's biological sex.
     var reportPatientSex: String?
+
+    /// Medications EXPLICITLY named in this document (a prescription,
+    /// after-visit summary, or current-meds list), extracted copy-only
+    /// at scan time. Surfaced on the dashboard as one-tap "Add to Meds"
+    /// suggestions — Localabs never invents a medication, so this only
+    /// holds names that literally appear in the scanned text. nil =
+    /// never extracted (older reports); [] = extracted, none found.
+    var detectedMedications: [DetectedMedication]?
 
     /// Convenience: whether this report counts toward the user's own
     /// trends / chat context.
@@ -349,5 +359,27 @@ struct StructuredReport: Codable, Identifiable, Hashable {
             medicationNotes: sections["medicationNotes"] ?? "",
             rawText: rawText
         )
+    }
+}
+
+/// A medication Localabs found explicitly written in a scanned
+/// document — a name, plus the dose and frequency when the document
+/// states them. Surfaced on the dashboard as a one-tap "Add to Meds"
+/// suggestion that pre-fills the medication editor. Copy-only: every
+/// field comes verbatim from the document, never inferred.
+struct DetectedMedication: Codable, Equatable, Hashable, Identifiable {
+    var name: String
+    var dose: String
+    var frequency: String
+
+    /// Stable identity from the content (no stored UUID, so it stays
+    /// clean through Codable round-trips and dedupes naturally).
+    var id: String { "\(name)|\(dose)|\(frequency)".lowercased() }
+
+    /// One-line label for the suggestion chip, e.g. "Metformin · 500 mg".
+    var displayLabel: String {
+        var s = name
+        if !dose.isEmpty { s += " · \(dose)" }
+        return s
     }
 }

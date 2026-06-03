@@ -525,6 +525,7 @@ final class InferenceEngine: ObservableObject {
             report.reportDate = Self.extractReportDate(from: combinedText)
             report.reportPatientAge = Self.extractPatientAge(from: combinedText)
             report.reportPatientSex = Self.extractPatientSex(from: combinedText)
+            report.detectedMedications = await extractMedications(from: combinedText)
             LocalStorageService.shared.saveReport(report)
         }
         if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -627,7 +628,8 @@ final class InferenceEngine: ObservableObject {
                 report.labValues = await extractLabValues(from: combinedText)
                 report.reportDate = Self.extractReportDate(from: combinedText)
                 report.reportPatientAge = Self.extractPatientAge(from: combinedText)
-            report.reportPatientSex = Self.extractPatientSex(from: combinedText)
+                report.reportPatientSex = Self.extractPatientSex(from: combinedText)
+                report.detectedMedications = await extractMedications(from: combinedText)
                 LocalStorageService.shared.saveReport(report)
             }
             if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -1520,6 +1522,110 @@ final class InferenceEngine: ObservableObject {
             return false
         }
         return false
+    }
+
+    // MARK: - Medication detection (#33)
+
+    /// Extraction pass for medications EXPLICITLY named in a document
+    /// (a prescription, after-visit summary, or current-meds list).
+    /// Copy-only: the model is told never to infer a drug, and a
+    /// deterministic guard then drops any name that doesn't literally
+    /// appear in the source — Localabs never invents a medication.
+    /// Returns [] for documents with no prescription/dosing language
+    /// (most lab reports), skipping the extra pass entirely so a
+    /// typical scan isn't slowed.
+    func extractMedications(from ocrText: String) async -> [DetectedMedication] {
+        guard let context = llamaContext else { return [] }
+        guard Self.medicationCuesPresent(in: ocrText) else {
+            print("[MedExtract] no prescription/dosing cues — skipping med extraction")
+            return []
+        }
+        let trimmed = String(ocrText.prefix(3000))
+        guard !trimmed.isEmpty else { return [] }
+
+        let prompt = """
+        <start_of_turn>user
+        You are a precise data extractor. From the medical document below, list ONLY medications that are EXPLICITLY named in it — drugs the patient is prescribed, told to take, or that appear in a current-medications list. Output ONE per line in EXACTLY this pipe-delimited format and nothing else:
+        NAME | DOSE | FREQUENCY
+
+        Rules:
+        - Copy the medication name, dose, and how often to take it EXACTLY as written. NEVER invent or infer a medication that is not written in the text.
+        - If the dose or frequency is not written for a medication, leave that field EMPTY but keep the pipes.
+        - Do NOT include lab tests, foods, or general advice — only actual medications named in the document.
+        - If no medications are named, output exactly: NONE
+
+        Examples:
+        Metformin | 500 mg | twice daily
+        Atorvastatin | 20 mg | once daily at bedtime
+        Lisinopril | 10 mg |
+
+        Document text:
+        \(trimmed)
+
+        Output:
+        <end_of_turn>
+        <start_of_turn>model
+        """
+
+        var collected = ""
+        // Greedy/deterministic decoding, same as lab extraction — the
+        // same document should always surface the same medications.
+        for await piece in context.predict(prompt: prompt, maxTokens: 250, deterministic: true) {
+            if isInferenceCancelled || Task.isCancelled { break }
+            collected += piece
+        }
+        print("[MedExtract] raw model output:\n\(collected)\n[MedExtract] end")
+        return Self.parseDetectedMedications(from: collected, sourceText: ocrText)
+    }
+
+    /// Cheap pre-gate: only run med extraction when the document
+    /// actually contains prescription / dosing language. Pure lab
+    /// reports rarely do, so this skips the extra pass on the common
+    /// case. Intentionally specific — not just "mg", which appears in
+    /// lab units like "mg/dL".
+    static func medicationCuesPresent(in text: String) -> Bool {
+        let lower = text.lowercased()
+        let cues = [
+            "prescrib", "medication", "tablet", "capsule", "by mouth",
+            "refill", "sig:", "dispense", "as directed", "once daily",
+            "twice daily", "three times daily", "at bedtime", "with meals",
+            "take ", " po ", "rx ", "mg daily", "mcg", "as needed for"
+        ]
+        return cues.contains { lower.contains($0) }
+    }
+
+    /// Parse the model's pipe-delimited med list, then enforce
+    /// copy-only: drop any medication whose name doesn't literally
+    /// appear in the source text (a deterministic guard against the
+    /// model inventing a drug). Dedupes by name.
+    static func parseDetectedMedications(from raw: String, sourceText: String) -> [DetectedMedication] {
+        let lowerSource = sourceText.lowercased()
+        var seen = Set<String>()
+        var result: [DetectedMedication] = []
+        for line in raw.split(separator: "\n") {
+            let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+            if trimmedLine.isEmpty || trimmedLine.uppercased() == "NONE" { continue }
+            guard trimmedLine.contains("|") else { continue }
+            let parts = trimmedLine
+                .split(separator: "|", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            let name = parts.first ?? ""
+            guard !name.isEmpty else { continue }
+            // Copy-only guard: the name must appear verbatim in the source.
+            guard lowerSource.contains(name.lowercased()) else {
+                print("[MedExtract] dropped '\(name)' — not found verbatim in source")
+                continue
+            }
+            let key = name.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(DetectedMedication(
+                name: name,
+                dose: parts.count > 1 ? parts[1] : "",
+                frequency: parts.count > 2 ? parts[2] : ""
+            ))
+        }
+        return result
     }
 
     /// Parse the report's collection/draw date from the OCR text so
