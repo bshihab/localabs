@@ -1609,18 +1609,22 @@ private struct LassoDemoView: View {
     }
 
     private func demoRow(name: String, value: String, unit: String, lit: Bool) -> some View {
+        // The demo card is always white "paper", so the text is pinned
+        // to dark colors rather than Color.primary — otherwise in dark
+        // mode the primary color flips to white and the rows vanish
+        // against the white card.
         HStack(spacing: 5) {
             Text(name)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(lit ? Color.blue : Color.primary.opacity(0.75))
+                .foregroundStyle(lit ? Color.blue : Color.black.opacity(0.72))
             Spacer(minLength: 6)
             Text(value)
                 .font(.system(size: 11, weight: .bold).monospacedDigit())
-                .foregroundStyle(lit ? Color.blue : Color.primary.opacity(0.85))
+                .foregroundStyle(lit ? Color.blue : Color.black.opacity(0.85))
             if !unit.isEmpty {
                 Text(unit)
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.black.opacity(0.45))
             }
         }
     }
