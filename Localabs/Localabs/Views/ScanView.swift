@@ -185,7 +185,7 @@ struct ScanView: View {
                 Button {
                     requestCameraAndOpen()
                 } label: {
-                    homePane("Scan Document", "doc.viewfinder.fill", .blue, subtitle: "Use the camera")
+                    HomePane(title: "Scan Document", icon: "doc.viewfinder.fill", color: .blue, subtitle: "Use the camera")
                 }
                 .buttonStyle(.plain)
                 .disabled(!engine.isModelLoaded)
@@ -196,14 +196,14 @@ struct ScanView: View {
                     maxSelectionCount: 10,
                     matching: .images
                 ) {
-                    homePane("From Photos", "photo.on.rectangle", .green, subtitle: "Up to 10 images")
+                    HomePane(title: "From Photos", icon: "photo.on.rectangle", color: .green, subtitle: "Up to 10 images")
                 }
                 .disabled(!engine.isModelLoaded)
 
                 Button {
                     showPDFPicker = true
                 } label: {
-                    homePane("From PDF", "doc.fill", .orange, subtitle: "Choose a file")
+                    HomePane(title: "From PDF", icon: "doc.fill", color: .orange, subtitle: "Choose a file")
                 }
                 .buttonStyle(.plain)
                 .disabled(!engine.isModelLoaded)
@@ -211,7 +211,7 @@ struct ScanView: View {
                 Button {
                     showVisitHub = true
                 } label: {
-                    homePane("Doctor Visit", "stethoscope", .purple, subtitle: visitPaneSubtitle)
+                    HomePane(title: "Doctor Visit", icon: "stethoscope", color: .purple, subtitle: visitPaneSubtitle)
                 }
                 .buttonStyle(.plain)
             }
@@ -226,35 +226,6 @@ struct ScanView: View {
                     .padding(.bottom, 20)
             }
         }
-    }
-
-    /// One Home pane: gradient icon tile + title + subtitle in a glass
-    /// card. Used for all four panes so they read as a set.
-    private func homePane(_ title: String, _ icon: String, _ color: Color, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 48, height: 48)
-                .background(
-                    LinearGradient(
-                        colors: [color, color.opacity(0.78)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
-            Spacer(minLength: 6)
-            Text(title)
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(.primary)
-            Text(subtitle)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, minHeight: 152, alignment: .leading)
-        .padding(16)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     /// Subtitle for the Doctor Visit pane, reflecting visit state.
@@ -860,5 +831,43 @@ private struct VisitFlowModifier: ViewModifier {
                 onLoad()
                 showVisitCheckIn = true
             }
+    }
+}
+
+/// One Home pane: a gradient icon tile + title + subtitle in a glass
+/// card. A View struct (not a method on ScanView) so it can be used in
+/// the PhotosPicker / Button label closures without tripping Swift 6's
+/// main-actor-isolated-result rule.
+private struct HomePane: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let subtitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.78)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+            Spacer(minLength: 6)
+            Text(title)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.primary)
+            Text(subtitle)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 152, alignment: .leading)
+        .padding(16)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 }
