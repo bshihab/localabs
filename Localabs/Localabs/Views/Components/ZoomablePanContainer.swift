@@ -42,6 +42,14 @@ struct ZoomablePanContainer<Content: View>: UIViewRepresentable {
         scrollView.showsVerticalScrollIndicator = false
         scrollView.isScrollEnabled = isScrollEnabled
         scrollView.backgroundColor = .clear
+        // Deliver touches to the SwiftUI content immediately instead of
+        // delaying them to detect a scroll. Without this, single taps on
+        // the entity highlights (#31) get swallowed in Browse mode (scroll
+        // enabled) — the scroll view holds the touch, decides it isn't a
+        // pan, and by then the tap gesture never fires. A real drag still
+        // cancels the content touch and scrolls (canCancelContentTouches
+        // stays true by default), so pan/zoom are unaffected.
+        scrollView.delaysContentTouches = false
 
         let host = UIHostingController(rootView: content())
         host.view.backgroundColor = .clear

@@ -51,6 +51,9 @@ struct DocumentViewerView: View {
     /// Drives the pre-filled medication editor when the user taps
     /// "Add to Meds" in an entity's action menu.
     @State private var entityMedToAdd: DetectedMedication?
+    /// Bumped when the user tracks/untracks a marker so the action menu
+    /// re-renders and flips its "Add" ↔ "Added" label in place.
+    @State private var entityActionVersion = 0
 
     /// Two explicit interaction modes — replaces the long-press-to-engage
     /// pattern that kept fighting with scroll. Browse is the default
@@ -523,7 +526,33 @@ struct DocumentViewerView: View {
             }
             .buttonStyle(.plain)
 
-            if let med = popover.entity.medication {
+            entityPrimaryAction(popover.entity)
+        }
+        .padding(14)
+        .frame(width: 232)
+        .glassEffect(
+            .regular.tint(.blue.opacity(0.12)),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+    }
+
+    /// The entity-specific action row: "Add to Meds" / "Already added to
+    /// Meds" for a medication, and "Add to Health Trend" / "Added to
+    /// Health Trends" (a toggle) for a lab value. Re-reads its state on
+    /// every render so it flips in place when `entityActionVersion` bumps.
+    @ViewBuilder
+    private func entityPrimaryAction(_ entity: HighlightEntity) -> some View {
+        switch entity {
+        case .medication(let med):
+            let added = Medication.loadAll().contains {
+                $0.name.caseInsensitiveCompare(med.name) == .orderedSame
+            }
+            if added {
+                Label("Already added to Meds", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.green)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
                 Button {
                     dismissEntityPopover()
                     entityMedToAdd = med
@@ -535,13 +564,27 @@ struct DocumentViewerView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+        case .labValue(let lv):
+            let tracked = TrackedMarkers.isTracked(lv.canonicalName)
+            Button {
+                if tracked {
+                    TrackedMarkers.remove(lv.canonicalName)
+                } else {
+                    TrackedMarkers.add(lv.canonicalName)
+                }
+                entityActionVersion += 1   // flip the label in place
+            } label: {
+                Label(
+                    tracked ? "Added to Health Trends" : "Add to Health Trend",
+                    systemImage: tracked ? "checkmark.circle.fill" : "chart.line.uptrend.xyaxis"
+                )
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(tracked ? .green : .blue)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
         }
-        .padding(14)
-        .frame(width: 232)
-        .glassEffect(
-            .regular.tint(.blue.opacity(0.12)),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-        )
     }
 
     private func dismissEntityPopover() {
