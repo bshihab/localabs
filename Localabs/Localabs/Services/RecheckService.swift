@@ -25,6 +25,18 @@ enum RecheckService {
         return reminder
     }
 
+    /// Default-on: after a report saves, schedule a recheck for each
+    /// out-of-range marker the user hasn't turned off and that doesn't
+    /// already have a reminder. The user can opt any of them out from the
+    /// highlight menu or Recheck Reminders settings.
+    static func autoSchedule(forOutOfRange markers: [String]) async {
+        for marker in markers {
+            guard !RecheckStore.isOptedOut(marker),
+                  !RecheckStore.isSet(forMarker: marker) else { continue }
+            await schedule(marker: marker, months: RecheckStore.defaultIntervalMonths)
+        }
+    }
+
     static func cancel(id: UUID) async {
         RecheckStore.remove(id: id)
         UNUserNotificationCenter.current()
@@ -38,11 +50,21 @@ enum RecheckService {
     }
 
     /// Re-arm all stored reminders on app activation (recovers any the
-    /// system dropped) and clear ones whose date has already passed and
-    /// fired.
+    /// system dropped), clear past-due ones, and drop reminders whose
+    /// marker no longer appears in any of the user's reports (its reports
+    /// were deleted) — those toggles + notifications go away with it.
     static func syncAll() async {
+        let validMarkers = Set(
+            LocalStorageService.shared.getHistory()
+                .filter(\.isOwnReport)
+                .flatMap { $0.labValues ?? [] }
+                .map { LabValue.normalizeKey($0.canonicalName) }
+        )
         for reminder in RecheckStore.all() {
-            if reminder.dueDate <= Date() {
+            if !validMarkers.contains(reminder.key) {
+                // Its report(s) were deleted — drop the reminder entirely.
+                await cancel(id: reminder.id)
+            } else if reminder.dueDate <= Date() {
                 // Past due — it has fired (or the window passed); clear it.
                 await cancel(id: reminder.id)
             } else {

@@ -527,6 +527,11 @@ final class InferenceEngine: ObservableObject {
             report.reportPatientSex = Self.extractPatientSex(from: combinedText)
             report.detectedMedications = await extractMedications(from: combinedText)
             LocalStorageService.shared.saveReport(report)
+            // Default-on recheck reminders for out-of-range markers (#31).
+            if report.isOwnReport {
+                let oor = (report.labValues ?? []).filter(\.isOutOfRange).map(\.canonicalName)
+                await RecheckService.autoSchedule(forOutOfRange: oor)
+            }
         }
         if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
             pendingResumeReport = report
@@ -631,6 +636,10 @@ final class InferenceEngine: ObservableObject {
                 report.reportPatientSex = Self.extractPatientSex(from: combinedText)
                 report.detectedMedications = await extractMedications(from: combinedText)
                 LocalStorageService.shared.saveReport(report)
+                if report.isOwnReport {
+                    let oor = (report.labValues ?? []).filter(\.isOutOfRange).map(\.canonicalName)
+                    await RecheckService.autoSchedule(forOutOfRange: oor)
+                }
             }
             if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
                 pendingResumeReport = report

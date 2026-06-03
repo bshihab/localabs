@@ -110,6 +110,8 @@ struct EntityActionMenu: View {
             set: { on in
                 let marker = lv.canonicalName
                 if on {
+                    // Re-enabling clears any prior opt-out.
+                    RecheckStore.setOptedOut(marker, false)
                     let reminder = RecheckReminder(
                         marker: marker,
                         dueDate: Calendar.current.date(
@@ -120,9 +122,13 @@ struct EntityActionMenu: View {
                     )
                     RecheckStore.save(reminder)
                     Task { await RecheckService.arm(reminder) }
-                } else if let existing = RecheckStore.reminder(forMarker: marker) {
-                    RecheckStore.remove(id: existing.id)
-                    RecheckService.removeNotification(id: existing.id)
+                } else {
+                    // Remember the opt-out so a re-scan won't re-add it.
+                    RecheckStore.setOptedOut(marker, true)
+                    if let existing = RecheckStore.reminder(forMarker: marker) {
+                        RecheckStore.remove(id: existing.id)
+                        RecheckService.removeNotification(id: existing.id)
+                    }
                 }
                 version += 1
             }

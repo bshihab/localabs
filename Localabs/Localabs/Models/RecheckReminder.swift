@@ -30,6 +30,7 @@ struct RecheckReminder: Codable, Identifiable, Equatable {
 enum RecheckStore {
     private static let listKey = "localabs_recheck_reminders"
     private static let intervalKey = "localabs_recheck_default_months"
+    private static let optedOutKey = "localabs_recheck_optedout"
 
     static func all() -> [RecheckReminder] {
         guard
@@ -79,8 +80,35 @@ enum RecheckStore {
         set { UserDefaults.standard.set(newValue, forKey: intervalKey) }
     }
 
+    // MARK: - Opt-out (markers the user turned OFF)
+
+    /// Out-of-range markers default to ON (auto-scheduled at scan). When
+    /// the user turns one OFF, we remember it here so it isn't re-created
+    /// the next time the same marker is scanned.
+    static func optedOut() -> Set<String> {
+        guard
+            let data = UserDefaults.standard.data(forKey: optedOutKey),
+            let set = try? JSONDecoder().decode(Set<String>.self, from: data)
+        else { return [] }
+        return set
+    }
+
+    static func isOptedOut(_ marker: String) -> Bool {
+        optedOut().contains(LabValue.normalizeKey(marker))
+    }
+
+    static func setOptedOut(_ marker: String, _ on: Bool) {
+        var set = optedOut()
+        let k = LabValue.normalizeKey(marker)
+        if on { set.insert(k) } else { set.remove(k) }
+        if let data = try? JSONEncoder().encode(set) {
+            UserDefaults.standard.set(data, forKey: optedOutKey)
+        }
+    }
+
     static func resetAll() {
         UserDefaults.standard.removeObject(forKey: listKey)
         UserDefaults.standard.removeObject(forKey: intervalKey)
+        UserDefaults.standard.removeObject(forKey: optedOutKey)
     }
 }
