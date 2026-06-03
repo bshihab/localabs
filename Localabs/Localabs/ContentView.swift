@@ -81,6 +81,11 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .openVisitCheckIn)) { _ in
                 selectedTab = 0
             }
+            // Tapping a "time to recheck your <marker>" notification lands
+            // on the Home tab so the user can scan a fresh result.
+            .onReceive(NotificationCenter.default.publisher(for: .openRecheckScan)) { _ in
+                selectedTab = 0
+            }
             // Foreground path on app activation: re-check armed Health
             // alerts, and re-sync medication reminders so edits made
             // while backgrounded (or pending requests iOS dropped) are
@@ -91,6 +96,7 @@ struct ContentView: View {
                     await HealthAlertService.shared.evaluate()
                     await MedicationService.syncAll()
                     await VisitService.syncUpcoming()
+                    await RecheckService.syncAll()
                 }
             }
         } else {

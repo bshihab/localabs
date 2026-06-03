@@ -38,6 +38,14 @@ struct ProfileView: View {
                     .buttonStyle(.plain)
                     .padding(.horizontal)
 
+                    NavigationLink {
+                        RecheckRemindersView()
+                    } label: {
+                        recheckRemindersCard
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal)
+
                     coreInfoCard
                         .padding(.horizontal)
 
@@ -124,6 +132,30 @@ struct ProfileView: View {
     /// as a tappable card (chevron affordance) matching the glass
     /// chrome of the other Profile cards. Shows a count of armed
     /// alerts so the user can see at a glance whether anything's on.
+    private var recheckRemindersCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.title2)
+                .foregroundStyle(.blue)
+                .frame(width: 32)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Recheck Reminders")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text("Get reminded to re-scan markers that were trending the wrong way")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
     private var healthAlertsCard: some View {
         HStack(spacing: 14) {
             Image(systemName: "bell.badge.fill")

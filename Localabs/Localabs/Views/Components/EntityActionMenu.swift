@@ -2,22 +2,24 @@ import SwiftUI
 
 /// The liquid-glass action menu that pops up from a tapped scan
 /// highlight (#31). Shared by the document viewer and the dashboard
-/// scan preview so the actions and their on/off states stay identical.
+/// scan preview.
 ///
-/// "Ask Localabs about this" is host-specific (the viewer selects a
-/// block and opens its in-place chat; the dashboard presents one), so
-/// it's passed in. The "Add to Meds" and "Add to Health Trend" controls
-/// are self-contained **toggles** — flip them on to add, off to remove —
-/// so the menu always reflects, and lets the user change, the current
-/// state right there.
+/// - "Ask Localabs about this" is always available (host-presented chat).
+/// - The personal actions — Add to Meds, the "in your trends" status,
+///   and the recheck-reminder toggle — only show for the user's OWN
+///   reports. On a report tagged as someone else's, the menu is just
+///   "Ask Localabs" so a relative's meds/markers never land in the
+///   user's own data.
 struct EntityActionMenu: View {
     let entity: HighlightEntity
+    /// False when the report is tagged as someone else's — hides the
+    /// personal "add to my data" actions.
+    let isOwnReport: Bool
     let onAsk: () -> Void
     /// Opens the Meds editor (host-presented) so the user can set the
     /// dose/schedule when adding a medication.
     let onAddMedication: (DetectedMedication) -> Void
-    /// Bumped whenever a toggle changes so the labels/switch states
-    /// re-read their backing stores and update in place.
+    /// Bumped when the recheck toggle changes so the label/switch updates.
     @State private var version = 0
 
     var body: some View {
@@ -42,10 +44,12 @@ struct EntityActionMenu: View {
             }
             .buttonStyle(.plain)
 
-            primaryToggle
+            if isOwnReport {
+                personalActions
+            }
         }
         .padding(14)
-        .frame(width: 248)
+        .frame(width: 252)
         .glassEffect(
             .regular.tint(.blue.opacity(0.12)),
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -53,13 +57,11 @@ struct EntityActionMenu: View {
     }
 
     @ViewBuilder
-    private var primaryToggle: some View {
-        // `version` is read so flipping a toggle re-renders this row.
+    private var personalActions: some View {
         let _ = version
         switch entity {
         case .medication(let med):
             if isMedAdded(med) {
-                // Already tracked — show status; manage it in the Meds tab.
                 Label("Added to Meds", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.green)
@@ -78,27 +80,50 @@ struct EntityActionMenu: View {
             }
 
         case .labValue(let lv):
-            let tracked = TrackedMarkers.isTracked(lv.canonicalName)
-            Toggle(isOn: trendBinding(lv)) {
+            // Lab values are already tracked in cross-report trends
+            // automatically — this is just status, no toggle.
+            Label("In your Health Trends", systemImage: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // The actionable control: a reminder to re-scan this marker.
+            Toggle(isOn: recheckBinding(lv)) {
                 Label(
-                    tracked ? "Added to Health Trends" : "Add to Health Trend",
-                    systemImage: "chart.line.uptrend.xyaxis"
+                    RecheckStore.isSet(forMarker: lv.canonicalName)
+                        ? "Recheck reminder set"
+                        : "Remind me to recheck",
+                    systemImage: "bell.badge"
                 )
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(tracked ? .green : .blue)
+                .foregroundStyle(RecheckStore.isSet(forMarker: lv.canonicalName) ? .green : .blue)
             }
             .tint(.blue)
         }
     }
 
-    // MARK: - Bindings
+    // MARK: - Bindings / helpers
 
-    private func trendBinding(_ lv: LabValue) -> Binding<Bool> {
+    private func recheckBinding(_ lv: LabValue) -> Binding<Bool> {
         Binding(
-            get: { TrackedMarkers.isTracked(lv.canonicalName) },
+            get: { RecheckStore.isSet(forMarker: lv.canonicalName) },
             set: { on in
-                if on { TrackedMarkers.add(lv.canonicalName) }
-                else { TrackedMarkers.remove(lv.canonicalName) }
+                let marker = lv.canonicalName
+                if on {
+                    let reminder = RecheckReminder(
+                        marker: marker,
+                        dueDate: Calendar.current.date(
+                            byAdding: .month,
+                            value: RecheckStore.defaultIntervalMonths,
+                            to: Date()
+                        ) ?? Date()
+                    )
+                    RecheckStore.save(reminder)
+                    Task { await RecheckService.arm(reminder) }
+                } else if let existing = RecheckStore.reminder(forMarker: marker) {
+                    RecheckStore.remove(id: existing.id)
+                    RecheckService.removeNotification(id: existing.id)
+                }
                 version += 1
             }
         )

@@ -469,6 +469,7 @@ struct DashboardView: View {
 
                     EntityActionMenu(
                         entity: popover.entity,
+                        isOwnReport: currentReport?.isOwnReport ?? true,
                         onAsk: {
                             let entity = popover.entity
                             previewPopover = nil

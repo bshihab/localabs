@@ -506,6 +506,7 @@ struct DocumentViewerView: View {
 
                     EntityActionMenu(
                         entity: popover.entity,
+                        isOwnReport: report.isOwnReport,
                         onAsk: { askAboutEntity(popover) },
                         onAddMedication: { med in
                             dismissEntityPopover()

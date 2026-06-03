@@ -14,6 +14,9 @@ extension Notification.Name {
     /// notification. ContentView switches to the Home tab and ScanView
     /// opens the check-in flow.
     static let openVisitCheckIn = Notification.Name("localabs.openVisitCheckIn")
+    /// Posted when the user taps a "time to recheck your <marker>"
+    /// notification. ContentView switches to the Home tab to scan.
+    static let openRecheckScan = Notification.Name("localabs.openRecheckScan")
 }
 
 @main
@@ -121,6 +124,8 @@ final class LocalabsAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
                     NotificationCenter.default.post(name: .openMedsFromReminder, object: nil)
                 case "visitcheckin":
                     NotificationCenter.default.post(name: .openVisitCheckIn, object: nil)
+                case "recheck":
+                    NotificationCenter.default.post(name: .openRecheckScan, object: nil)
                 default:
                     break
                 }
