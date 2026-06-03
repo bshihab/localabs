@@ -33,6 +33,9 @@ struct TrendsView: View {
     /// history. Independent of HealthKit.
     @State private var labTrends: [LabTrend] = []
     @State private var showLabTrends: Bool = false
+    /// Bumped when the user pins/unpins a marker so the lab list re-sorts
+    /// pinned markers to the top in place.
+    @State private var trackedVersion = 0
     /// Which data source the tab is showing — Apple Health metrics or
     /// lab-report trends. Replaces the old single long scroll.
     @State private var dataSource: DataSource = .health
@@ -158,17 +161,33 @@ struct TrendsView: View {
     /// full comparison sheet. Shows the first few markers inline with
     /// worsening ones surfaced first (LabTrendService already sorts
     /// that way).
+    /// Lab trends with pinned (tracked) markers floated to the top —
+    /// recomputed when `trackedVersion` bumps so a pin tap re-sorts live.
+    private var sortedLabTrends: [LabTrend] {
+        _ = trackedVersion
+        let pinned = labTrends.filter { TrackedMarkers.isTracked($0.canonicalName) }
+        let rest = labTrends.filter { !TrackedMarkers.isTracked($0.canonicalName) }
+        return pinned + rest
+    }
+
     private var labValuesSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("LAB VALUES OVER TIME")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .tracking(1.0)
+        let rows = sortedLabTrends
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("LAB VALUES OVER TIME")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.0)
+                Spacer()
+                Text("Tap 📌 to pin")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
 
             VStack(spacing: 0) {
-                ForEach(labTrends) { trend in
-                    LabTrendRow(trend: trend)
-                    if trend.id != labTrends.last?.id {
+                ForEach(rows) { trend in
+                    LabTrendRow(trend: trend, onTrackToggle: { trackedVersion += 1 })
+                    if trend.id != rows.last?.id {
                         Divider()
                     }
                 }
