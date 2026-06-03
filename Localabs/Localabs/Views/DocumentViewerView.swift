@@ -116,6 +116,11 @@ struct DocumentViewerView: View {
             .sensoryFeedback(.impact(weight: .medium), trigger: isLassoing) { old, new in
                 lassoStarted(oldValue: old, newValue: new)
             }
+            // A light tap when an entity highlight is selected (not on
+            // dismiss) so tapping a value feels tactile.
+            .sensoryFeedback(trigger: entityPopover?.id) { _, new in
+                new != nil ? .impact(weight: .light) : nil
+            }
             .onChange(of: currentPageIndex) { _, _ in evaluateCrossPageBanner() }
             .onChange(of: selectedBlocks) { _, _ in evaluateCrossPageBanner() }
             .onChange(of: mode) { _, newMode in handleModeChange(newMode) }
@@ -180,6 +185,7 @@ struct DocumentViewerView: View {
                                 let rect = convertRect(block.boundingBox, in: renderedImageSize)
                                 let isSelected = selectedBlocks.contains(block.id)
                                 let blockEntity = entity(for: block.id)
+                                let isActive = entityPopover?.blockID == block.id
 
                                 Group {
                                     if isSelected {
@@ -194,12 +200,15 @@ struct DocumentViewerView: View {
                                         // Subtle blue Live-Text-style highlight
                                         // for an important value/medication —
                                         // reads as tappable without the loud
-                                        // yellow of an active selection.
+                                        // yellow of an active selection. The
+                                        // tapped one ("active") deepens so the
+                                        // user can see exactly what they hit.
                                         RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                            .fill(Color.blue.opacity(0.13))
+                                            .fill(Color.blue.opacity(isActive ? 0.32 : 0.13))
                                             .overlay(
                                                 RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                                    .strokeBorder(Color.blue.opacity(0.42), lineWidth: 1)
+                                                    .strokeBorder(Color.blue.opacity(isActive ? 0.9 : 0.42),
+                                                                  lineWidth: isActive ? 1.8 : 1)
                                             )
                                     } else {
                                         RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -207,12 +216,15 @@ struct DocumentViewerView: View {
                                     }
                                 }
                                 .frame(width: rect.width, height: rect.height)
-                                .position(x: rect.midX, y: rect.midY)
+                                .scaleEffect(isActive ? 1.08 : 1.0)
+                                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isActive)
+                                // contentShape + gesture BEFORE .position so the
+                                // hit area is the box itself. (After .position
+                                // the box expands to fill the page and every tap
+                                // hits the topmost block — the bug where one
+                                // highlight swallowed all taps.)
                                 .contentShape(Rectangle())
                                 .gesture(
-                                    // SpatialTapGesture gives the global tap
-                                    // point so the action menu can pop up from
-                                    // exactly where the user touched.
                                     SpatialTapGesture(coordinateSpace: .global).onEnded { value in
                                         if mode == .select {
                                             // Tap-to-select stays Select-mode
@@ -240,6 +252,7 @@ struct DocumentViewerView: View {
                                         }
                                     }
                                 )
+                                .position(x: rect.midX, y: rect.midY)
                             }
                         }
                         .frame(width: renderedImageSize.width, height: renderedImageSize.height)

@@ -457,6 +457,10 @@ struct DashboardView: View {
             // The liquid-glass action menu for a tapped preview highlight,
             // floating above the dashboard at the tap point.
             .overlay { previewPopoverOverlay }
+            // A light tap when a preview highlight is selected.
+            .sensoryFeedback(trigger: previewPopover?.id) { _, new in
+                new != nil ? .impact(weight: .light) : nil
+            }
     }
 
     // MARK: - Preview entity action menu (#31)
@@ -755,14 +759,19 @@ struct DashboardView: View {
             ZStack(alignment: .topLeading) {
                 ForEach(highlights) { h in
                     let rect = convertPreviewRect(h.box, image: img, frameWidth: previewWidth, frameHeight: pageHeight)
+                    let isActive = previewPopover?.blockID == h.id
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.blue.opacity(0.18))
+                        .fill(Color.blue.opacity(isActive ? 0.34 : 0.18))
                         .overlay(
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .strokeBorder(Color.blue.opacity(0.6), lineWidth: 1.3)
+                                .strokeBorder(Color.blue.opacity(isActive ? 0.95 : 0.6),
+                                              lineWidth: isActive ? 2 : 1.3)
                         )
                         .frame(width: rect.width, height: rect.height)
-                        .position(x: rect.midX, y: rect.midY)
+                        .scaleEffect(isActive ? 1.08 : 1.0)
+                        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isActive)
+                        // contentShape + gesture BEFORE .position so the hit
+                        // area is the box, not the whole page.
                         .contentShape(Rectangle())
                         .gesture(
                             SpatialTapGesture(coordinateSpace: .global).onEnded { value in
@@ -775,6 +784,7 @@ struct DashboardView: View {
                                 }
                             }
                         )
+                        .position(x: rect.midX, y: rect.midY)
                 }
             }
             .frame(width: previewWidth, height: pageHeight, alignment: .topLeading)
