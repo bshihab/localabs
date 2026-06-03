@@ -59,34 +59,12 @@ struct LabComparisonView: View {
 /// One marker's row: name, the value trajectory, and a status chip.
 struct LabTrendRow: View {
     let trend: LabTrend
-    /// Notifies the parent (Trends tab) when the pin state changes so it
-    /// can re-sort pinned markers to the top. Optional — the comparison
-    /// sheet doesn't re-sort.
-    var onTrackToggle: (() -> Void)? = nil
-    @State private var tracked = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+            HStack {
                 Text(trend.canonicalName)
                     .font(.body.weight(.semibold))
-                // Pin to follow this marker in Health Trends (#31). Filled
-                // when tracked; tap toggles.
-                Button {
-                    if tracked {
-                        TrackedMarkers.remove(trend.canonicalName)
-                    } else {
-                        TrackedMarkers.add(trend.canonicalName)
-                    }
-                    tracked.toggle()
-                    onTrackToggle?()
-                } label: {
-                    Image(systemName: tracked ? "pin.fill" : "pin")
-                        .font(.system(size: 12))
-                        .foregroundStyle(tracked ? .blue : .secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(tracked ? "Stop tracking \(trend.canonicalName)" : "Track \(trend.canonicalName)")
                 Spacer()
                 statusChip
             }
@@ -112,7 +90,6 @@ struct LabTrendRow: View {
             }
         }
         .padding(.vertical, 4)
-        .onAppear { tracked = TrackedMarkers.isTracked(trend.canonicalName) }
     }
 
     /// Line + point chart of the marker over its report dates —

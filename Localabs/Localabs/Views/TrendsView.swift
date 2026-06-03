@@ -172,37 +172,62 @@ struct TrendsView: View {
 
     private var labValuesSection: some View {
         let rows = sortedLabTrends
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("LAB VALUES OVER TIME")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .tracking(1.0)
                 Spacer()
-                Text("Tap 📌 to pin")
+                Label("Swipe right to pin", systemImage: "hand.draw")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
 
-            VStack(spacing: 0) {
-                ForEach(rows) { trend in
-                    LabTrendRow(trend: trend, onTrackToggle: { trackedVersion += 1 })
-                    if trend.id != rows.last?.id {
-                        Divider()
-                    }
+            // Each marker is its own card now (no shared box), and
+            // swiping a card to the right pins it — a yellow pin appears
+            // and it floats to the top.
+            ForEach(rows) { trend in
+                SwipeToPinCard(
+                    isPinned: TrackedMarkers.isTracked(trend.canonicalName),
+                    onTogglePin: { togglePin(trend) }
+                ) {
+                    LabTrendRow(trend: trend)
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .overlay(alignment: .topTrailing) {
+                            if TrackedMarkers.isTracked(trend.canonicalName) {
+                                Image(systemName: "pin.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.yellow)
+                                    .padding(10)
+                            }
+                        }
                 }
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
 
             // Explain where the "normal" range comes from + that it's
             // personalized to the user's age/sex when a report omits one.
             Text(labRangeFootnote)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// Toggle a marker's pinned state (swipe action), animating the
+    /// re-sort so the pinned card slides to the top.
+    private func togglePin(_ trend: LabTrend) {
+        if TrackedMarkers.isTracked(trend.canonicalName) {
+            TrackedMarkers.remove(trend.canonicalName)
+        } else {
+            TrackedMarkers.add(trend.canonicalName)
+        }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            trackedVersion += 1
         }
     }
 
@@ -1294,5 +1319,57 @@ struct MetricDetailView: View {
         if value >= 100 { return String(format: "%.0f", value) }
         if value >= 10  { return String(format: "%.1f", value) }
         return String(format: "%.2f", value)
+    }
+}
+
+/// A card that pins on a rightward swipe — the Apple Mail / Files style
+/// leading swipe action, but built as a gesture so it works inside the
+/// Trends tab's vertical ScrollView (a vertical scroll only claims
+/// vertical drags, so a horizontal swipe falls through to this gesture).
+/// A yellow pin reveals behind the card as it slides; releasing past the
+/// threshold toggles the pin.
+private struct SwipeToPinCard<Content: View>: View {
+    let isPinned: Bool
+    let onTogglePin: () -> Void
+    @ViewBuilder var content: () -> Content
+    @State private var offset: CGFloat = 0
+    @State private var armed = false
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.yellow)
+                .overlay(alignment: .leading) {
+                    Image(systemName: isPinned ? "pin.slash.fill" : "pin.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.leading, 22)
+                        .opacity(offset > 16 ? 1 : 0)
+                }
+                .opacity(offset > 0 ? 1 : 0)
+
+            content()
+                .offset(x: offset)
+        }
+        .gesture(
+            DragGesture(minimumDistance: 14)
+                .onChanged { v in
+                    // Engage only for a clearly-horizontal rightward drag,
+                    // so vertical scrolling is unaffected.
+                    guard v.translation.width > 0,
+                          v.translation.width > abs(v.translation.height) else { return }
+                    offset = min(v.translation.width, 96)
+                    armed = offset > 64
+                }
+                .onEnded { _ in
+                    let shouldToggle = offset > 64
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { offset = 0 }
+                    if shouldToggle { onTogglePin() }
+                    armed = false
+                }
+        )
+        .sensoryFeedback(.impact(weight: .medium), trigger: armed) { _, now in
+            now ? .impact(weight: .medium) : nil
+        }
     }
 }
