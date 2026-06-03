@@ -51,9 +51,6 @@ struct DocumentViewerView: View {
     /// Drives the pre-filled medication editor when the user taps
     /// "Add to Meds" in an entity's action menu.
     @State private var entityMedToAdd: DetectedMedication?
-    /// Bumped when the user tracks/untracks a marker so the action menu
-    /// re-renders and flips its "Add" ↔ "Added" label in place.
-    @State private var entityActionVersion = 0
 
     /// Two explicit interaction modes — replaces the long-press-to-engage
     /// pattern that kept fighting with scroll. Browse is the default
@@ -494,96 +491,18 @@ struct DocumentViewerView: View {
                         .ignoresSafeArea()
                         .onTapGesture { dismissEntityPopover() }
 
-                    entityActionMenu(popover)
-                        .position(x: clampedX, y: localY)
-                        .transition(.scale(scale: 0.55, anchor: .bottom).combined(with: .opacity))
+                    EntityActionMenu(
+                        entity: popover.entity,
+                        onAsk: { askAboutEntity(popover) },
+                        onAddMedication: { med in
+                            dismissEntityPopover()
+                            entityMedToAdd = med
+                        }
+                    )
+                    .position(x: clampedX, y: localY)
+                    .transition(.scale(scale: 0.55, anchor: .bottom).combined(with: .opacity))
                 }
             }
-        }
-    }
-
-    private func entityActionMenu(_ popover: EntityPopover) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(popover.entity.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.primary)
-                if let sub = popover.entity.subtitle {
-                    Text(sub)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Divider()
-
-            Button {
-                askAboutEntity(popover)
-            } label: {
-                Label("Ask Localabs about this", systemImage: "sparkles")
-                    .font(.system(size: 14, weight: .medium))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-
-            entityPrimaryAction(popover.entity)
-        }
-        .padding(14)
-        .frame(width: 232)
-        .glassEffect(
-            .regular.tint(.blue.opacity(0.12)),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-        )
-    }
-
-    /// The entity-specific action row: "Add to Meds" / "Already added to
-    /// Meds" for a medication, and "Add to Health Trend" / "Added to
-    /// Health Trends" (a toggle) for a lab value. Re-reads its state on
-    /// every render so it flips in place when `entityActionVersion` bumps.
-    @ViewBuilder
-    private func entityPrimaryAction(_ entity: HighlightEntity) -> some View {
-        switch entity {
-        case .medication(let med):
-            let added = Medication.loadAll().contains {
-                $0.name.caseInsensitiveCompare(med.name) == .orderedSame
-            }
-            if added {
-                Label("Already added to Meds", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.green)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Button {
-                    dismissEntityPopover()
-                    entityMedToAdd = med
-                } label: {
-                    Label("Add to Meds", systemImage: "pills.fill")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.orange)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-            }
-
-        case .labValue(let lv):
-            let tracked = TrackedMarkers.isTracked(lv.canonicalName)
-            Button {
-                if tracked {
-                    TrackedMarkers.remove(lv.canonicalName)
-                } else {
-                    TrackedMarkers.add(lv.canonicalName)
-                }
-                entityActionVersion += 1   // flip the label in place
-            } label: {
-                Label(
-                    tracked ? "Added to Health Trends" : "Add to Health Trend",
-                    systemImage: tracked ? "checkmark.circle.fill" : "chart.line.uptrend.xyaxis"
-                )
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(tracked ? .green : .blue)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
         }
     }
 
@@ -784,26 +703,11 @@ struct DocumentViewerView: View {
         entityMaps[currentPageIndex]?[blockID]
     }
 
-    /// Match a page's OCR blocks to the report's important entities:
-    /// every detected medication, plus lab values that are out of range
-    /// (the "notable" ones — highlighting an entire normal panel would
-    /// just be noise). Matched copy-only by text containment, so a block
-    /// only lights up if its text actually contains the entity name.
+    /// Match a page's OCR blocks to the report's important entities via
+    /// the shared matcher (every medication + out-of-range lab values),
+    /// so the viewer and the dashboard preview highlight the same things.
     private func computeEntities(for blocks: [TextBlock]) -> [UUID: HighlightEntity] {
-        let meds = report.detectedMedications ?? []
-        let notable = (report.labValues ?? []).filter(\.isOutOfRange)
-        guard !meds.isEmpty || !notable.isEmpty else { return [:] }
-
-        var map: [UUID: HighlightEntity] = [:]
-        for block in blocks {
-            let lower = block.text.lowercased()
-            if let med = meds.first(where: { !$0.name.isEmpty && lower.contains($0.name.lowercased()) }) {
-                map[block.id] = .medication(med)
-            } else if let lv = notable.first(where: { !$0.rawName.isEmpty && lower.contains($0.rawName.lowercased()) }) {
-                map[block.id] = .labValue(lv)
-            }
-        }
-        return map
+        HighlightEntity.match(blocks: blocks.map { ($0.id, $0.text) }, in: report)
     }
 
     private func loadAllPages() {
