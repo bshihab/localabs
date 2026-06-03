@@ -8,6 +8,10 @@ struct MedsView: View {
     @State private var showAddSheet = false
     @State private var editingMed: Medication?
     @State private var pendingDeleteID: UUID?
+    /// Drives the pre-visit prep sheet (#30). Lives on the Meds tab as
+    /// the health-management hub — prepping a visit naturally clusters
+    /// with the user's medication list.
+    @State private var showVisitPrep = false
     /// Bumped on each adherence toggle to force the Today rows +
     /// streak labels to recompute (adherence lives outside `meds`).
     @State private var adherenceVersion = 0
@@ -21,6 +25,9 @@ struct MedsView: View {
                     content
                 }
             }
+            // Pre-visit prep entry, pinned above the list so it's
+            // always reachable — even from the empty state.
+            .safeAreaInset(edge: .top) { visitPrepBanner }
             .navigationTitle("Meds")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -34,6 +41,9 @@ struct MedsView: View {
                     }
                     .accessibilityLabel("Add medication")
                 }
+            }
+            .sheet(isPresented: $showVisitPrep) {
+                PreVisitPrepView()
             }
             .sheet(isPresented: $showAddSheet) {
                 MedicationEditSheet(editing: editingMed)
@@ -69,6 +79,54 @@ struct MedsView: View {
 
     private func reload() {
         meds = Medication.loadAll()
+    }
+
+    // MARK: - Visit prep banner (#30)
+
+    /// Tappable glass banner that opens pre-visit prep — a one-screen
+    /// summary (trends + symptoms + meds + questions) to bring to a
+    /// doctor's appointment.
+    private var visitPrepBanner: some View {
+        Button {
+            showVisitPrep = true
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "stethoscope")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.blue, Color.blue.opacity(0.8)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ),
+                        in: Circle()
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Prep for a doctor visit")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text("Your trends, symptoms, meds & questions")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .background(.bar)
     }
 
     private var activeMeds: [Medication] { meds.filter(\.isActive) }

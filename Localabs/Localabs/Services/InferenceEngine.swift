@@ -2108,4 +2108,63 @@ final class InferenceEngine: ObservableObject {
 
         return context.predict(prompt: prompt, maxTokens: 450)
     }
+
+    // MARK: - Pre-visit prep (#30)
+
+    /// Generates a handful of concise, specific questions the user could
+    /// ask their doctor, from a compact context summary (their worsening
+    /// trends, recent symptoms, and current medications). Questions only
+    /// — the prompt forbids diagnosis or treatment recommendations, in
+    /// keeping with the app's informational-not-diagnostic contract.
+    /// Returns [] if the model isn't loaded or produced nothing usable.
+    func generateVisitQuestions(contextSummary: String) async -> [String] {
+        guard let context = llamaContext,
+              !contextSummary.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+
+        let prompt = """
+        <start_of_turn>user
+        A patient is preparing for a doctor's visit. Based ONLY on the context below, write 4 to 6 short, specific questions the patient should ask their doctor.
+
+        Rules:
+        - One question per line. No numbering, no bullet points, no preamble, no closing text.
+        - Make each question specific to the context — reference the actual trend, symptom, or medication.
+        - Do NOT diagnose, and do NOT recommend treatments or medications. Only questions to ask.
+        - Keep each question to a single sentence.
+
+        Context:
+        \(contextSummary)
+
+        Questions:
+        <end_of_turn>
+        <start_of_turn>model
+        """
+
+        var collected = ""
+        for await piece in context.predict(prompt: prompt, maxTokens: 300) {
+            if isInferenceCancelled || Task.isCancelled { break }
+            collected += piece
+        }
+
+        return collected
+            .split(separator: "\n")
+            .map { Self.stripQuestionMarker(String($0)) }
+            .filter { $0.count > 8 }
+            .prefix(6)
+            .map { String($0) }
+    }
+
+    /// Strips a leading list marker ("- ", "* ", "• ", "1.", "2)") that
+    /// the model may prepend despite being told not to, leaving the bare
+    /// question text.
+    private static func stripQuestionMarker(_ line: String) -> String {
+        var t = line.trimmingCharacters(in: .whitespaces)
+        if let first = t.first, "-*•".contains(first) {
+            t.removeFirst()
+            return t.trimmingCharacters(in: .whitespaces)
+        }
+        if let m = t.range(of: #"^\d+[.)]\s*"#, options: .regularExpression) {
+            t.removeSubrange(m)
+        }
+        return t.trimmingCharacters(in: .whitespaces)
+    }
 }
