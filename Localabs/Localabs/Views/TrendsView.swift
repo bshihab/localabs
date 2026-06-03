@@ -36,6 +36,17 @@ struct TrendsView: View {
     /// Bumped when the user pins/unpins a marker so the lab list re-sorts
     /// pinned markers to the top in place.
     @State private var trackedVersion = 0
+    /// A tapped lab-trend card + the global tap point — drives the same
+    /// liquid-glass action menu the scan highlights use (#31).
+    @State private var trendPopover: EntityPopover?
+    /// Drives "Ask Localabs about this" from a tapped trend.
+    @State private var trendAsk: TrendAsk?
+
+    struct TrendAsk: Identifiable {
+        let id = UUID()
+        let marker: String
+        let seedText: String
+    }
     /// Which data source the tab is showing — Apple Health metrics or
     /// lab-report trends. Replaces the old single long scroll.
     @State private var dataSource: DataSource = .health
@@ -152,6 +163,26 @@ struct TrendsView: View {
                 )
                 .environmentObject(engine)
             }
+            // "Ask Localabs about this" from a tapped trend.
+            .sheet(item: $trendAsk) { ask in
+                if let report = reportContaining(ask.marker) {
+                    FollowUpChatView(
+                        reportID: report.id,
+                        selectedText: ask.seedText,
+                        fullReportContext: report.patientSummary,
+                        ocrText: report.rawText,
+                        isWholeDocumentAsk: false,
+                        detectedTable: nil,
+                        extraText: ""
+                    )
+                    .environmentObject(engine)
+                }
+            }
+            // The tapped-trend action menu, floating at the tap point.
+            .overlay { trendPopoverOverlay }
+            .sensoryFeedback(trigger: trendPopover?.id) { _, new in
+                new != nil ? .impact(weight: .light) : nil
+            }
         }
     }
 
@@ -207,6 +238,20 @@ struct TrendsView: View {
                                     .padding(10)
                             }
                         }
+                        .contentShape(Rectangle())
+                        // Tap (not swipe) → the same liquid-glass menu the
+                        // scan highlights use, anchored at the tap point.
+                        .gesture(
+                            SpatialTapGesture(coordinateSpace: .global).onEnded { v in
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
+                                    trendPopover = EntityPopover(
+                                        entity: .labValue(makeLabValue(trend)),
+                                        point: v.location,
+                                        blockID: UUID()
+                                    )
+                                }
+                            }
+                        )
                 }
             }
 
@@ -228,6 +273,67 @@ struct TrendsView: View {
         }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             trackedVersion += 1
+        }
+    }
+
+    /// Build a LabValue from a trend's latest reading so the shared
+    /// EntityActionMenu can act on it (recheck toggle + Ask).
+    private func makeLabValue(_ trend: LabTrend) -> LabValue {
+        LabValue(
+            canonicalName: trend.canonicalName,
+            rawName: trend.canonicalName,
+            value: trend.latest?.value ?? 0,
+            unit: trend.unit,
+            referenceRange: trend.referenceRangeLabel,
+            concernDirection: trend.concern,
+            rangeFromReport: nil
+        )
+    }
+
+    /// The most recent own report that measured this marker — used as the
+    /// chat's report context for "Ask Localabs about this".
+    private func reportContaining(_ marker: String) -> StructuredReport? {
+        let key = LabValue.normalizeKey(marker)
+        return LocalStorageService.shared.getHistory()
+            .filter(\.isOwnReport)
+            .sorted { $0.effectiveDate > $1.effectiveDate }
+            .first { ($0.labValues ?? []).contains { LabValue.normalizeKey($0.canonicalName) == key } }
+    }
+
+    /// The liquid-glass action menu for a tapped trend, popped up at the
+    /// tap point with a dismiss scrim — mirrors the scan-highlight menu.
+    @ViewBuilder
+    private var trendPopoverOverlay: some View {
+        if let popover = trendPopover {
+            GeometryReader { geo in
+                let origin = geo.frame(in: .global).origin
+                let localX = min(max(popover.point.x - origin.x, 128), geo.size.width - 128)
+                let localY = max(popover.point.y - origin.y - 118, 100)
+
+                ZStack {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
+                                trendPopover = nil
+                            }
+                        }
+
+                    EntityActionMenu(
+                        entity: popover.entity,
+                        isOwnReport: true,
+                        onAsk: {
+                            let title = popover.entity.title
+                            let seed = popover.entity.subtitle.map { "\(title) — \($0)" } ?? title
+                            trendPopover = nil
+                            trendAsk = TrendAsk(marker: title, seedText: seed)
+                        },
+                        onAddMedication: { _ in }   // trends are never meds
+                    )
+                    .position(x: localX, y: localY)
+                    .transition(.scale(scale: 0.55, anchor: .bottom).combined(with: .opacity))
+                }
+            }
         }
     }
 
