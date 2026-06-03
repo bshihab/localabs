@@ -48,9 +48,6 @@ struct DocumentViewerView: View {
     /// The entity the user tapped, plus the GLOBAL tap point the
     /// liquid-glass action menu pops up from. nil = no menu showing.
     @State private var entityPopover: EntityPopover?
-    /// Drives the pre-filled medication editor when the user taps
-    /// "Add to Meds" in an entity's action menu.
-    @State private var entityMedToAdd: DetectedMedication?
 
     /// Two explicit interaction modes — replaces the long-press-to-engage
     /// pattern that kept fighting with scroll. Browse is the default
@@ -457,14 +454,6 @@ struct DocumentViewerView: View {
         .overlay {
             entityPopoverOverlay
         }
-        // "Add to Meds" from an entity's action menu, pre-filled.
-        .sheet(item: $entityMedToAdd) { med in
-            MedicationEditSheet(
-                sourceReportID: report.id,
-                prefilledName: med.name,
-                prefilledDose: med.dose
-            )
-        }
     }
 
     // MARK: - Entity action menu (#31)
@@ -493,11 +482,7 @@ struct DocumentViewerView: View {
 
                     EntityActionMenu(
                         entity: popover.entity,
-                        onAsk: { askAboutEntity(popover) },
-                        onAddMedication: { med in
-                            dismissEntityPopover()
-                            entityMedToAdd = med
-                        }
+                        onAsk: { askAboutEntity(popover) }
                     )
                     .position(x: clampedX, y: localY)
                     .transition(.scale(scale: 0.55, anchor: .bottom).combined(with: .opacity))

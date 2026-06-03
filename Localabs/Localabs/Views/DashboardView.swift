@@ -481,10 +481,6 @@ struct DashboardView: View {
                             let entity = popover.entity
                             previewPopover = nil
                             previewAsk = AskEntity(entity: entity)
-                        },
-                        onAddMedication: { med in
-                            previewPopover = nil
-                            medToAdd = med
                         }
                     )
                     .position(x: clampedX, y: localY)
@@ -716,15 +712,35 @@ struct DashboardView: View {
         }
     }
 
-    /// Map a normalized Vision box (bottom-left origin) to the preview
-    /// page's displayed rect. Assumes the page fills the frame (true for
-    /// the uniform letter-size pages reports almost always are).
-    private func convertPreviewRect(_ box: CGRect, width: CGFloat, height: CGFloat) -> CGRect {
-        CGRect(
-            x: box.origin.x * width,
-            y: (1 - box.origin.y - box.height) * height,
-            width: box.width * width,
-            height: box.height * height
+    /// Map a normalized Vision box (bottom-left origin) onto the actual
+    /// DISPLAYED image rect inside the frame. `.scaledToFit()` letterboxes
+    /// when the page's aspect differs from the frame's, so we compute the
+    /// rendered rect (with its centering offset) and map into that —
+    /// otherwise highlights drift off the real values on any page whose
+    /// aspect isn't the frame's.
+    private func convertPreviewRect(_ box: CGRect, image: UIImage, frameWidth: CGFloat, frameHeight: CGFloat) -> CGRect {
+        let imgAspect = image.size.width / max(image.size.height, 1)
+        let frameAspect = frameWidth / max(frameHeight, 1)
+
+        var renderedW = frameWidth
+        var renderedH = frameHeight
+        var offsetX: CGFloat = 0
+        var offsetY: CGFloat = 0
+        if imgAspect > frameAspect {
+            // Image is wider → fills width, letterboxed top/bottom.
+            renderedH = frameWidth / imgAspect
+            offsetY = (frameHeight - renderedH) / 2
+        } else {
+            // Image is taller → fills height, letterboxed left/right.
+            renderedW = frameHeight * imgAspect
+            offsetX = (frameWidth - renderedW) / 2
+        }
+
+        return CGRect(
+            x: offsetX + box.origin.x * renderedW,
+            y: offsetY + (1 - box.origin.y - box.height) * renderedH,
+            width: box.width * renderedW,
+            height: box.height * renderedH
         )
     }
 
@@ -732,15 +748,18 @@ struct DashboardView: View {
     /// pops the shared action menu from the tap point.
     @ViewBuilder
     private func previewHighlights(page: Int, pageHeight: CGFloat) -> some View {
-        if previewWidth > 0, let highlights = previewEntities[page] {
+        if previewWidth > 0,
+           previewImages.indices.contains(page),
+           let highlights = previewEntities[page] {
+            let img = previewImages[page]
             ZStack(alignment: .topLeading) {
                 ForEach(highlights) { h in
-                    let rect = convertPreviewRect(h.box, width: previewWidth, height: pageHeight)
+                    let rect = convertPreviewRect(h.box, image: img, frameWidth: previewWidth, frameHeight: pageHeight)
                     RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.blue.opacity(0.16))
+                        .fill(Color.blue.opacity(0.18))
                         .overlay(
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .strokeBorder(Color.blue.opacity(0.55), lineWidth: 1.2)
+                                .strokeBorder(Color.blue.opacity(0.6), lineWidth: 1.3)
                         )
                         .frame(width: rect.width, height: rect.height)
                         .position(x: rect.midX, y: rect.midY)

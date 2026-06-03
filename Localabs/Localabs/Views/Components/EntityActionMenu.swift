@@ -2,22 +2,23 @@ import SwiftUI
 
 /// The liquid-glass action menu that pops up from a tapped scan
 /// highlight (#31). Shared by the document viewer and the dashboard
-/// scan preview so the actions and their "added" states stay identical.
+/// scan preview so the actions and their on/off states stay identical.
 ///
-/// "Ask Localabs about this" and "Add to Meds" are host-specific — the
-/// viewer selects a block and opens its in-place chat, the dashboard
-/// presents one — so they're passed in as closures. The Health-Trend
-/// toggle is self-contained (it just writes `TrackedMarkers`).
+/// "Ask Localabs about this" is host-specific (the viewer selects a
+/// block and opens its in-place chat; the dashboard presents one), so
+/// it's passed in. The "Add to Meds" and "Add to Health Trend" controls
+/// are self-contained **toggles** — flip them on to add, off to remove —
+/// so the menu always reflects, and lets the user change, the current
+/// state right there.
 struct EntityActionMenu: View {
     let entity: HighlightEntity
     let onAsk: () -> Void
-    let onAddMedication: (DetectedMedication) -> Void
-    /// Bumped when the user tracks/untracks a marker so the label flips
-    /// in place between "Add to Health Trend" and "Added to Health Trends".
+    /// Bumped whenever a toggle changes so the labels/switch states
+    /// re-read their backing stores and update in place.
     @State private var version = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entity.title)
                     .font(.system(size: 14, weight: .semibold))
@@ -32,14 +33,16 @@ struct EntityActionMenu: View {
             Divider()
 
             Button(action: onAsk) {
-                rowLabel("Ask Localabs about this", "sparkles", .primary)
+                Label("Ask Localabs about this", systemImage: "sparkles")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
 
-            primaryAction
+            primaryToggle
         }
         .padding(14)
-        .frame(width: 232)
+        .frame(width: 248)
         .glassEffect(
             .regular.tint(.blue.opacity(0.12)),
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -47,50 +50,72 @@ struct EntityActionMenu: View {
     }
 
     @ViewBuilder
-    private var primaryAction: some View {
+    private var primaryToggle: some View {
+        // `version` is read so flipping a toggle re-renders this row.
+        let _ = version
         switch entity {
         case .medication(let med):
-            let added = Medication.loadAll().contains {
-                $0.name.caseInsensitiveCompare(med.name) == .orderedSame
+            let added = isMedAdded(med)
+            Toggle(isOn: medBinding(med)) {
+                Label(added ? "Added to Meds" : "Add to Meds", systemImage: "pills.fill")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(added ? .green : .orange)
             }
-            if added {
-                rowLabel("Already added to Meds", "checkmark.circle.fill", .green)
-            } else {
-                Button {
-                    onAddMedication(med)
-                } label: {
-                    rowLabel("Add to Meds", "pills.fill", .orange)
-                }
-                .buttonStyle(.plain)
-            }
+            .tint(.orange)
 
         case .labValue(let lv):
-            // `version` referenced so the toggle re-renders this row.
-            let _ = version
             let tracked = TrackedMarkers.isTracked(lv.canonicalName)
-            Button {
-                if tracked {
-                    TrackedMarkers.remove(lv.canonicalName)
-                } else {
-                    TrackedMarkers.add(lv.canonicalName)
-                }
-                version += 1
-            } label: {
-                rowLabel(
+            Toggle(isOn: trendBinding(lv)) {
+                Label(
                     tracked ? "Added to Health Trends" : "Add to Health Trend",
-                    tracked ? "checkmark.circle.fill" : "chart.line.uptrend.xyaxis",
-                    tracked ? .green : .blue
+                    systemImage: "chart.line.uptrend.xyaxis"
                 )
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(tracked ? .green : .blue)
             }
-            .buttonStyle(.plain)
+            .tint(.blue)
         }
     }
 
-    private func rowLabel(_ text: String, _ icon: String, _ color: Color) -> some View {
-        Label(text, systemImage: icon)
-            .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(color)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    // MARK: - Bindings
+
+    private func trendBinding(_ lv: LabValue) -> Binding<Bool> {
+        Binding(
+            get: { TrackedMarkers.isTracked(lv.canonicalName) },
+            set: { on in
+                if on { TrackedMarkers.add(lv.canonicalName) }
+                else { TrackedMarkers.remove(lv.canonicalName) }
+                version += 1
+            }
+        )
+    }
+
+    private func medBinding(_ med: DetectedMedication) -> Binding<Bool> {
+        Binding(
+            get: { isMedAdded(med) },
+            set: { on in
+                if on {
+                    // Quick-add as "as needed" (no reminder times) with the
+                    // dose we detected — the user can set a schedule later
+                    // in the Meds tab.
+                    Medication.save(Medication(name: med.name, dose: med.dose))
+                } else {
+                    for existing in Medication.loadAll()
+                    where existing.name.caseInsensitiveCompare(med.name) == .orderedSame {
+                        let id = existing.id
+                        Medication.delete(id: id)
+                        Task { @MainActor in await MedicationService.cancel(medID: id) }
+                    }
+                }
+                version += 1
+            }
+        )
+    }
+
+    private func isMedAdded(_ med: DetectedMedication) -> Bool {
+        Medication.loadAll().contains {
+            $0.name.caseInsensitiveCompare(med.name) == .orderedSame
+        }
     }
 }
 
