@@ -1,29 +1,30 @@
 import Foundation
 
+/// The on-device model Localabs runs. Single option now — MedGemma 4B.
+/// TinyLlama was removed: it isn't medically tuned and its output is too
+/// weak to trust in a health app. The enum shape is kept (CaseIterable,
+/// Codable) so the model picker and persistence keep working, and a
+/// stored value that no longer matches falls back to `.medGemma4B`.
 enum AvailableModel: String, CaseIterable, Identifiable, Codable {
     case medGemma4B = "medgemma_4b"
-    case tinyLlama = "tinyllama_1_1b"
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
         case .medGemma4B: return "MedGemma 4B"
-        case .tinyLlama:  return "TinyLlama 1.1B (dev)"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .medGemma4B: return "Google's medical-tuned Gemma. Recommended."
-        case .tinyLlama:  return "Tiny model for fast testing. Not medically tuned."
+        case .medGemma4B: return "Google's medical-tuned Gemma. Runs entirely on your device."
         }
     }
 
     var filename: String {
         switch self {
         case .medGemma4B: return "medgemma-4b-it-Q4_K_M.gguf"
-        case .tinyLlama:  return "tinyllama-1.1b-chat-v1.0.q4_k_m.gguf"
         }
     }
 
@@ -31,15 +32,12 @@ enum AvailableModel: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .medGemma4B:
             return URL(string: "https://huggingface.co/unsloth/medgemma-4b-it-GGUF/resolve/main/medgemma-4b-it-Q4_K_M.gguf")!
-        case .tinyLlama:
-            return URL(string: "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.q4_k_m.gguf")!
         }
     }
 
     var expectedSizeBytes: Int64 {
         switch self {
         case .medGemma4B: return 2_490_000_000
-        case .tinyLlama:    return 637_000_000
         }
     }
 

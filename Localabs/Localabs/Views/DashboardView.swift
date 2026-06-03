@@ -191,18 +191,6 @@ struct DashboardView: View {
                     .padding(.horizontal)
                     .padding(.top, 8)
 
-                GlassEffectContainer(spacing: 14) {
-                    HStack(spacing: 14) {
-                        StatusBadge(
-                            label: "Status",
-                            value: statusValue,
-                            color: statusColor
-                        )
-                        StatusBadge(label: "Health Sync", value: "Active", color: .blue)
-                    }
-                }
-                .padding(.horizontal)
-
                 summaryCard
                     .padding(.horizontal)
 
@@ -1009,27 +997,6 @@ struct DashboardView: View {
 
     // MARK: - Status badge
 
-    /// Reflects the *actual* state of the underlying analysis, not just
-    /// "do we have a report object." Pause/resume in particular needs
-    /// to surface as "Paused" rather than "Analyzed" — the report
-    /// object exists but the run never finished.
-    private var statusValue: String {
-        if engine.isPaused { return "Paused" }
-        if engine.isProcessing { return "Analyzing" }
-        if let report = currentReport {
-            return report.isIncomplete ? "Paused" : "Analyzed"
-        }
-        return "Pending"
-    }
-
-    private var statusColor: Color {
-        if engine.isPaused { return .orange }
-        if let report = currentReport, report.isIncomplete { return .orange }
-        if engine.isProcessing { return .blue }
-        if currentReport != nil { return .green }
-        return .secondary
-    }
-
     // MARK: - Report-time Apple Health snapshot
 
     /// "Apple Health used in this analysis" card. Shows the exact
@@ -1315,27 +1282,6 @@ struct DashboardView: View {
 }
 
 // MARK: - Sub-components
-
-struct StatusBadge: View {
-    let label: String
-    let value: String
-    let color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(color)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-}
 
 struct MetricPill: View {
     let value: String
