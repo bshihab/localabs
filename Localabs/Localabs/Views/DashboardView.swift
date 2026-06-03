@@ -472,7 +472,7 @@ struct DashboardView: View {
                 let origin = geo.frame(in: .global).origin
                 let localX = popover.point.x - origin.x
                 let clampedX = min(max(localX, 128), geo.size.width - 128)
-                let localY = max(popover.point.y - origin.y - 70, 96)
+                let localY = max(popover.point.y - origin.y - 118, 100)
 
                 ZStack {
                     Color.black.opacity(0.001)
@@ -485,6 +485,10 @@ struct DashboardView: View {
                             let entity = popover.entity
                             previewPopover = nil
                             previewAsk = AskEntity(entity: entity)
+                        },
+                        onAddMedication: { med in
+                            previewPopover = nil
+                            medToAdd = med
                         }
                     )
                     .position(x: clampedX, y: localY)

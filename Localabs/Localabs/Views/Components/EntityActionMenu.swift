@@ -13,6 +13,9 @@ import SwiftUI
 struct EntityActionMenu: View {
     let entity: HighlightEntity
     let onAsk: () -> Void
+    /// Opens the Meds editor (host-presented) so the user can set the
+    /// dose/schedule when adding a medication.
+    let onAddMedication: (DetectedMedication) -> Void
     /// Bumped whenever a toggle changes so the labels/switch states
     /// re-read their backing stores and update in place.
     @State private var version = 0
@@ -55,13 +58,24 @@ struct EntityActionMenu: View {
         let _ = version
         switch entity {
         case .medication(let med):
-            let added = isMedAdded(med)
-            Toggle(isOn: medBinding(med)) {
-                Label(added ? "Added to Meds" : "Add to Meds", systemImage: "pills.fill")
+            if isMedAdded(med) {
+                // Already tracked — show status; manage it in the Meds tab.
+                Label("Added to Meds", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(added ? .green : .orange)
+                    .foregroundStyle(.green)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                // Opens the editor so the user can set dose/schedule/dates.
+                Button {
+                    onAddMedication(med)
+                } label: {
+                    Label("Add to Meds", systemImage: "pills.fill")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
             }
-            .tint(.orange)
 
         case .labValue(let lv):
             let tracked = TrackedMarkers.isTracked(lv.canonicalName)
@@ -85,28 +99,6 @@ struct EntityActionMenu: View {
             set: { on in
                 if on { TrackedMarkers.add(lv.canonicalName) }
                 else { TrackedMarkers.remove(lv.canonicalName) }
-                version += 1
-            }
-        )
-    }
-
-    private func medBinding(_ med: DetectedMedication) -> Binding<Bool> {
-        Binding(
-            get: { isMedAdded(med) },
-            set: { on in
-                if on {
-                    // Quick-add as "as needed" (no reminder times) with the
-                    // dose we detected — the user can set a schedule later
-                    // in the Meds tab.
-                    Medication.save(Medication(name: med.name, dose: med.dose))
-                } else {
-                    for existing in Medication.loadAll()
-                    where existing.name.caseInsensitiveCompare(med.name) == .orderedSame {
-                        let id = existing.id
-                        Medication.delete(id: id)
-                        Task { @MainActor in await MedicationService.cancel(medID: id) }
-                    }
-                }
                 version += 1
             }
         )

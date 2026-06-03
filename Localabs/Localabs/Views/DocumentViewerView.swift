@@ -48,6 +48,9 @@ struct DocumentViewerView: View {
     /// The entity the user tapped, plus the GLOBAL tap point the
     /// liquid-glass action menu pops up from. nil = no menu showing.
     @State private var entityPopover: EntityPopover?
+    /// Drives the pre-filled Meds editor when the user taps "Add to Meds"
+    /// in an entity's action menu (so they can set dose/schedule/dates).
+    @State private var entityMedToAdd: DetectedMedication?
 
     /// Two explicit interaction modes — replaces the long-press-to-engage
     /// pattern that kept fighting with scroll. Browse is the default
@@ -467,6 +470,14 @@ struct DocumentViewerView: View {
         .overlay {
             entityPopoverOverlay
         }
+        // "Add to Meds" from an entity's action menu — pre-filled editor.
+        .sheet(item: $entityMedToAdd) { med in
+            MedicationEditSheet(
+                sourceReportID: report.id,
+                prefilledName: med.name,
+                prefilledDose: med.dose
+            )
+        }
     }
 
     // MARK: - Entity action menu (#31)
@@ -484,9 +495,9 @@ struct DocumentViewerView: View {
                 // then clamp so the menu can't run off either edge.
                 let localX = popover.point.x - origin.x
                 let clampedX = min(max(localX, 128), geo.size.width - 128)
-                // Sit the menu above the tap so it reads as rising out of
-                // the value; keep it on-screen near the top.
-                let localY = max(popover.point.y - origin.y - 70, 96)
+                // Sit the menu well above the tap so it never covers the
+                // value the user just tapped; keep it on-screen near the top.
+                let localY = max(popover.point.y - origin.y - 118, 100)
 
                 ZStack {
                     Color.black.opacity(0.001)
@@ -495,7 +506,11 @@ struct DocumentViewerView: View {
 
                     EntityActionMenu(
                         entity: popover.entity,
-                        onAsk: { askAboutEntity(popover) }
+                        onAsk: { askAboutEntity(popover) },
+                        onAddMedication: { med in
+                            dismissEntityPopover()
+                            entityMedToAdd = med
+                        }
                     )
                     .position(x: clampedX, y: localY)
                     .transition(.scale(scale: 0.55, anchor: .bottom).combined(with: .opacity))
