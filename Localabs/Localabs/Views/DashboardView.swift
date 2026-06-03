@@ -670,7 +670,11 @@ struct DashboardView: View {
     /// resident in RAM, so parallel Vision passes court a jetsam.
     private func loadPreviewEntities() {
         previewEntities = [:]
-        guard let report = currentReport, report.isOwnReport else { return }
+        // Highlights show for ANY report, including ones tagged as someone
+        // else's — the user can see and tap them (the menu just limits
+        // what they can do there). Ownership is handled in the menu, not
+        // by hiding the highlights.
+        guard let report = currentReport else { return }
         let hasNotable = (report.labValues ?? []).contains(where: \.isOutOfRange)
             || !(report.detectedMedications ?? []).isEmpty
         guard hasNotable else { return }
