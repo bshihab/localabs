@@ -15,7 +15,7 @@ struct ContentView: View {
             TabView(selection: $selectedTab) {
                 ScanView()
                     .tabItem {
-                        Label("Scan", systemImage: "doc.text.viewfinder")
+                        Label("Home", systemImage: "house.fill")
                     }
                     .tag(0)
 
@@ -76,6 +76,11 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .openMedsFromReminder)) { _ in
                 selectedTab = 2
             }
+            // Tapping the evening post-visit check-in notification lands
+            // on the Home tab (tag 0); ScanView opens the check-in sheet.
+            .onReceive(NotificationCenter.default.publisher(for: .openVisitCheckIn)) { _ in
+                selectedTab = 0
+            }
             // Foreground path on app activation: re-check armed Health
             // alerts, and re-sync medication reminders so edits made
             // while backgrounded (or pending requests iOS dropped) are
@@ -85,6 +90,7 @@ struct ContentView: View {
                 Task { @MainActor in
                     await HealthAlertService.shared.evaluate()
                     await MedicationService.syncAll()
+                    await VisitService.syncUpcoming()
                 }
             }
         } else {

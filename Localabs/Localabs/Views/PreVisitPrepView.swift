@@ -330,9 +330,13 @@ struct PreVisitPrepView: View {
 
     private func persistAppointment() {
         if hasAppointment {
-            Appointment(date: appointmentDate, note: appointmentNote).save()
+            let appt = Appointment(date: appointmentDate, note: appointmentNote)
+            appt.save()
+            // Arm (or re-arm) the evening post-visit check-in (#34).
+            Task { @MainActor in await VisitService.schedule(for: appt) }
         } else {
             Appointment.clear()
+            Task { @MainActor in VisitService.cancel() }
         }
     }
 

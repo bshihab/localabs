@@ -10,6 +10,10 @@ extension Notification.Name {
     /// Posted when the user taps a medication-reminder notification.
     /// ContentView switches to the Meds tab to check off the dose.
     static let openMedsFromReminder = Notification.Name("localabs.openMedsFromReminder")
+    /// Posted when the user taps the evening post-visit check-in
+    /// notification. ContentView switches to the Home tab and ScanView
+    /// opens the check-in flow.
+    static let openVisitCheckIn = Notification.Name("localabs.openVisitCheckIn")
 }
 
 @main
@@ -115,6 +119,8 @@ final class LocalabsAppDelegate: NSObject, UIApplicationDelegate, UNUserNotifica
                     NotificationCenter.default.post(name: .openTrendsFromAlert, object: nil)
                 case "meds":
                     NotificationCenter.default.post(name: .openMedsFromReminder, object: nil)
+                case "visitcheckin":
+                    NotificationCenter.default.post(name: .openVisitCheckIn, object: nil)
                 default:
                     break
                 }

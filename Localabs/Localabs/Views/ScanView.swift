@@ -21,6 +21,12 @@ struct ScanView: View {
     /// dismissing the alert clears `report` so ScanView snaps back
     /// to the idle upload view.
     @State private var showNonHealthAlert = false
+    /// The user's upcoming (or just-passed) appointment, reflected on
+    /// the Home visit card. Reloaded on appear and after the prep /
+    /// check-in sheets close so the card always shows current state.
+    @State private var upcomingVisit: Appointment?
+    @State private var showVisitPrep = false
+    @State private var showVisitCheckIn = false
 
     var body: some View {
         NavigationStack {
@@ -136,6 +142,16 @@ struct ScanView: View {
                         .id(report.id)
                 }
             }
+            // Visit prep + post-visit check-in sheets, the appearance
+            // loader, and the notification deep-link — bundled into one
+            // modifier so the body's modifier chain stays short enough
+            // for the SwiftUI type-checker.
+            .modifier(VisitFlowModifier(
+                showVisitPrep: $showVisitPrep,
+                showVisitCheckIn: $showVisitCheckIn,
+                visit: upcomingVisit,
+                onLoad: loadVisit
+            ))
         }
     }
 
@@ -143,6 +159,10 @@ struct ScanView: View {
 
     private var uploadView: some View {
         VStack(spacing: 0) {
+            visitCard
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+
             Spacer()
 
             ZStack {
@@ -225,6 +245,91 @@ struct ScanView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 40)
         }
+    }
+
+    // MARK: - Visit card (#30 / #34)
+
+    /// Whether the upcoming appointment's time has already passed —
+    /// i.e. the visit happened and a check-in is what's relevant now.
+    private var visitHasPassed: Bool {
+        guard let visit = upcomingVisit else { return false }
+        return visit.date < Date()
+    }
+
+    /// The Home tab's "doctor visit" entry. Three states:
+    ///   - no appointment → "Prep for a doctor visit" (opens prep)
+    ///   - upcoming appointment → shows the date, opens prep
+    ///   - appointment time passed → "How did your visit go?" (opens
+    ///     the post-visit check-in)
+    @ViewBuilder
+    private var visitCard: some View {
+        Button {
+            if visitHasPassed {
+                showVisitCheckIn = true
+            } else {
+                showVisitPrep = true
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: visitHasPassed ? "checkmark.circle.fill" : "stethoscope")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(
+                        LinearGradient(
+                            colors: visitHasPassed
+                                ? [Color.green, Color.green.opacity(0.8)]
+                                : [Color.blue, Color.blue.opacity(0.8)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ),
+                        in: Circle()
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(visitCardTitle)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(visitCardSubtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var visitCardTitle: String {
+        if visitHasPassed { return "How did your visit go?" }
+        return upcomingVisit == nil ? "Prep for a doctor visit" : "Upcoming visit"
+    }
+
+    private var visitCardSubtitle: String {
+        if let visit = upcomingVisit {
+            let f = DateFormatter()
+            f.dateStyle = .medium
+            f.timeStyle = .short
+            let when = f.string(from: visit.date)
+            if visitHasPassed {
+                return "Tap to log new meds & instructions"
+            }
+            return visit.note.isEmpty ? when : "\(when) · \(visit.note)"
+        }
+        return "Trends, symptoms, meds & questions to bring"
+    }
+
+    private func loadVisit() {
+        upcomingVisit = Appointment.loadUpcoming()
     }
 
     // MARK: - Processing (live-fill) view
@@ -777,5 +882,34 @@ struct DocumentCameraView: UIViewControllerRepresentable {
             print("[DocumentCameraView] scan failed: \(error.localizedDescription)")
             parent.dismiss()
         }
+    }
+}
+
+/// Bundles the Home tab's visit-flow presentation — prep + check-in
+/// sheets, the on-appear loader, and the check-in notification deep
+/// link — into a single modifier. Extracted so ScanView's already-long
+/// body modifier chain doesn't overwhelm the SwiftUI type-checker.
+private struct VisitFlowModifier: ViewModifier {
+    @Binding var showVisitPrep: Bool
+    @Binding var showVisitCheckIn: Bool
+    let visit: Appointment?
+    let onLoad: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear(perform: onLoad)
+            .sheet(isPresented: $showVisitPrep, onDismiss: onLoad) {
+                PreVisitPrepView()
+            }
+            .sheet(isPresented: $showVisitCheckIn, onDismiss: onLoad) {
+                PostVisitCheckInView(visit: visit)
+            }
+            // Tapping the evening "how did your visit go?" notification
+            // deep-links to Home (ContentView switches to tag 0) and
+            // opens the check-in directly.
+            .onReceive(NotificationCenter.default.publisher(for: .openVisitCheckIn)) { _ in
+                onLoad()
+                showVisitCheckIn = true
+            }
     }
 }
