@@ -1368,7 +1368,7 @@ private struct SwipeToPinCard<Content: View>: View {
                     armed = false
                 }
         )
-        .sensoryFeedback(.impact(weight: .medium), trigger: armed) { _, now in
+        .sensoryFeedback(trigger: armed) { _, now in
             now ? .impact(weight: .medium) : nil
         }
     }
