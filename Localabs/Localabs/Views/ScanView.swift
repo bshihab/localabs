@@ -27,6 +27,9 @@ struct ScanView: View {
     @State private var upcomingVisit: Appointment?
     @State private var showVisitPrep = false
     @State private var showVisitCheckIn = false
+    /// The "Doctor Visit" Home pane opens the visit hub (prep + check-in
+    /// notes in one place).
+    @State private var showVisitHub = false
 
     var body: some View {
         NavigationStack {
@@ -152,6 +155,10 @@ struct ScanView: View {
                 visit: upcomingVisit,
                 onLoad: loadVisit
             ))
+            // The Doctor Visit pane opens the hub (prep + check-in notes).
+            .sheet(isPresented: $showVisitHub, onDismiss: loadVisit) {
+                VisitHubView()
+            }
         }
     }
 
@@ -159,173 +166,115 @@ struct ScanView: View {
 
     private var uploadView: some View {
         VStack(spacing: 0) {
-            visitCard
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
+            VStack(spacing: 4) {
+                Text("Localabs")
+                    .font(.system(size: 34, weight: .bold))
+                Text("Scan a report, or prep for a doctor visit")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 20)
 
             Spacer()
 
-            ZStack {
-                Circle()
-                    .fill(.blue.opacity(0.12))
-                    .frame(width: 96, height: 96)
-                Image(systemName: "doc.text.viewfinder")
-                    .font(.system(size: 44))
-                    .foregroundStyle(.blue)
+            // Four big panes: three scan methods + the doctor-visit hub.
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)],
+                spacing: 14
+            ) {
+                Button {
+                    requestCameraAndOpen()
+                } label: {
+                    homePane("Scan Document", "doc.viewfinder.fill", .blue, subtitle: "Use the camera")
+                }
+                .buttonStyle(.plain)
+                .disabled(!engine.isModelLoaded)
+
+                // Up to 10 photos for a multi-page report.
+                PhotosPicker(
+                    selection: $pickerItems,
+                    maxSelectionCount: 10,
+                    matching: .images
+                ) {
+                    homePane("From Photos", "photo.on.rectangle", .green, subtitle: "Up to 10 images")
+                }
+                .disabled(!engine.isModelLoaded)
+
+                Button {
+                    showPDFPicker = true
+                } label: {
+                    homePane("From PDF", "doc.fill", .orange, subtitle: "Choose a file")
+                }
+                .buttonStyle(.plain)
+                .disabled(!engine.isModelLoaded)
+
+                Button {
+                    showVisitHub = true
+                } label: {
+                    homePane("Doctor Visit", "stethoscope", .purple, subtitle: visitPaneSubtitle)
+                }
+                .buttonStyle(.plain)
             }
-            .padding(.bottom, 24)
-
-            Text("Upload Report")
-                .font(.system(size: 34, weight: .bold))
-                .padding(.bottom, 8)
-
-            Text("Ingest lab results securely using your\nCamera or Photo Library.")
-                .font(.system(size: 17))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-                .padding(.horizontal, 40)
+            .padding(.horizontal, 20)
 
             Spacer()
 
-            VStack(spacing: 8) {
-                GlassEffectContainer(spacing: 12) {
-                    VStack(spacing: 12) {
-                        Button {
-                            requestCameraAndOpen()
-                        } label: {
-                            // Reframed as "Scan Document" so users know
-                            // the camera supports multi-page capture in
-                            // one session — matches the document-scanner
-                            // UX (same one Notes uses) the button now
-                            // opens.
-                            Label("Scan Document", systemImage: "doc.viewfinder.fill")
-                                .font(.system(size: 17, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                        }
-                        .buttonStyle(.glassProminent)
-                        .disabled(!engine.isModelLoaded)
-
-                        // Up to 10 photos for a multi-page report. iOS's
-                        // built-in picker handles the multi-select UI.
-                        PhotosPicker(
-                            selection: $pickerItems,
-                            maxSelectionCount: 10,
-                            matching: .images
-                        ) {
-                            Label("Choose from Photos", systemImage: "photo.on.rectangle")
-                                .font(.system(size: 17, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                        }
-                        .buttonStyle(.glass)
-                        .disabled(!engine.isModelLoaded)
-
-                        Button {
-                            showPDFPicker = true
-                        } label: {
-                            Label("Choose a PDF", systemImage: "doc.fill")
-                                .font(.system(size: 17, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                        }
-                        .buttonStyle(.glass)
-                        .disabled(!engine.isModelLoaded)
-                    }
-                }
-
-                if !engine.isModelLoaded {
-                    Text("Download \(engine.selectedModel.displayName) in Profile first.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 8)
-                }
+            if !engine.isModelLoaded {
+                Text("Download \(engine.selectedModel.displayName) in Profile to scan.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 20)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 40)
         }
     }
 
-    // MARK: - Visit card (#30 / #34)
+    /// One Home pane: gradient icon tile + title + subtitle in a glass
+    /// card. Used for all four panes so they read as a set.
+    private func homePane(_ title: String, _ icon: String, _ color: Color, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 48, height: 48)
+                .background(
+                    LinearGradient(
+                        colors: [color, color.opacity(0.78)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+            Spacer(minLength: 6)
+            Text(title)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(.primary)
+            Text(subtitle)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 152, alignment: .leading)
+        .padding(16)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    /// Subtitle for the Doctor Visit pane, reflecting visit state.
+    private var visitPaneSubtitle: String {
+        if visitHasPassed { return "How did it go?" }
+        if let visit = upcomingVisit {
+            let f = DateFormatter()
+            f.dateStyle = .medium
+            return f.string(from: visit.date)
+        }
+        return "Prep & visit notes"
+    }
+
+    // MARK: - Doctor visit (#30 / #34)
 
     /// Whether the upcoming appointment's time has already passed —
     /// i.e. the visit happened and a check-in is what's relevant now.
     private var visitHasPassed: Bool {
         guard let visit = upcomingVisit else { return false }
         return visit.date < Date()
-    }
-
-    /// The Home tab's "doctor visit" entry. Three states:
-    ///   - no appointment → "Prep for a doctor visit" (opens prep)
-    ///   - upcoming appointment → shows the date, opens prep
-    ///   - appointment time passed → "How did your visit go?" (opens
-    ///     the post-visit check-in)
-    @ViewBuilder
-    private var visitCard: some View {
-        Button {
-            if visitHasPassed {
-                showVisitCheckIn = true
-            } else {
-                showVisitPrep = true
-            }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: visitHasPassed ? "checkmark.circle.fill" : "stethoscope")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(
-                        LinearGradient(
-                            colors: visitHasPassed
-                                ? [Color.green, Color.green.opacity(0.8)]
-                                : [Color.blue, Color.blue.opacity(0.8)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ),
-                        in: Circle()
-                    )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(visitCardTitle)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text(visitCardSubtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer(minLength: 8)
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var visitCardTitle: String {
-        if visitHasPassed { return "How did your visit go?" }
-        return upcomingVisit == nil ? "Prep for a doctor visit" : "Upcoming visit"
-    }
-
-    private var visitCardSubtitle: String {
-        if let visit = upcomingVisit {
-            let f = DateFormatter()
-            f.dateStyle = .medium
-            f.timeStyle = .short
-            let when = f.string(from: visit.date)
-            if visitHasPassed {
-                return "Tap to log new meds & instructions"
-            }
-            return visit.note.isEmpty ? when : "\(when) · \(visit.note)"
-        }
-        return "Trends, symptoms, meds & questions to bring"
     }
 
     private func loadVisit() {

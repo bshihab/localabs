@@ -204,16 +204,20 @@ struct TrendsView: View {
     private var labValuesSection: some View {
         let rows = sortedLabTrends
         return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("LAB VALUES OVER TIME")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .tracking(1.0)
-                Spacer()
-                Label("Swipe right to pin", systemImage: "hand.draw")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
+            Text("LAB VALUES OVER TIME")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .tracking(1.0)
+
+            // Tell the user both swipe directions + the privacy effect of
+            // hiding (hidden markers leave the AI's context).
+            Label(
+                "Swipe a card right to pin it to the top, left to hide it. Hidden markers leave your trends and aren't shared with Localabs.",
+                systemImage: "hand.draw"
+            )
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
 
             // Each marker is its own card now (no shared box), and
             // swiping a card to the right pins it — a yellow pin appears
