@@ -219,9 +219,10 @@ struct TrendsView: View {
             // swiping a card to the right pins it — a yellow pin appears
             // and it floats to the top.
             ForEach(rows) { trend in
-                SwipeToPinCard(
+                SwipeActionCard(
                     isPinned: TrackedMarkers.isTracked(trend.canonicalName),
-                    onTogglePin: { togglePin(trend) }
+                    onTogglePin: { togglePin(trend) },
+                    onHide: { hideMarker(trend) }
                 ) {
                     LabTrendRow(trend: trend)
                         .padding(16)
@@ -273,6 +274,20 @@ struct TrendsView: View {
         }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             trackedVersion += 1
+        }
+    }
+
+    /// Hide a marker from Health Trends without deleting its report.
+    /// Also unpins it, cancels its recheck reminder, and records the
+    /// opt-out so a future scan won't bring it back.
+    private func hideMarker(_ trend: LabTrend) {
+        let name = trend.canonicalName
+        HiddenMarkers.hide(name)
+        TrackedMarkers.remove(name)
+        RecheckStore.setOptedOut(name, true)
+        Task { await RecheckService.cancel(marker: name) }
+        withAnimation(.easeInOut(duration: 0.25)) {
+            labTrends = LabTrendService.trends(from: LocalStorageService.shared.getHistory())
         }
     }
 
@@ -405,10 +420,72 @@ struct TrendsView: View {
     /// state prompting the user to scan two reports that share a marker.
     @ViewBuilder
     private var labContent: some View {
-        if labTrends.isEmpty {
-            labTrendsEmptyState.padding(.horizontal)
-        } else {
-            labValuesSection.padding(.horizontal)
+        VStack(alignment: .leading, spacing: 22) {
+            if labTrends.isEmpty {
+                labTrendsEmptyState
+            } else {
+                labValuesSection
+            }
+            hiddenMarkersSection
+        }
+        .padding(.horizontal)
+    }
+
+    /// Lab markers the user hid (swipe-left), with a Restore button each.
+    /// Lets them undo a hide without re-scanning. Hidden only — re-reads
+    /// when `trackedVersion` bumps after a restore.
+    @ViewBuilder
+    private var hiddenMarkersSection: some View {
+        let _ = trackedVersion
+        let hidden = hiddenMarkerNames()
+        if !hidden.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("HIDDEN FROM TRENDS")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.0)
+                ForEach(hidden, id: \.self) { name in
+                    HStack {
+                        Text(name)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Restore") { restoreMarker(name) }
+                            .font(.caption.weight(.semibold))
+                            .buttonStyle(.bordered)
+                    }
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                }
+            }
+        }
+    }
+
+    /// Display names for the hidden markers (looked up from reports so
+    /// they read nicely; falls back to the stored key if the report was
+    /// since deleted).
+    private func hiddenMarkerNames() -> [String] {
+        let hidden = HiddenMarkers.all()
+        guard !hidden.isEmpty else { return [] }
+        var byKey: [String: String] = [:]
+        for value in LocalStorageService.shared.getHistory()
+            .filter(\.isOwnReport)
+            .flatMap({ $0.labValues ?? [] }) {
+            let key = LabValue.normalizeKey(value.canonicalName)
+            if hidden.contains(key), byKey[key] == nil { byKey[key] = value.canonicalName }
+        }
+        for key in hidden where byKey[key] == nil { byKey[key] = key }
+        return byKey.values.sorted()
+    }
+
+    private func restoreMarker(_ name: String) {
+        HiddenMarkers.unhide(name)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            labTrends = LabTrendService.trends(from: LocalStorageService.shared.getHistory())
+            trackedVersion += 1
         }
     }
 
@@ -1428,21 +1505,23 @@ struct MetricDetailView: View {
     }
 }
 
-/// A card that pins on a rightward swipe — the Apple Mail / Files style
-/// leading swipe action, but built as a gesture so it works inside the
-/// Trends tab's vertical ScrollView (a vertical scroll only claims
-/// vertical drags, so a horizontal swipe falls through to this gesture).
-/// A yellow pin reveals behind the card as it slides; releasing past the
-/// threshold toggles the pin.
-private struct SwipeToPinCard<Content: View>: View {
+/// A card with Apple Mail / Files style horizontal swipe actions, built
+/// as a gesture so it works inside the Trends tab's vertical ScrollView
+/// (a vertical scroll only claims vertical drags, so a horizontal swipe
+/// falls through to this gesture). Swipe RIGHT reveals a yellow pin
+/// (toggle pin); swipe LEFT reveals a red trash (hide the marker from
+/// trends). Release past the threshold to fire that side's action.
+private struct SwipeActionCard<Content: View>: View {
     let isPinned: Bool
     let onTogglePin: () -> Void
+    let onHide: () -> Void
     @ViewBuilder var content: () -> Content
     @State private var offset: CGFloat = 0
     @State private var armed = false
 
     var body: some View {
-        ZStack(alignment: .leading) {
+        ZStack {
+            // Right reveal — pin (yellow).
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.yellow)
                 .overlay(alignment: .leading) {
@@ -1454,23 +1533,36 @@ private struct SwipeToPinCard<Content: View>: View {
                 }
                 .opacity(offset > 0 ? 1 : 0)
 
+            // Left reveal — hide (red).
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.red)
+                .overlay(alignment: .trailing) {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.trailing, 22)
+                        .opacity(offset < -16 ? 1 : 0)
+                }
+                .opacity(offset < 0 ? 1 : 0)
+
             content()
                 .offset(x: offset)
         }
         .gesture(
             DragGesture(minimumDistance: 14)
                 .onChanged { v in
-                    // Engage only for a clearly-horizontal rightward drag,
-                    // so vertical scrolling is unaffected.
-                    guard v.translation.width > 0,
-                          v.translation.width > abs(v.translation.height) else { return }
-                    offset = min(v.translation.width, 96)
-                    armed = offset > 64
+                    // Engage only for a clearly-horizontal drag so vertical
+                    // scrolling is unaffected.
+                    guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                    offset = max(min(v.translation.width, 96), -96)
+                    armed = abs(offset) > 64
                 }
                 .onEnded { _ in
-                    let shouldToggle = offset > 64
+                    let pin = offset > 64
+                    let hide = offset < -64
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { offset = 0 }
-                    if shouldToggle { onTogglePin() }
+                    if pin { onTogglePin() }
+                    else if hide { onHide() }
                     armed = false
                 }
         )

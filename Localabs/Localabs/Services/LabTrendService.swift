@@ -216,12 +216,16 @@ enum LabTrendService {
                 )
             }
 
-        return trends.sorted { a, b in
-            let aw = a.isWorseningStreak() || a.change == .worsened
-            let bw = b.isWorseningStreak() || b.change == .worsened
-            if aw != bw { return aw }  // worsening first
-            return a.canonicalName < b.canonicalName
-        }
+        return trends
+            // Drop markers the user hid from their trends (#31) — the
+            // report still exists, the marker just stops being tracked.
+            .filter { !HiddenMarkers.isHidden($0.canonicalName) }
+            .sorted { a, b in
+                let aw = a.isWorseningStreak() || a.change == .worsened
+                let bw = b.isWorseningStreak() || b.change == .worsened
+                if aw != bw { return aw }  // worsening first
+                return a.canonicalName < b.canonicalName
+            }
     }
 
     /// Compare a specific (usually just-scanned) report against the
