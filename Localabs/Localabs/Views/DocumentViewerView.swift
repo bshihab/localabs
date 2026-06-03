@@ -38,6 +38,20 @@ struct DocumentViewerView: View {
     @State private var showCrossPageBanner = false
     @Namespace private var glassNamespace
 
+    // MARK: - Entity highlighting (#31)
+
+    /// Per page, the OCR blocks that matched an important entity (an
+    /// out-of-range lab value or a detected medication), so they can be
+    /// painted with a tappable blue highlight. Keyed page index → block
+    /// id → entity. Built after each page's OCR completes.
+    @State private var entityMaps: [Int: [UUID: HighlightEntity]] = [:]
+    /// The entity the user tapped, plus the GLOBAL tap point the
+    /// liquid-glass action menu pops up from. nil = no menu showing.
+    @State private var entityPopover: EntityPopover?
+    /// Drives the pre-filled medication editor when the user taps
+    /// "Add to Meds" in an entity's action menu.
+    @State private var entityMedToAdd: DetectedMedication?
+
     /// Two explicit interaction modes — replaces the long-press-to-engage
     /// pattern that kept fighting with scroll. Browse is the default
     /// (Photos-style: drag to scroll, pinch to zoom, tap-to-select still
@@ -168,6 +182,7 @@ struct DocumentViewerView: View {
                             ForEach(recognizedBlocks) { block in
                                 let rect = convertRect(block.boundingBox, in: renderedImageSize)
                                 let isSelected = selectedBlocks.contains(block.id)
+                                let blockEntity = entity(for: block.id)
 
                                 Group {
                                     if isSelected {
@@ -178,6 +193,17 @@ struct DocumentViewerView: View {
                                                 in: RoundedRectangle(cornerRadius: 6, style: .continuous)
                                             )
                                             .glassEffectID(block.id, in: glassNamespace)
+                                    } else if blockEntity != nil {
+                                        // Subtle blue Live-Text-style highlight
+                                        // for an important value/medication —
+                                        // reads as tappable without the loud
+                                        // yellow of an active selection.
+                                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                            .fill(Color.blue.opacity(0.13))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                                    .strokeBorder(Color.blue.opacity(0.42), lineWidth: 1)
+                                            )
                                     } else {
                                         RoundedRectangle(cornerRadius: 6, style: .continuous)
                                             .fill(Color.white.opacity(0.001))
@@ -186,23 +212,37 @@ struct DocumentViewerView: View {
                                 .frame(width: rect.width, height: rect.height)
                                 .position(x: rect.midX, y: rect.midY)
                                 .contentShape(Rectangle())
-                                .onTapGesture {
-                                    // Tap-to-select is Select-mode only.
-                                    // Without this gate, taps in Browse
-                                    // mode flipped selection state too,
-                                    // which let users accidentally select
-                                    // blocks while just panning around
-                                    // the scan.
-                                    guard mode == .select else { return }
-                                    dismissHintIfShown()
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                                        if isSelected {
-                                            selectedBlocks.remove(block.id)
-                                        } else {
-                                            selectedBlocks.insert(block.id)
+                                .gesture(
+                                    // SpatialTapGesture gives the global tap
+                                    // point so the action menu can pop up from
+                                    // exactly where the user touched.
+                                    SpatialTapGesture(coordinateSpace: .global).onEnded { value in
+                                        if mode == .select {
+                                            // Tap-to-select stays Select-mode
+                                            // only so Browse taps don't flip
+                                            // selection while panning.
+                                            dismissHintIfShown()
+                                            withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                                                if isSelected {
+                                                    selectedBlocks.remove(block.id)
+                                                } else {
+                                                    selectedBlocks.insert(block.id)
+                                                }
+                                            }
+                                        } else if let blockEntity {
+                                            // Browse mode: tapping an entity
+                                            // pops the liquid-glass action menu.
+                                            dismissHintIfShown()
+                                            withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
+                                                entityPopover = EntityPopover(
+                                                    entity: blockEntity,
+                                                    point: value.location,
+                                                    blockID: block.id
+                                                )
+                                            }
                                         }
                                     }
-                                }
+                                )
                             }
                         }
                         .frame(width: renderedImageSize.width, height: renderedImageSize.height)
@@ -412,6 +452,110 @@ struct DocumentViewerView: View {
             // handles dismissal and the controls stay tappable.
             .allowsHitTesting(false)
         }
+        // Entity action menu — pops up in screen space from the tapped
+        // highlight (#31). Layered above everything else.
+        .overlay {
+            entityPopoverOverlay
+        }
+        // "Add to Meds" from an entity's action menu, pre-filled.
+        .sheet(item: $entityMedToAdd) { med in
+            MedicationEditSheet(
+                sourceReportID: report.id,
+                prefilledName: med.name,
+                prefilledDose: med.dose
+            )
+        }
+    }
+
+    // MARK: - Entity action menu (#31)
+
+    /// The liquid-glass menu that pops up from a tapped highlight, plus a
+    /// transparent scrim that dismisses it on an outside tap. Positioned
+    /// in global space so it lands at the exact tap point regardless of
+    /// the document's zoom/pan transform.
+    @ViewBuilder
+    private var entityPopoverOverlay: some View {
+        if let popover = entityPopover {
+            GeometryReader { geo in
+                let origin = geo.frame(in: .global).origin
+                // Convert the global tap point into this overlay's space,
+                // then clamp so the menu can't run off either edge.
+                let localX = popover.point.x - origin.x
+                let clampedX = min(max(localX, 128), geo.size.width - 128)
+                // Sit the menu above the tap so it reads as rising out of
+                // the value; keep it on-screen near the top.
+                let localY = max(popover.point.y - origin.y - 70, 96)
+
+                ZStack {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .onTapGesture { dismissEntityPopover() }
+
+                    entityActionMenu(popover)
+                        .position(x: clampedX, y: localY)
+                        .transition(.scale(scale: 0.55, anchor: .bottom).combined(with: .opacity))
+                }
+            }
+        }
+    }
+
+    private func entityActionMenu(_ popover: EntityPopover) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(popover.entity.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                if let sub = popover.entity.subtitle {
+                    Text(sub)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            Button {
+                askAboutEntity(popover)
+            } label: {
+                Label("Ask Localabs about this", systemImage: "sparkles")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            if let med = popover.entity.medication {
+                Button {
+                    dismissEntityPopover()
+                    entityMedToAdd = med
+                } label: {
+                    Label("Add to Meds", systemImage: "pills.fill")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .frame(width: 232)
+        .glassEffect(
+            .regular.tint(.blue.opacity(0.12)),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+    }
+
+    private func dismissEntityPopover() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
+            entityPopover = nil
+        }
+    }
+
+    /// "Ask Localabs about this": select just the tapped block and open
+    /// the existing follow-up chat, which seeds itself from the selection.
+    private func askAboutEntity(_ popover: EntityPopover) {
+        selectedBlocks = [popover.blockID]
+        entityPopover = nil
+        showChat = true
     }
 
     /// Predicate for the lasso-start haptic. Pulled out of the
@@ -589,6 +733,56 @@ struct DocumentViewerView: View {
             : "Elaborate on \(selectedBlocks.count) highlights"
     }
 
+    // MARK: - Entity matching (#31)
+
+    /// The important entity (if any) a given block on the CURRENT page
+    /// matched — drives both the blue highlight and the tap action.
+    private func entity(for blockID: UUID) -> HighlightEntity? {
+        entityMaps[currentPageIndex]?[blockID]
+    }
+
+    /// Match a page's OCR blocks to the report's important entities:
+    /// every detected medication, plus lab values that are out of range
+    /// (the "notable" ones — highlighting an entire normal panel would
+    /// just be noise). Matched copy-only by text containment, so a block
+    /// only lights up if its text actually contains the entity name.
+    private func computeEntities(for blocks: [TextBlock]) -> [UUID: HighlightEntity] {
+        let meds = report.detectedMedications ?? []
+        let notable = (report.labValues ?? []).filter { Self.isNotable($0) }
+        guard !meds.isEmpty || !notable.isEmpty else { return [:] }
+
+        var map: [UUID: HighlightEntity] = [:]
+        for block in blocks {
+            let lower = block.text.lowercased()
+            if let med = meds.first(where: { !$0.name.isEmpty && lower.contains($0.name.lowercased()) }) {
+                map[block.id] = .medication(med)
+            } else if let lv = notable.first(where: { !$0.rawName.isEmpty && lower.contains($0.rawName.lowercased()) }) {
+                map[block.id] = .labValue(lv)
+            }
+        }
+        return map
+    }
+
+    /// A lab value is "notable" when it sits outside its reference range
+    /// in the concerning direction (or either side when the direction is
+    /// mid-optimal / unknown). No range → not notable (no basis to flag).
+    private static func isNotable(_ v: LabValue) -> Bool {
+        let (lo, hi) = LabValue.parseRange(v.referenceRange)
+        guard lo != nil || hi != nil else { return false }
+        switch v.concernDirection {
+        case .higherWorse:
+            if let hi { return v.value > hi }
+            return false
+        case .lowerWorse:
+            if let lo { return v.value < lo }
+            return false
+        case .midOptimal, .none:
+            if let hi, v.value > hi { return true }
+            if let lo, v.value < lo { return true }
+            return false
+        }
+    }
+
     private func loadAllPages() {
         let urls = report.allImageURLs
         var images: [UIImage] = []
@@ -610,9 +804,13 @@ struct DocumentViewerView: View {
         Task {
             for (idx, image) in images.enumerated() {
                 let blocks = (try? await VisionOCRService.extractBlocks(from: image)) ?? []
-                pageBlocks[idx] = blocks.map {
+                let mapped = blocks.map {
                     TextBlock(text: $0.text, boundingBox: $0.boundingBox)
                 }
+                pageBlocks[idx] = mapped
+                // Match this page's blocks to important entities for the
+                // Live-Text-style highlights (#31).
+                entityMaps[idx] = computeEntities(for: mapped)
             }
         }
 
@@ -1712,6 +1910,50 @@ private struct CalloutBubbleShape: Shape {
 /// the lasso outline. Returns its path in fixed `box` coordinates
 /// (ignores the layout rect) so the stroke trim and the finger's
 /// `trimmedPath(...).currentPoint` stay in perfect sync.
+/// An important thing Localabs found on a scan that gets a tappable
+/// blue highlight (#31): a detected medication, or an out-of-range lab
+/// value. Carries everything the action menu needs.
+enum HighlightEntity: Equatable {
+    case medication(DetectedMedication)
+    case labValue(LabValue)
+
+    /// Bold title shown at the top of the action menu.
+    var title: String {
+        switch self {
+        case .medication(let m): return m.name
+        case .labValue(let v):   return v.rawName
+        }
+    }
+
+    /// Secondary line (dose / value + unit), nil when there's nothing
+    /// extra to show.
+    var subtitle: String? {
+        switch self {
+        case .medication(let m):
+            let parts = [m.dose, m.frequency].filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        case .labValue(let v):
+            let val = LabTrend.fmt(v.value)
+            return v.unit.isEmpty ? val : "\(val) \(v.unit)"
+        }
+    }
+
+    /// The detected medication when this is one — drives the "Add to
+    /// Meds" action (nil for lab values).
+    var medication: DetectedMedication? {
+        if case .medication(let m) = self { return m }
+        return nil
+    }
+}
+
+/// A tapped entity plus the global point its action menu pops up from.
+struct EntityPopover: Identifiable {
+    let id = UUID()
+    let entity: HighlightEntity
+    let point: CGPoint
+    let blockID: UUID
+}
+
 private struct LassoOutline: Shape {
     let box: CGRect
     let radius: CGFloat
