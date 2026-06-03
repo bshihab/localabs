@@ -98,6 +98,28 @@ extension LabValue {
         return Double(num)
     }
 
+    /// True when this reading sits outside its reference range in the
+    /// clinically concerning direction (or either side when the concern
+    /// direction is mid-optimal / unknown). No range → false (no basis
+    /// to flag). Drives the "notable" set that gets highlighted on a
+    /// scan (#31) and the dashboard preview's flagged-count badge.
+    var isOutOfRange: Bool {
+        let (lo, hi) = LabValue.parseRange(referenceRange)
+        guard lo != nil || hi != nil else { return false }
+        switch concernDirection {
+        case .higherWorse:
+            if let hi { return value > hi }
+            return false
+        case .lowerWorse:
+            if let lo { return value < lo }
+            return false
+        case .midOptimal, .none:
+            if let hi, value > hi { return true }
+            if let lo, value < lo { return true }
+            return false
+        }
+    }
+
     /// Normalized cross-report join key: lowercased, whitespace-
     /// collapsed name. Two reports that print the same test name join;
     /// no hardcoded synonym table.

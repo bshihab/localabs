@@ -748,7 +748,7 @@ struct DocumentViewerView: View {
     /// only lights up if its text actually contains the entity name.
     private func computeEntities(for blocks: [TextBlock]) -> [UUID: HighlightEntity] {
         let meds = report.detectedMedications ?? []
-        let notable = (report.labValues ?? []).filter { Self.isNotable($0) }
+        let notable = (report.labValues ?? []).filter(\.isOutOfRange)
         guard !meds.isEmpty || !notable.isEmpty else { return [:] }
 
         var map: [UUID: HighlightEntity] = [:]
@@ -761,26 +761,6 @@ struct DocumentViewerView: View {
             }
         }
         return map
-    }
-
-    /// A lab value is "notable" when it sits outside its reference range
-    /// in the concerning direction (or either side when the direction is
-    /// mid-optimal / unknown). No range → not notable (no basis to flag).
-    private static func isNotable(_ v: LabValue) -> Bool {
-        let (lo, hi) = LabValue.parseRange(v.referenceRange)
-        guard lo != nil || hi != nil else { return false }
-        switch v.concernDirection {
-        case .higherWorse:
-            if let hi { return v.value > hi }
-            return false
-        case .lowerWorse:
-            if let lo { return v.value < lo }
-            return false
-        case .midOptimal, .none:
-            if let hi, v.value > hi { return true }
-            if let lo, v.value < lo { return true }
-            return false
-        }
     }
 
     private func loadAllPages() {

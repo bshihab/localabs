@@ -445,6 +445,11 @@ struct DashboardView: View {
         // ratio. Before the first width measurement lands we fall back to
         // a reasonable portrait height so layout doesn't jump to zero.
         let pageHeight = previewWidth > 0 ? previewWidth / previewAspect : 460
+        // Count of things that get highlighted inside the viewer (#31):
+        // out-of-range lab values + detected medications. Surfaced as a
+        // badge so the user knows there's something worth opening for.
+        let flaggedCount = (currentReport?.labValues ?? []).filter(\.isOutOfRange).count
+            + (currentReport?.detectedMedications?.count ?? 0)
 
         return VStack(spacing: 12) {
             HStack {
@@ -452,6 +457,14 @@ struct DashboardView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                 Spacer()
+                if flaggedCount > 0 {
+                    Label("\(flaggedCount) highlighted", systemImage: "sparkles")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.18), in: Capsule())
+                }
             }
 
             // Swipe-only — no tap gesture here, so tapping a page just
