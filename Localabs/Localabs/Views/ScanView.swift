@@ -196,7 +196,7 @@ struct ScanView: View {
                     maxSelectionCount: 10,
                     matching: .images
                 ) {
-                    HomePane(title: "From Photos", icon: "photo.on.rectangle", color: .black, subtitle: "Up to 10 images")
+                    HomePane(title: "From Photos", icon: "photo.on.rectangle", color: .green, subtitle: "Up to 10 images", textColor: .black)
                 }
                 .disabled(!engine.isModelLoaded)
 
@@ -843,6 +843,9 @@ private struct HomePane: View {
     let icon: String
     let color: Color
     let subtitle: String
+    /// Optional override for the title + subtitle color. nil = the
+    /// system primary/secondary pair.
+    var textColor: Color? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -860,10 +863,10 @@ private struct HomePane: View {
             Spacer(minLength: 6)
             Text(title)
                 .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(textColor ?? .primary)
             Text(subtitle)
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(textColor ?? .secondary)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, minHeight: 152, alignment: .leading)
