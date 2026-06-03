@@ -58,6 +58,31 @@ struct DashboardView: View {
     /// `docViewerPage` when the user taps a preview page.
     @State private var showDocViewer = false
     @State private var docViewerPage = 0
+    /// Entity highlights (#31) for the preview, keyed by page index →
+    /// the normalized box + matched entity for each highlighted block.
+    /// Filled by an on-demand OCR pass (only for reports that have
+    /// something to flag).
+    @State private var previewEntities: [Int: [PreviewHighlight]] = [:]
+    /// A tapped preview highlight + the global point its action menu
+    /// pops up from.
+    @State private var previewPopover: EntityPopover?
+    /// Drives "Ask Localabs about this" from a preview highlight.
+    @State private var previewAsk: AskEntity?
+
+    /// One highlighted block on a preview page: its normalized Vision box
+    /// and the entity it matched.
+    struct PreviewHighlight: Identifiable {
+        let id = UUID()
+        let box: CGRect
+        let entity: HighlightEntity
+    }
+
+    /// Identifiable wrapper so "Ask Localabs" can present the chat sheet
+    /// via `.sheet(item:)` for a tapped entity.
+    struct AskEntity: Identifiable {
+        let id = UUID()
+        let entity: HighlightEntity
+    }
 
     var body: some View {
         // NOTE: no nested NavigationStack here. DashboardView is always
@@ -332,11 +357,13 @@ struct DashboardView: View {
                 if report == nil { report = initialReport }
                 reloadLabTrends()
                 loadPreviewImages()
+                loadPreviewEntities()
                 maybeSuggestOwnership()
             }
             .onChange(of: currentReport?.id) { _, _ in
                 reloadLabTrends()
                 loadPreviewImages()
+                loadPreviewEntities()
                 maybeSuggestOwnership()
             }
             // Tapping a preview page pushes the full document viewer
@@ -412,6 +439,71 @@ struct DashboardView: View {
                     prefilledDose: med.dose
                 )
             }
+            // "Ask Localabs about this" from a preview highlight (#31).
+            .sheet(item: $previewAsk) { ask in
+                if let report = currentReport {
+                    FollowUpChatView(
+                        reportID: report.id,
+                        selectedText: previewAskText(ask.entity),
+                        fullReportContext: report.patientSummary,
+                        ocrText: report.rawText,
+                        isWholeDocumentAsk: false,
+                        detectedTable: nil,
+                        extraText: ""
+                    )
+                    .environmentObject(engine)
+                }
+            }
+            // The liquid-glass action menu for a tapped preview highlight,
+            // floating above the dashboard at the tap point.
+            .overlay { previewPopoverOverlay }
+    }
+
+    // MARK: - Preview entity action menu (#31)
+
+    @ViewBuilder
+    private var previewPopoverOverlay: some View {
+        if let popover = previewPopover {
+            GeometryReader { geo in
+                let origin = geo.frame(in: .global).origin
+                let localX = popover.point.x - origin.x
+                let clampedX = min(max(localX, 128), geo.size.width - 128)
+                let localY = max(popover.point.y - origin.y - 70, 96)
+
+                ZStack {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .onTapGesture { dismissPreviewPopover() }
+
+                    EntityActionMenu(
+                        entity: popover.entity,
+                        onAsk: {
+                            let entity = popover.entity
+                            previewPopover = nil
+                            previewAsk = AskEntity(entity: entity)
+                        },
+                        onAddMedication: { med in
+                            previewPopover = nil
+                            medToAdd = med
+                        }
+                    )
+                    .position(x: clampedX, y: localY)
+                    .transition(.scale(scale: 0.55, anchor: .bottom).combined(with: .opacity))
+                }
+            }
+        }
+    }
+
+    private func dismissPreviewPopover() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
+            previewPopover = nil
+        }
+    }
+
+    /// Seed text for "Ask Localabs about this" from a preview highlight.
+    private func previewAskText(_ entity: HighlightEntity) -> String {
+        if let sub = entity.subtitle { return "\(entity.title) — \(sub)" }
+        return entity.title
     }
 
     // MARK: - Scan preview
@@ -467,8 +559,9 @@ struct DashboardView: View {
                 }
             }
 
-            // Swipe-only — no tap gesture here, so tapping a page just
-            // settles the scroll instead of navigating.
+            // Swipe to page; tap a blue highlight to act on it. The
+            // image itself has no tap gesture, so a non-highlight tap
+            // just settles the scroll.
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 0) {
                     ForEach(Array(previewImages.enumerated()), id: \.offset) { idx, img in
@@ -477,6 +570,7 @@ struct DashboardView: View {
                             .scaledToFit()
                             .frame(width: previewWidth, height: pageHeight)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay { previewHighlights(page: idx, pageHeight: pageHeight) }
                             .id(idx)
                     }
                 }
@@ -489,15 +583,25 @@ struct DashboardView: View {
             // to exactly one viewport (clean paging) at the real aspect.
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { previewWidth = $0 }
 
-            // Apple-style page dots (white on the blue pane).
+            // Apple-style page dots (white on the blue pane). Pages that
+            // have highlights get a ring so the user can see at a glance
+            // which pages are worth swiping to.
             if previewImages.count > 1 {
-                HStack(spacing: 7) {
+                HStack(spacing: 8) {
                     ForEach(previewImages.indices, id: \.self) { i in
+                        let hasHighlights = previewEntities[i] != nil
                         Circle()
                             .fill(i == currentPreviewPage
                                   ? Color.white
                                   : Color.white.opacity(0.4))
                             .frame(width: 7, height: 7)
+                            .overlay {
+                                if hasHighlights {
+                                    Circle()
+                                        .strokeBorder(Color.white.opacity(0.9), lineWidth: 1.5)
+                                        .padding(-3)
+                                }
+                            }
                     }
                 }
                 .animation(.easeInOut(duration: 0.2), value: currentPreviewPage)
@@ -561,6 +665,101 @@ struct DashboardView: View {
         }
         previewImages = images
         scrolledPreviewPage = images.isEmpty ? nil : 0
+    }
+
+    // MARK: - Preview entity highlights (#31)
+
+    /// OCR the preview pages on demand and match blocks to important
+    /// entities, so the swipeable preview can show the same blue
+    /// highlights the viewer does. Gated to reports that actually have
+    /// something to flag (out-of-range values or detected meds) so a
+    /// normal panel never pays for OCR. Runs sequentially — the model is
+    /// resident in RAM, so parallel Vision passes court a jetsam.
+    private func loadPreviewEntities() {
+        previewEntities = [:]
+        guard let report = currentReport, report.isOwnReport else { return }
+        let hasNotable = (report.labValues ?? []).contains(where: \.isOutOfRange)
+            || !(report.detectedMedications ?? []).isEmpty
+        guard hasNotable else { return }
+
+        let urls = report.allImageURLs
+        Task {
+            var result: [Int: [PreviewHighlight]] = [:]
+            for (idx, url) in urls.enumerated() {
+                guard let data = try? Data(contentsOf: url),
+                      let img = UIImage(data: data) else { continue }
+                let blocks = (try? await VisionOCRService.extractBlocks(from: img)) ?? []
+                let ided = blocks.map { (id: UUID(), text: $0.text, box: $0.boundingBox) }
+                let map = HighlightEntity.match(blocks: ided.map { (id: $0.id, text: $0.text) }, in: report)
+                let highlights = ided.compactMap { b -> PreviewHighlight? in
+                    guard let e = map[b.id] else { return nil }
+                    return PreviewHighlight(box: b.box, entity: e)
+                }
+                if !highlights.isEmpty { result[idx] = highlights }
+            }
+            await MainActor.run {
+                previewEntities = result
+                autoScrollToFirstHighlight()
+            }
+        }
+    }
+
+    /// If the landing page (the one first shown) has no highlights but a
+    /// later page does, glide the pager to the first highlighted page so
+    /// the user lands on something worth seeing.
+    private func autoScrollToFirstHighlight() {
+        guard previewEntities[currentPreviewPage] == nil,
+              let firstWithHighlights = previewEntities.keys.sorted().first
+        else { return }
+        withAnimation(.easeInOut(duration: 0.45)) {
+            scrolledPreviewPage = firstWithHighlights
+        }
+    }
+
+    /// Map a normalized Vision box (bottom-left origin) to the preview
+    /// page's displayed rect. Assumes the page fills the frame (true for
+    /// the uniform letter-size pages reports almost always are).
+    private func convertPreviewRect(_ box: CGRect, width: CGFloat, height: CGFloat) -> CGRect {
+        CGRect(
+            x: box.origin.x * width,
+            y: (1 - box.origin.y - box.height) * height,
+            width: box.width * width,
+            height: box.height * height
+        )
+    }
+
+    /// Subtle blue, tappable highlights for one preview page. Tapping one
+    /// pops the shared action menu from the tap point.
+    @ViewBuilder
+    private func previewHighlights(page: Int, pageHeight: CGFloat) -> some View {
+        if previewWidth > 0, let highlights = previewEntities[page] {
+            ZStack(alignment: .topLeading) {
+                ForEach(highlights) { h in
+                    let rect = convertPreviewRect(h.box, width: previewWidth, height: pageHeight)
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.blue.opacity(0.16))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .strokeBorder(Color.blue.opacity(0.55), lineWidth: 1.2)
+                        )
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            SpatialTapGesture(coordinateSpace: .global).onEnded { value in
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
+                                    previewPopover = EntityPopover(
+                                        entity: h.entity,
+                                        point: value.location,
+                                        blockID: h.id
+                                    )
+                                }
+                            }
+                        )
+                }
+            }
+            .frame(width: previewWidth, height: pageHeight, alignment: .topLeading)
+        }
     }
 
     // MARK: - Detected-medication suggestions (#33)

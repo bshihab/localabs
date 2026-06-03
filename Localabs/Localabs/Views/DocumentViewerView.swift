@@ -707,7 +707,7 @@ struct DocumentViewerView: View {
     /// the shared matcher (every medication + out-of-range lab values),
     /// so the viewer and the dashboard preview highlight the same things.
     private func computeEntities(for blocks: [TextBlock]) -> [UUID: HighlightEntity] {
-        HighlightEntity.match(blocks: blocks.map { ($0.id, $0.text) }, in: report)
+        HighlightEntity.match(blocks: blocks.map { (id: $0.id, text: $0.text) }, in: report)
     }
 
     private func loadAllPages() {
