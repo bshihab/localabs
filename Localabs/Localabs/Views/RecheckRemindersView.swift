@@ -9,21 +9,24 @@ struct RecheckRemindersView: View {
     /// Unique detected markers from the user's own reports, out-of-range
     /// ones first. Loaded on appear.
     @State private var markers: [String] = []
-    @State private var intervalMonths: Int = RecheckStore.defaultIntervalMonths
+    @State private var intervalDays: Int = RecheckStore.defaultIntervalDays
     /// Bumped on each toggle so the rows re-read their reminder state.
     @State private var version = 0
 
     var body: some View {
         Form {
             Section {
-                Picker("Default interval", selection: $intervalMonths) {
-                    Text("1 month").tag(1)
-                    Text("3 months").tag(3)
-                    Text("6 months").tag(6)
-                    Text("12 months").tag(12)
+                Picker("Default interval", selection: $intervalDays) {
+                    Text("2 weeks").tag(14)
+                    Text("1 month").tag(30)
+                    Text("6 weeks").tag(45)
+                    Text("2 months").tag(60)
+                    Text("3 months").tag(90)
+                    Text("6 months").tag(180)
+                    Text("1 year").tag(365)
                 }
-                .onChange(of: intervalMonths) { _, v in
-                    RecheckStore.defaultIntervalMonths = v
+                .onChange(of: intervalDays) { _, v in
+                    RecheckStore.defaultIntervalDays = v
                 }
             } header: {
                 Text("Default")
@@ -92,10 +95,27 @@ struct RecheckRemindersView: View {
             set: { on in
                 if on {
                     RecheckStore.setOptedOut(marker, false)
-                    Task { await RecheckService.schedule(marker: marker, months: RecheckStore.defaultIntervalMonths) }
+                    // Save to the store SYNCHRONOUSLY (so the toggle reflects
+                    // on the first tap), then arm the notification in the
+                    // background. Using the async schedule() here meant the
+                    // store wasn't updated yet when the row re-read its
+                    // state — which is why it took two taps.
+                    let reminder = RecheckReminder(
+                        marker: marker,
+                        dueDate: Calendar.current.date(
+                            byAdding: .day,
+                            value: RecheckStore.defaultIntervalDays,
+                            to: Date()
+                        ) ?? Date()
+                    )
+                    RecheckStore.save(reminder)
+                    Task { await RecheckService.arm(reminder) }
                 } else {
                     RecheckStore.setOptedOut(marker, true)
-                    Task { await RecheckService.cancel(marker: marker) }
+                    if let existing = RecheckStore.reminder(forMarker: marker) {
+                        RecheckStore.remove(id: existing.id)
+                        RecheckService.removeNotification(id: existing.id)
+                    }
                 }
                 version += 1
             }

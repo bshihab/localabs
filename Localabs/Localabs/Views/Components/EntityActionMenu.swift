@@ -115,8 +115,8 @@ struct EntityActionMenu: View {
                     let reminder = RecheckReminder(
                         marker: marker,
                         dueDate: Calendar.current.date(
-                            byAdding: .month,
-                            value: RecheckStore.defaultIntervalMonths,
+                            byAdding: .day,
+                            value: RecheckStore.defaultIntervalDays,
                             to: Date()
                         ) ?? Date()
                     )

@@ -14,11 +14,11 @@ enum RecheckService {
     /// Replaces any existing reminder for the same marker. Returns the
     /// stored reminder.
     @discardableResult
-    static func schedule(marker: String, months: Int) async -> RecheckReminder {
+    static func schedule(marker: String, days: Int) async -> RecheckReminder {
         // One reminder per marker — drop the old one first.
         await cancel(marker: marker)
 
-        let due = Calendar.current.date(byAdding: .month, value: max(1, months), to: Date()) ?? Date()
+        let due = Calendar.current.date(byAdding: .day, value: max(1, days), to: Date()) ?? Date()
         let reminder = RecheckReminder(marker: marker, dueDate: due)
         RecheckStore.save(reminder)
         await arm(reminder)
@@ -36,7 +36,7 @@ enum RecheckService {
         for marker in markers {
             guard !RecheckStore.isOptedOut(marker),
                   !RecheckStore.isSet(forMarker: marker) else { continue }
-            await schedule(marker: marker, months: RecheckStore.defaultIntervalMonths)
+            await schedule(marker: marker, days: RecheckStore.defaultIntervalDays)
         }
     }
 

@@ -29,7 +29,7 @@ struct RecheckReminder: Codable, Identifiable, Equatable {
 /// rest of the app.
 enum RecheckStore {
     private static let listKey = "localabs_recheck_reminders"
-    private static let intervalKey = "localabs_recheck_default_months"
+    private static let intervalDaysKey = "localabs_recheck_default_days"
     private static let optedOutKey = "localabs_recheck_optedout"
 
     static func all() -> [RecheckReminder] {
@@ -65,14 +65,16 @@ enum RecheckStore {
         UserDefaults.standard.set(data, forKey: listKey)
     }
 
-    /// Default months until a recheck, used when the user flips the
-    /// reminder toggle. Defaults to 3 (the common "recheck in 3 months").
-    static var defaultIntervalMonths: Int {
+    /// Default number of DAYS until a recheck, used when the user flips a
+    /// reminder toggle. Stored in days (not months) so the picker can offer
+    /// finer choices like "2 weeks" or "6 weeks". Defaults to 90 (~the
+    /// common "recheck in 3 months").
+    static var defaultIntervalDays: Int {
         get {
-            let v = UserDefaults.standard.integer(forKey: intervalKey)
-            return v == 0 ? 3 : v
+            let v = UserDefaults.standard.integer(forKey: intervalDaysKey)
+            return v == 0 ? 90 : v
         }
-        set { UserDefaults.standard.set(newValue, forKey: intervalKey) }
+        set { UserDefaults.standard.set(newValue, forKey: intervalDaysKey) }
     }
 
     // MARK: - Opt-out (markers the user turned OFF)
@@ -103,7 +105,7 @@ enum RecheckStore {
 
     static func resetAll() {
         UserDefaults.standard.removeObject(forKey: listKey)
-        UserDefaults.standard.removeObject(forKey: intervalKey)
+        UserDefaults.standard.removeObject(forKey: intervalDaysKey)
         UserDefaults.standard.removeObject(forKey: optedOutKey)
     }
 }
