@@ -19,6 +19,8 @@ struct ProfileView: View {
     @State private var hasRequestedHealth = HealthKitService.shared.hasRequestedAuthorization
     @State private var healthMetrics: HealthKitService.HealthMetrics?
     @State private var isRequestingHealth = false
+    /// Presents the medical disclaimer + terms (#32).
+    @State private var showLegal = false
 
     var body: some View {
         NavigationStack {
@@ -58,6 +60,14 @@ struct ProfileView: View {
                     medicationsCard
                         .padding(.horizontal)
 
+                    Button {
+                        showLegal = true
+                    } label: {
+                        legalCard
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal)
+
                     actionButtons
                         .padding(.horizontal)
                         .padding(.bottom, 100)
@@ -81,6 +91,9 @@ struct ProfileView: View {
             }
             .sheet(isPresented: $showOnboarding) {
                 OnboardingView()
+            }
+            .sheet(isPresented: $showLegal) {
+                LegalView()
             }
             .sheet(isPresented: $showProfileEdit, onDismiss: {
                 // ProfileEditSheet auto-saves on every change, so by
@@ -143,6 +156,30 @@ struct ProfileView: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
                 Text("Get reminded to re-scan markers that were trending the wrong way")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var legalCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "checkmark.shield")
+                .font(.title2)
+                .foregroundStyle(.blue)
+                .frame(width: 32)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Terms & Medical Disclaimer")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text("Informational, not a diagnosis — read the disclaimer, terms & privacy")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

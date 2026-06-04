@@ -6,6 +6,7 @@ struct OnboardingView: View {
     @State private var step = 0
     @State private var profile = UserProfile.load()
     @State private var agreed = false
+    @State private var showLegal = false
 
     /// Bridges the optional `dateOfBirth` to the DatePicker. Defaults
     /// to 30 years ago for display; the set only fires when the user
@@ -212,7 +213,8 @@ struct OnboardingView: View {
 
                     VStack(alignment: .leading, spacing: 12) {
                         Text("1. **100% On-Device:** Localabs runs entirely on your phone's processor. Your health data is NEVER sent to the cloud.")
-                        Text("2. **Not a Doctor:** Localabs is an experimental AI tool. It is not a substitute for professional medical advice, diagnosis, or treatment.")
+                        Text("2. **Not a Doctor:** Localabs is an informational AI tool, not a medical device. It does not diagnose and is not a substitute for professional medical advice. It can be wrong — confirm anything important with your doctor.")
+                        Text("3. **Emergencies:** Localabs is not for medical emergencies. In an emergency, call 911 or your doctor.")
                     }
                     .font(.subheadline)
                     .padding(18)
@@ -220,15 +222,26 @@ struct OnboardingView: View {
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .padding(.horizontal)
 
-                    Toggle("I understand and agree to the terms above.", isOn: $agreed)
+                    Button {
+                        showLegal = true
+                    } label: {
+                        Label("Read the full Medical Disclaimer & Terms", systemImage: "doc.text")
+                            .font(.subheadline.weight(.medium))
+                    }
+                    .padding(.horizontal, 24)
+
+                    Toggle("I have read and agree to the Medical Disclaimer & Terms.", isOn: $agreed)
                         .padding(.horizontal, 24)
                         .font(.subheadline.weight(.semibold))
                 }
             }
+            .sheet(isPresented: $showLegal) { LegalView() }
 
             Button {
                 profile.onboardingComplete = true
                 profile.save()
+                // Record when the user accepted the disclaimer + terms.
+                UserDefaults.standard.set(Date(), forKey: "localabs_terms_accepted_at")
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     onboardingComplete = true
