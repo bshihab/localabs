@@ -271,6 +271,7 @@ struct OnboardingView: View {
                 Image(systemName: icon)
                     .font(.system(size: 22))
                     .foregroundStyle(color)
+                    .shadow(color: color.opacity(0.5), radius: 7)
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.system(size: 17, weight: .semibold))

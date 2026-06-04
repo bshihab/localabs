@@ -169,6 +169,7 @@ struct ScanView: View {
             VStack(spacing: 4) {
                 Text("Localabs")
                     .font(.system(size: 34, weight: .bold))
+                    .shadow(color: .blue.opacity(0.35), radius: 12)
                 Text("Scan a report, or prep for a doctor visit")
                     .font(.system(size: 15))
                     .foregroundStyle(.secondary)
@@ -1106,6 +1107,8 @@ private struct HomePane: View {
                     ),
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                 )
+                // Soft colored glow so each tile reads as a lit icon.
+                .shadow(color: color.opacity(0.55), radius: 11, y: 3)
             Spacer(minLength: 6)
             Text(title)
                 .font(.system(size: 17, weight: .bold))

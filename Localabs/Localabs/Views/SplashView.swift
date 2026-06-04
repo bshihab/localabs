@@ -216,6 +216,7 @@ struct SplashView: View {
         Text("Localabs")
             .font(.system(size: 32, weight: .bold, design: .rounded))
             .foregroundStyle(.primary)
+            .shadow(color: .blue.opacity(0.45), radius: 14)
             .offset(y: 130)
             .keyframeAnimator(
                 initialValue: 1.0,
