@@ -76,6 +76,11 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .openRecheckScan)) { _ in
                 selectedTab = 0
             }
+            // "Scan your after-visit summary" — land on Home (ScanView tears
+            // down the visit sheets so the scanner is right there).
+            .onReceive(NotificationCenter.default.publisher(for: .openScanFromVisit)) { _ in
+                selectedTab = 0
+            }
             // Foreground path on app activation: re-check armed Health
             // alerts, and re-sync medication reminders so edits made
             // while backgrounded (or pending requests iOS dropped) are

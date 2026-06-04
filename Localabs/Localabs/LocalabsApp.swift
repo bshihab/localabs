@@ -17,6 +17,11 @@ extension Notification.Name {
     /// Posted when the user taps a "time to recheck your <marker>"
     /// notification. ContentView switches to the Home tab to scan.
     static let openRecheckScan = Notification.Name("localabs.openRecheckScan")
+    /// Posted from the post-visit check-in's "Scan your after-visit summary"
+    /// button. Tears down the WHOLE visit flow (the check-in sheet AND the
+    /// visit hub that presented it) and lands the user on the Home tab to
+    /// scan — rather than dismissing only one sheet level.
+    static let openScanFromVisit = Notification.Name("localabs.openScanFromVisit")
     /// Posted when the user changes their age or biological sex. Views
     /// that show age/sex-dependent reference ranges (Trends, Dashboard)
     /// reload so the "normal" ranges reflect the new demographics — even

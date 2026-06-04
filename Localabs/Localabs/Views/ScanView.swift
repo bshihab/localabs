@@ -159,6 +159,13 @@ struct ScanView: View {
             .sheet(isPresented: $showVisitHub, onDismiss: loadVisit) {
                 VisitHubView()
             }
+            // "Scan your after-visit summary" — collapse every visit sheet so
+            // the user lands on the Home scanner, not back on the visit hub.
+            .onReceive(NotificationCenter.default.publisher(for: .openScanFromVisit)) { _ in
+                showVisitHub = false
+                showVisitCheckIn = false
+                showVisitPrep = false
+            }
         }
     }
 

@@ -104,10 +104,11 @@ struct PostVisitCheckInView: View {
     private var summaryScanSection: some View {
         Section {
             Button {
-                // Return to the Home screen, where the document scanner
-                // lives. Detected medications in the summary then surface
-                // as one-tap adds (#33).
-                dismiss()
+                // Take the user all the way back to the Home tab to scan —
+                // tear down the whole visit flow (this sheet AND the visit
+                // hub that presented it), not just one level. Detected
+                // medications then surface as one-tap adds (#33).
+                NotificationCenter.default.post(name: .openScanFromVisit, object: nil)
             } label: {
                 Label("Scan your after-visit summary", systemImage: "doc.viewfinder")
             }
