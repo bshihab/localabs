@@ -280,67 +280,50 @@ struct ScanView: View {
 
     private var processingView: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
+            Group {
+                if needsResume {
+                    // Paused / truncated — compact text header; the Resume
+                    // + Discard CTAs live below.
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(processingHeadline)
                                 .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(needsResume ? Color.orange : Color.primary)
-                            Spacer()
-                            // Live percentage tied to engine.analysisProgress.
-                            // Using monospaced digits keeps it from twitching
-                            // as the percent changes width.
-                            Text("\(Int(engine.analysisProgress * 100))%")
-                                .font(.system(size: 15, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(.orange)
+                            Text(statusLine)
+                                .font(.system(size: 13))
                                 .foregroundStyle(.secondary)
-                                .contentTransition(.numericText(value: engine.analysisProgress))
+                                .lineLimit(1)
                         }
-                        Text(statusLine)
-                            .font(.system(size: 13))
+                        Spacer()
+                        Text("\(Int(engine.analysisProgress * 100))%")
+                            .font(.system(size: 15, weight: .semibold).monospacedDigit())
                             .foregroundStyle(.secondary)
-                            .lineLimit(1)
                     }
-
-                    // Pause toggle only while a run is actively
-                    // streaming. Hidden while paused (action moves to
-                    // the dedicated bottom buttons) AND while we're
-                    // showing a truncated-needs-resume state — there's
-                    // nothing to pause.
-                    if engine.isProcessing && !needsResume {
-                        Button {
-                            engine.pauseInference()
-                        } label: {
-                            Image(systemName: "pause.circle.fill")
-                                .font(.system(size: 26))
-                                .foregroundStyle(.blue, .blue.opacity(0.18))
-                                .symbolRenderingMode(.hierarchical)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    // Active run — the circular phase hero: a progress ring
+                    // with the four phases as pips around it, orbiting dots,
+                    // and the current phase's icon pulsing in the center.
+                    PhaseOrbitView(phase: engine.analysisPhase, progress: engine.analysisProgress)
+                        .frame(maxWidth: .infinity)
+                        .overlay(alignment: .topTrailing) {
+                            if engine.isProcessing {
+                                Button {
+                                    engine.pauseInference()
+                                } label: {
+                                    Image(systemName: "pause.circle.fill")
+                                        .font(.system(size: 26))
+                                        .foregroundStyle(.blue, .blue.opacity(0.18))
+                                        .symbolRenderingMode(.hierarchical)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Pause analysis")
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Pause analysis")
-                    }
                 }
-
-                // Guided pipeline stepper — Read → Write → Trends → Meds.
-                // Makes the previously-invisible trend/medication passes
-                // visible so the run never reads as "stuck on the last
-                // section." Hidden while paused (nothing's advancing).
-                if !needsResume {
-                    AnalysisPhaseStepper(phase: engine.analysisPhase)
-                        .padding(.top, 2)
-                }
-
-                // Determinate progress bar — replaces the previous
-                // indeterminate spinner. Fills as each pipeline phase
-                // completes (OCR per page → save → Health → Localabs
-                // streaming → trends → meds → save). Tints orange while
-                // paused so the frozen state reads at a glance.
-                ProgressView(value: engine.analysisProgress)
-                    .tint(needsResume ? .orange : .blue)
-                    .animation(.easeOut(duration: 0.25), value: engine.analysisProgress)
             }
             .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .padding(.horizontal, 20)
             .padding(.top, 16)
@@ -678,16 +661,22 @@ struct LiveSectionCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(activeGlow)        // soft radial glow behind the active card
         .glassEffect(
             state == .active
-                ? .regular.tint(section.tint.opacity(0.18))
+                ? .regular.tint(section.tint.opacity(0.16))
                 : .regular,
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
         )
-        .overlay(breathingBorder)
+        // Steady (non-animated) tinted border on the active card so the
+        // eye knows where Localabs is writing — the pane no longer pulses.
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(
+                    section.tint.opacity(state == .active ? 0.5 : (state == .complete ? 0.18 : 0)),
+                    lineWidth: state == .active ? 1.5 : 1
+                )
+        )
         .opacity(state == .pending ? 0.5 : 1.0)
-        .scaleEffect(state == .active ? 1.0 : (state == .pending ? 0.96 : 0.99))
         .animation(.spring(response: 0.42, dampingFraction: 0.82), value: state)
         .animation(.easeOut(duration: 0.2), value: lines.count)
     }
@@ -712,8 +701,9 @@ struct LiveSectionCard: View {
     private var statusIndicator: some View {
         switch state {
         case .active:
-            PulsingDot(tint: section.tint)
-                .transition(.scale.combined(with: .opacity))
+            // No pulsing indicator here — the blinking caret in the body
+            // shows it's being written. Keeps the pane calm.
+            EmptyView()
         case .complete:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 16, weight: .semibold))
@@ -759,38 +749,11 @@ struct LiveSectionCard: View {
                     .foregroundStyle(.secondary)
             }
         } else {
-            // Pending — shimmering skeleton lines hint that content is coming.
-            ShimmerLines(tint: section.tint)
-        }
-    }
-
-    // MARK: Decoration
-
-    @ViewBuilder
-    private var activeGlow: some View {
-        if state == .active {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(section.tint.opacity(0.22))
-                .blur(radius: 22)
-                .padding(-4)
-                .transition(.opacity)
-        }
-    }
-
-    /// A gentle "breathing" tinted border on the active card so the eye
-    /// is drawn to wherever Localabs is currently writing.
-    @ViewBuilder
-    private var breathingBorder: some View {
-        if state == .active {
-            TimelineView(.animation) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                let breathe = 0.35 + 0.30 * (0.5 + 0.5 * sin(t * 2.2))  // 0.35→0.65
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(section.tint.opacity(breathe), lineWidth: 1.5)
-            }
-        } else {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(section.tint.opacity(state == .complete ? 0.20 : 0), lineWidth: 1)
+            // Pending — calm, no skeleton. The dim header alone reads as
+            // "up next"; the circular hero up top carries the motion.
+            Text("Up next")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary.opacity(0.5))
         }
     }
 }
@@ -815,145 +778,154 @@ private struct BlinkingCaret: View {
     }
 }
 
-/// The active-section "writing" pulse — a dot that scales + fades on the
-/// display clock (smoother than a chained repeatForever animation).
-private struct PulsingDot: View {
-    let tint: Color
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let curve = 0.5 + 0.5 * sin(t * 3.0)
-            Circle()
-                .fill(tint)
-                .frame(width: 9, height: 9)
-                .scaleEffect(0.8 + 0.5 * curve)
-                .opacity(0.5 + 0.5 * curve)
-        }
-        .frame(width: 16, height: 16)
-        .accessibilityHidden(true)
-    }
-}
+// MARK: - Circular phase hero
 
-/// Shimmering skeleton placeholder for a pending section — three lines of
-/// varying width with a soft highlight band sweeping left→right, like
-/// Messages / News loading states. The band is rebuilt each frame as a
-/// horizontal gradient (no GeometryReader needed).
-private struct ShimmerLines: View {
-    let tint: Color
-    private let widths: [CGFloat] = [1.0, 0.82, 0.55]
-
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let center = (t / 1.5).truncatingRemainder(dividingBy: 1)  // 0→1 sweep
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(widths.indices, id: \.self) { i in
-                    Capsule()
-                        .fill(shimmerGradient(center: center))
-                        .frame(height: 9)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .scaleEffect(x: widths[i], anchor: .leading)
-                }
-            }
-            .frame(height: 41)
-        }
-        .accessibilityLabel("Waiting for Localabs")
-    }
-
-    private func shimmerGradient(center: Double) -> LinearGradient {
-        let base = Color.secondary.opacity(0.16)
-        let band = 0.16
-        let stops: [Gradient.Stop] = [
-            .init(color: base, location: 0),
-            .init(color: base, location: max(0, center - band)),
-            .init(color: tint.opacity(0.5), location: min(max(center, 0), 1)),
-            .init(color: base, location: min(1, center + band)),
-            .init(color: base, location: 1)
-        ]
-        return LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing)
-    }
-}
-
-// MARK: - Guided pipeline stepper
-
-/// Horizontal "Read → Write → Trends → Meds" stage tracker shown above the
-/// progress bar during a scan. Completed stages get a check, the current
-/// stage glows + pulses, pending stages sit dim — so the run reads as a
-/// journey and the trend/medication passes (previously invisible) are
-/// clearly part of it.
-struct AnalysisPhaseStepper: View {
+/// The scan loading hero: a circular progress ring with the four pipeline
+/// phases as pips around it, a few dots orbiting the middle, and the
+/// current phase's icon pulsing in the center with the live percentage.
+/// Replaces the old linear stepper + bar.
+struct PhaseOrbitView: View {
     let phase: InferenceEngine.AnalysisPhase
+    let progress: Double
 
-    private struct Stage {
-        let phase: InferenceEngine.AnalysisPhase
-        let icon: String
-        let label: String
-    }
-
-    private let stages: [Stage] = [
-        .init(phase: .reading,       icon: "doc.text.viewfinder",       label: "Read"),
-        .init(phase: .writing,       icon: "square.and.pencil",         label: "Write"),
-        .init(phase: .findingTrends, icon: "chart.line.uptrend.xyaxis", label: "Trends"),
-        .init(phase: .detectingMeds, icon: "pills.fill",                label: "Meds")
-    ]
+    private let stagePhases: [InferenceEngine.AnalysisPhase] =
+        [.reading, .writing, .findingTrends, .detectingMeds]
+    private let ringSize: CGFloat = 132
+    private var radius: CGFloat { ringSize / 2 }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(stages.enumerated()), id: \.offset) { idx, stage in
-                node(for: stage)
-                if idx < stages.count - 1 {
-                    connector(after: stage)
-                }
-            }
-        }
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: phase)
-    }
-
-    private func status(_ stage: Stage) -> LiveSectionState {
-        if phase == .done || phase.rawValue > stage.phase.rawValue { return .complete }
-        if phase.rawValue == stage.phase.rawValue { return .active }
-        return .pending
-    }
-
-    @ViewBuilder
-    private func node(for stage: Stage) -> some View {
-        let s = status(stage)
-        VStack(spacing: 5) {
+        VStack(spacing: 14) {
             ZStack {
+                // Track + progress ring.
                 Circle()
-                    .fill(s == .pending ? Color.secondary.opacity(0.14) : Color.blue.opacity(0.16))
-                    .frame(width: 34, height: 34)
-                if s == .active {
-                    // Pulsing ring around the current stage.
-                    TimelineView(.animation) { timeline in
-                        let t = timeline.date.timeIntervalSinceReferenceDate
-                        let p = 0.5 + 0.5 * sin(t * 3.0)
-                        Circle()
-                            .stroke(Color.blue.opacity(0.5 - 0.4 * p), lineWidth: 2)
-                            .frame(width: 34 + 10 * p, height: 34 + 10 * p)
-                    }
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 6)
+                Circle()
+                    .trim(from: 0, to: max(0.001, min(progress, 1)))
+                    .stroke(
+                        AngularGradient(
+                            gradient: Gradient(colors: [.blue, .cyan, .blue]),
+                            center: .center
+                        ),
+                        style: StrokeStyle(lineWidth: 6, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeOut(duration: 0.35), value: progress)
+
+                // Dots orbiting the middle.
+                OrbitingDots(radius: radius - 22)
+
+                // The four phases as pips sitting on the ring.
+                ForEach(Array(stagePhases.enumerated()), id: \.offset) { idx, p in
+                    phasePip(p, at: idx)
                 }
-                Image(systemName: s == .complete ? "checkmark" : stage.icon)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(s == .pending ? Color.secondary : Color.blue)
-                    .contentTransition(.symbolEffect(.replace))
-                    .scaleEffect(s == .active ? 1.05 : 1.0)
+
+                // Center: pulsing current-phase icon + live %.
+                VStack(spacing: 2) {
+                    PulsingIcon(systemName: icon(phase))
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText(value: progress))
+                }
             }
-            Text(stage.label)
-                .font(.system(size: 11, weight: s == .active ? .bold : .medium))
-                .foregroundStyle(s == .pending ? Color.secondary : Color.primary)
+            .frame(width: ringSize, height: ringSize)
+
+            Text(label(phase))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .animation(.easeInOut(duration: 0.25), value: phase)
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func connector(after stage: Stage) -> some View {
-        // Filled (blue) once this stage is done, otherwise dim.
-        let done = status(stage) == .complete
-        return Capsule()
-            .fill(done ? Color.blue.opacity(0.55) : Color.secondary.opacity(0.18))
-            .frame(height: 2)
-            .frame(maxWidth: .infinity)
-            .offset(y: -9)  // align with the node circles, not the labels
+    private func phasePip(_ p: InferenceEngine.AnalysisPhase, at idx: Int) -> some View {
+        let s = status(p)
+        // Top, right, bottom, left.
+        let angle = Double(idx) * 90 - 90
+        let rad = angle * .pi / 180
+        let dotSize: CGFloat = s == .active ? 24 : 19
+        return ZStack {
+            Circle()
+                .fill(s == .pending ? Color(.secondarySystemBackground) : Color.blue)
+                .frame(width: dotSize, height: dotSize)
+                .overlay(
+                    Circle().stroke(Color.secondary.opacity(s == .pending ? 0.35 : 0), lineWidth: 1)
+                )
+                .shadow(color: s == .active ? .blue.opacity(0.6) : .clear, radius: 5)
+            Image(systemName: s == .complete ? "checkmark" : icon(p))
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(s == .pending ? Color.secondary : .white)
+        }
+        .offset(x: radius * cos(rad), y: radius * sin(rad))
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: s)
+    }
+
+    private func status(_ p: InferenceEngine.AnalysisPhase) -> LiveSectionState {
+        if phase == .done || phase.rawValue > p.rawValue { return .complete }
+        if phase.rawValue == p.rawValue { return .active }
+        return .pending
+    }
+
+    private func icon(_ p: InferenceEngine.AnalysisPhase) -> String {
+        switch p {
+        case .reading:       return "doc.text.viewfinder"
+        case .writing:       return "square.and.pencil"
+        case .findingTrends: return "chart.line.uptrend.xyaxis"
+        case .detectingMeds: return "pills.fill"
+        case .done:          return "checkmark"
+        case .idle:          return "hourglass"
+        }
+    }
+
+    private func label(_ p: InferenceEngine.AnalysisPhase) -> String {
+        switch p {
+        case .reading:       return "Reading your report"
+        case .writing:       return "Writing your translation"
+        case .findingTrends: return "Finding your trends"
+        case .detectingMeds: return "Detecting medications"
+        case .done:          return "Done"
+        case .idle:          return "Preparing…"
+        }
+    }
+}
+
+/// The current-phase icon at the center of the hero, gently pulsing on the
+/// display clock and morphing when the phase changes.
+private struct PulsingIcon: View {
+    let systemName: String
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let scale = 1.0 + 0.10 * (0.5 + 0.5 * sin(t * 3.0))
+            Image(systemName: systemName)
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(.blue)
+                .scaleEffect(scale)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .frame(height: 30)
+    }
+}
+
+/// Three small dots orbiting the center of the hero, rotating continuously
+/// on the display clock.
+private struct OrbitingDots: View {
+    let radius: CGFloat
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let base = t * 0.9  // radians/sec
+            ZStack {
+                ForEach(0..<3, id: \.self) { i in
+                    let angle = base + Double(i) * (2 * .pi / 3)
+                    Circle()
+                        .fill(Color.blue.opacity(0.5))
+                        .frame(width: 6, height: 6)
+                        .offset(x: radius * cos(angle), y: radius * sin(angle))
+                }
+            }
+        }
+        .accessibilityHidden(true)
     }
 }
 
