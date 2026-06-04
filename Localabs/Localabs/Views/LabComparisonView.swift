@@ -97,18 +97,45 @@ struct LabTrendRow: View {
     /// the lab's normal range drawn as dashed boundary lines.
     private var chart: some View {
         Chart {
-            // Normal-range boundary lines (the lab's own reference
-            // range). Dashed, muted green, so the user can see at a
-            // glance whether a reading is inside or outside normal.
-            if let lo = trend.referenceLower {
-                RuleMark(y: .value("Lower", lo))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    .foregroundStyle(.green.opacity(0.5))
-            }
-            if let hi = trend.referenceUpper {
-                RuleMark(y: .value("Upper", hi))
-                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                    .foregroundStyle(.green.opacity(0.5))
+            // Normal-range boundary lines (dashed, muted green). When every
+            // report agrees on the range we draw two full-width rule lines.
+            // When reports disagree (different labs, or an age-shifting
+            // marker over a long span) we draw a STEPPED band instead, so
+            // you can see the normal range change over time. Printed ranges
+            // define the band; AI-filled ones are used only if nothing was
+            // printed (see `bandPoints`).
+            if bandVaries {
+                ForEach(bandPoints) { p in
+                    if let lo = p.lower {
+                        LineMark(x: .value("Date", p.date),
+                                 y: .value("Lower", lo),
+                                 series: .value("band", "lower"))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                            .foregroundStyle(.green.opacity(0.5))
+                            .interpolationMethod(.stepEnd)
+                    }
+                }
+                ForEach(bandPoints) { p in
+                    if let hi = p.upper {
+                        LineMark(x: .value("Date", p.date),
+                                 y: .value("Upper", hi),
+                                 series: .value("band", "upper"))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                            .foregroundStyle(.green.opacity(0.5))
+                            .interpolationMethod(.stepEnd)
+                    }
+                }
+            } else {
+                if let lo = trend.referenceLower {
+                    RuleMark(y: .value("Lower", lo))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                        .foregroundStyle(.green.opacity(0.5))
+                }
+                if let hi = trend.referenceUpper {
+                    RuleMark(y: .value("Upper", hi))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                        .foregroundStyle(.green.opacity(0.5))
+                }
             }
 
             ForEach(trend.points) { point in
@@ -147,6 +174,24 @@ struct LabTrendRow: View {
             }
         }
         .frame(height: 90)
+    }
+
+    /// Points that define the chart's normal band. Prefer the reports
+    /// that PRINTED a range (the real numbers); only fall back to the
+    /// AI-filled ones if no report printed a range at all. Stepping over
+    /// these is what lets the band change across time.
+    private var bandPoints: [LabTrend.Point] {
+        let printed = trend.points.filter { $0.rangeFromReport && ($0.lower != nil || $0.upper != nil) }
+        if !printed.isEmpty { return printed }
+        return trend.points.filter { $0.lower != nil || $0.upper != nil }
+    }
+
+    /// True when the band's reports don't all agree on the range — only
+    /// then do we draw the stepped band instead of clean full-width lines.
+    private var bandVaries: Bool {
+        let los = Set(bandPoints.compactMap { $0.lower })
+        let his = Set(bandPoints.compactMap { $0.upper })
+        return los.count > 1 || his.count > 1
     }
 
     /// Chart line color follows the marker's status, matching the chip.

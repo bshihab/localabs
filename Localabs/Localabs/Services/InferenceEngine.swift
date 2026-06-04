@@ -1291,9 +1291,12 @@ final class InferenceEngine: ObservableObject {
         values = values.filter { !Self.isLikelyNonLabField($0.canonicalName) }
 
         // PASS 2 — enrich with medical knowledge (range when the report
-        // omitted one, + concern direction), age/sex aware. Separated
-        // from transcription so the model isn't juggling two jobs.
-        return await enrichLabValues(values)
+        // omitted one, + concern direction), age/sex aware. Use the
+        // REPORT's own age/sex (a snapshot of the patient then), not the
+        // live profile, so the filled range belongs to that report.
+        let reportAge = Self.extractPatientAge(from: ocrText)
+        let reportSex = Self.extractPatientSex(from: ocrText)
+        return await enrichLabValues(values, patientAge: reportAge, patientSex: reportSex)
     }
 
     /// Second extraction pass: given the extracted test names + the
@@ -1302,18 +1305,31 @@ final class InferenceEngine: ObservableObject {
     /// pure medical knowledge, no transcription. Fills a value's range
     /// only when the report didn't print one (the lab's printed range
     /// wins), and sets the concern direction.
-    func enrichLabValues(_ values: [LabValue]) async -> [LabValue] {
+    /// Fills a normal range (only when the report didn't print one) and a
+    /// concern direction for each value. A report is a *snapshot*, so the
+    /// range is computed for the demographics that belong to THAT report —
+    /// `patientAge`/`patientSex` read off the report itself — falling back
+    /// to the user's profile only when the report doesn't state them. The
+    /// filled range is then frozen on the value; changing the profile later
+    /// never recomputes it (an old blood draw doesn't change because you had
+    /// a birthday).
+    func enrichLabValues(
+        _ values: [LabValue],
+        patientAge: Int? = nil,
+        patientSex: String? = nil
+    ) async -> [LabValue] {
         guard let context = llamaContext, !values.isEmpty else { return values }
 
+        // Prefer the report's own age/sex; fall back to the profile.
         let profile = UserProfile.load()
+        let age = patientAge ?? profile.ageYears
+        let reportSex = patientSex?.trimmingCharacters(in: .whitespaces)
+        let sex = (reportSex?.isEmpty == false ? reportSex! : profile.biologicalSex)
+            .trimmingCharacters(in: .whitespaces)
         var demoParts: [String] = []
-        if let age = profile.ageYears {
-            demoParts.append("age \(age)")
-        }
-        let sex = profile.biologicalSex.trimmingCharacters(in: .whitespaces)
+        if let age { demoParts.append("\(age)-year-old") }
         if !sex.isEmpty { demoParts.append(sex.lowercased()) }
-        let demoLine = demoParts.isEmpty ? "" : " for a \(demoParts.joined(separator: ", ")) patient"
-        print("[RangeDebug] enrichLabValues — \(values.count) marker(s), demographics in prompt: '\(demoLine.isEmpty ? "(none — age/sex not set!)" : demoLine)'")
+        let demoLine = demoParts.isEmpty ? "" : " for a \(demoParts.joined(separator: " ")) patient"
 
         let namesBlock = values.map { $0.canonicalName }.joined(separator: "\n")
         let prompt = """
@@ -1365,76 +1381,26 @@ final class InferenceEngine: ObservableObject {
             meta[LabValue.normalizeKey(parts[0])] = (range, dir)
         }
 
-        print("[RangeDebug] parsed \(meta.count) range(s) from model output")
         return values.map { value in
             var v = value
-            guard let m = meta[v.joinKey] else {
-                print("[RangeDebug]   '\(v.canonicalName)': NO match in model output — keeping range '\(v.referenceRange ?? "nil")'")
-                return v
-            }
-            let oldRange = v.referenceRange ?? "nil"
-            // Report's printed range wins; only fill in when empty.
+            guard let m = meta[v.joinKey] else { return v }
+            // Report's printed range wins; only fill in when empty. The
+            // AI range is anchored to the report's own age/sex (above) and
+            // frozen here — never recomputed when the profile changes.
             if (v.referenceRange?.isEmpty ?? true), let r = m.range {
                 v.referenceRange = r
-                print("[RangeDebug]   '\(v.canonicalName)': '\(oldRange)' → '\(r)' (AI-filled; fromReport=\(v.rangeFromReport ?? false))")
-            } else {
-                print("[RangeDebug]   '\(v.canonicalName)': KEPT '\(oldRange)' (fromReport=\(v.rangeFromReport ?? false)) — model said '\(m.range ?? "nil")'")
             }
             if let d = m.dir { v.concernDirection = d }
             return v
         }
     }
 
-    /// Recompute the AI-supplied reference ranges (and directions) on
-    /// every saved report when the user's age/sex changes — the
-    /// HDL/creatinine-type sex-specific cutoffs were filled in for the
-    /// old demographics.
-    ///
-    /// Crucially this does NOT re-transcribe the reports — it re-runs
-    /// ONLY the enrichment pass over each report's EXISTING lab values.
-    /// Re-transcribing was dropping markers (the model re-reading the
-    /// report from scratch produced fewer rows); keeping the stored
-    /// values and only refreshing their ranges/directions avoids that
-    /// entirely, and is ~2× faster. Lab-printed ranges
-    /// (rangeFromReport == true) are preserved; only the AI-filled ones
-    /// are cleared and recomputed.
-    ///
-    /// Atomic: computes all updates in memory and commits in a single
-    /// write at the end, so a force-quit mid-run leaves the original
-    /// ranges fully intact.
-    func reEnrichAllReports() async {
-        guard llamaContext != nil else {
-            print("[RangeDebug] reEnrichAllReports SKIPPED — no model loaded")
-            return
-        }
-        let targets = LocalStorageService.shared.getHistory().filter {
-            !($0.labValues?.isEmpty ?? true)
-        }
-        print("[RangeDebug] reEnrichAllReports START — \(targets.count) report(s) with lab values")
-        guard !targets.isEmpty else { return }
-
-        rangeRecompute = (0, targets.count)
-        defer { rangeRecompute = nil }
-
-        var updates: [UUID: [LabValue]] = [:]
-        for (index, report) in targets.enumerated() {
-            if Task.isCancelled { return }  // nothing committed → original kept
-            guard let stored = report.labValues else { continue }
-            // Clear ONLY the AI-filled ranges so enrichment refills them
-            // for the new age/sex; keep the lab's printed ranges.
-            let cleared = stored.map { v -> LabValue in
-                var v = v
-                if v.rangeFromReport != true { v.referenceRange = nil }
-                return v
-            }
-            updates[report.id] = await enrichLabValues(cleared)
-            rangeRecompute = (index + 1, targets.count)
-        }
-
-        guard !Task.isCancelled else { return }
-        print("[RangeDebug] reEnrichAllReports DONE — committing \(updates.count) report update(s)")
-        LocalStorageService.shared.applyLabValueUpdates(updates)
-    }
+    // NOTE: there is deliberately no "re-enrich on profile change" pass.
+    // A report is a snapshot — its ranges are anchored to the report's own
+    // age/sex at scan time and frozen. Editing the profile later must never
+    // rewrite a saved report's ranges. (The Apple Health "typical ranges"
+    // shown in Trends/Dashboard are computed live from the profile, so those
+    // still update — see `.profileDemographicsChanged`.)
 
     /// Whole-word labels that mark a row as document metadata, not a
     /// lab test — so a phone number, DOB, MRN, etc. doesn't get tracked
@@ -1801,7 +1767,13 @@ final class InferenceEngine: ObservableObject {
             let valueStr = parts[1].filter { "0123456789.-".contains($0) }
             guard let value = Double(valueStr) else { continue }
             let unit = parts.count > 2 ? parts[2] : ""
-            let range = (parts.count > 3 && !parts[3].isEmpty) ? parts[3] : nil
+            // A real reference range always contains a number ("<100",
+            // "70-99", ">40"). The model sometimes spills a unit ("mg/dL",
+            // "%") into the range column — reject anything with no digit so
+            // it can't masquerade as a printed range (which would block the
+            // enrichment pass from filling a proper one).
+            let rawRange = (parts.count > 3 && !parts[3].isEmpty) ? parts[3] : nil
+            let range = (rawRange?.contains(where: \.isNumber) ?? false) ? rawRange : nil
 
             let candidate = LabValue(
                 canonicalName: rawName,

@@ -23,6 +23,14 @@ struct LabTrend: Identifiable {
         let reportID: UUID
         let date: Date
         let value: Double
+        /// This report's OWN reference range (parsed numeric bounds), so
+        /// the chart can draw a "normal band" that steps over time when
+        /// reports disagree. nil bounds → that side is open / unknown.
+        let lower: Double?
+        let upper: Double?
+        /// Whether this point's range was printed on the report (vs.
+        /// AI-filled). The chart prefers printed ranges for the band.
+        let rangeFromReport: Bool
     }
 
     /// How the latest reading compares to the first.
@@ -128,6 +136,9 @@ enum LabTrendService {
         let scanTime: Date
         let reportID: UUID
         let date: Date
+        let lower: Double?
+        let upper: Double?
+        let rangeFromReport: Bool
     }
     private struct MarkerAccumulator {
         var display: String
@@ -136,11 +147,15 @@ enum LabTrendService {
         // One entry per calendar day — collapses duplicate reports
         // (e.g. re-scanning the same report) into a single point.
         var byDay: [Date: DayPoint] = [:]
-        // Reference range from the most recent report that supplied one.
+        // The single authoritative reference range for the marker. A
+        // printed range always beats an AI-filled one; among same-source
+        // ranges the most recently scanned report wins.
         var refLower: Double?
         var refUpper: Double?
-        // Newest scan time seen, so the latest report's concern /
-        // range win when they differ across reports.
+        var rangeIsPrinted: Bool = false
+        var rangeScan: Date = .distantPast
+        // Newest scan time seen, so the latest report's concern wins
+        // when reports disagree.
         var newestScan: Date = .distantPast
     }
 
@@ -170,14 +185,29 @@ enum LabTrendService {
                     concern: value.concernDirection ?? .midOptimal
                 )
                 if acc.unit.isEmpty && !value.unit.isEmpty { acc.unit = value.unit }
-                // The most recent report's clinical metadata wins: update
-                // the concern direction and range when this report is the
-                // newest seen for the marker and it supplied that info.
+                // Concern direction: the most recently scanned report wins.
                 if report.timestamp >= acc.newestScan {
                     acc.newestScan = report.timestamp
                     if let c = value.concernDirection { acc.concern = c }
-                    let (lo, hi) = LabValue.parseRange(value.referenceRange)
-                    if lo != nil || hi != nil { acc.refLower = lo; acc.refUpper = hi }
+                }
+
+                // Authoritative range: a printed range always beats an
+                // AI-filled one (the real number on a document wins over a
+                // model guess); only break ties between same-source ranges
+                // by scan recency.
+                let (lo, hi) = LabValue.parseRange(value.referenceRange)
+                let pointIsPrinted = value.rangeFromReport == true
+                if lo != nil || hi != nil {
+                    let firstRange = acc.refLower == nil && acc.refUpper == nil
+                    let beatsOnSource = pointIsPrinted && !acc.rangeIsPrinted
+                    let sameSourceNewer = (pointIsPrinted == acc.rangeIsPrinted)
+                        && report.timestamp >= acc.rangeScan
+                    if firstRange || beatsOnSource || sameSourceNewer {
+                        acc.refLower = lo
+                        acc.refUpper = hi
+                        acc.rangeIsPrinted = pointIsPrinted
+                        acc.rangeScan = report.timestamp
+                    }
                 }
 
                 // Dedupe by day: if this marker already has a reading
@@ -188,7 +218,10 @@ enum LabTrendService {
                     value: value.value,
                     scanTime: report.timestamp,
                     reportID: report.id,
-                    date: report.effectiveDate
+                    date: report.effectiveDate,
+                    lower: lo,
+                    upper: hi,
+                    rangeFromReport: pointIsPrinted
                 )
                 if let existing = acc.byDay[day] {
                     if report.timestamp >= existing.scanTime { acc.byDay[day] = candidate }
@@ -209,7 +242,16 @@ enum LabTrendService {
                     unit: acc.unit,
                     concern: acc.concern,
                     points: acc.byDay.values
-                        .map { LabTrend.Point(reportID: $0.reportID, date: $0.date, value: $0.value) }
+                        .map {
+                            LabTrend.Point(
+                                reportID: $0.reportID,
+                                date: $0.date,
+                                value: $0.value,
+                                lower: $0.lower,
+                                upper: $0.upper,
+                                rangeFromReport: $0.rangeFromReport
+                            )
+                        }
                         .sorted { $0.date < $1.date },
                     referenceLower: acc.refLower,
                     referenceUpper: acc.refUpper

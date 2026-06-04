@@ -102,25 +102,17 @@ struct ProfileView: View {
                 // ProfileView reflect those edits without waiting
                 // for the next tab switch.
                 profile = UserProfile.load()
-                // If age or biological sex changed, the AI-supplied
-                // reference ranges on saved reports were computed for
-                // the OLD demographics — recompute them all so the
-                // trends' thresholds match the new age/sex. Warn the
-                // user since it re-runs the on-device model per report.
+                // Saved reports' lab ranges are frozen snapshots — they are
+                // anchored to each report's OWN age/sex at scan time and are
+                // never recomputed when the profile changes. So changing age/
+                // sex here does NOT rewrite any saved report. We only notify
+                // Trends/Dashboard so the Apple Health "typical ranges"
+                // (which are derived live from the profile, not stored)
+                // re-read the new demographics.
                 let ageChanged = profile.ageDisplay != demoBeforeEdit.age
                 let sexChanged = profile.biologicalSex.trimmingCharacters(in: .whitespaces) != demoBeforeEdit.sex
-                print("[RangeDebug] Profile edit dismissed — before:(age=\(demoBeforeEdit.age), sex=\(demoBeforeEdit.sex)) after:(age=\(profile.ageDisplay), sex=\(profile.biologicalSex)) → ageChanged=\(ageChanged) sexChanged=\(sexChanged)")
                 if ageChanged || sexChanged {
-                    print("[RangeDebug] Demographics changed → posting notification + reEnrich (saved reports=\(LocalStorageService.shared.getHistory().count))")
-                    // Tell Trends/Dashboard to re-read their age/sex-based
-                    // ranges (Apple Health typical ranges update even with
-                    // no saved reports).
                     NotificationCenter.default.post(name: .profileDemographicsChanged, object: nil)
-                    // Re-enrich saved reports' AI-filled lab ranges for the
-                    // new age/sex. The app-wide banner shows progress.
-                    if !LocalStorageService.shared.getHistory().isEmpty {
-                        Task { await engine.reEnrichAllReports() }
-                    }
                 }
             }) {
                 ProfileEditSheet()
@@ -607,7 +599,6 @@ struct ProfileView: View {
                 profile.ageDisplay,
                 profile.biologicalSex.trimmingCharacters(in: .whitespaces)
             )
-            print("[RangeDebug] Opening profile editor — snapshot age=\(demoBeforeEdit.age) sex=\(demoBeforeEdit.sex)")
             // Dedicated edit sheet that shows existing field
             // values + any chat-added entries. The full 4-step
             // welcome / privacy onboarding flow only re-fires
