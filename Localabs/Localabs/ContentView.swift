@@ -49,16 +49,6 @@ struct ContentView: View {
                     .tag(4)
             }
             .tint(.blue)
-            // Global recompute banner — floats above the tab content so
-            // it persists no matter which tab/screen the user is on
-            // while the age/sex range recompute runs.
-            .overlay(alignment: .top) {
-                if let progress = engine.rangeRecompute {
-                    RangeRecomputeBanner(done: progress.done, total: progress.total)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
-            .animation(.easeInOut(duration: 0.25), value: engine.rangeRecompute?.done)
             // When a paused analysis exists, jump the user to the Scan
             // tab so they see the live cards / Resume CTA rather than
             // sitting on Trends or History wondering where it went.
@@ -105,37 +95,3 @@ struct ContentView: View {
     }
 }
 
-/// Thin top banner shown app-wide while the age/sex-change reference-
-/// range recompute runs. Determinate progress so the user can see it
-/// advancing and knows roughly how long is left.
-private struct RangeRecomputeBanner: View {
-    let done: Int
-    let total: Int
-
-    private var fraction: Double {
-        total > 0 ? Double(done) / Double(total) : 0
-    }
-
-    var body: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Updating reference ranges for your new age/sex… \(done) of \(total)")
-                    .font(.caption.weight(.medium))
-                Spacer(minLength: 0)
-            }
-            ProgressView(value: fraction)
-                .tint(.blue)
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
-        .padding(.horizontal, 12)
-        // Push below the status bar / Dynamic Island.
-        .padding(.top, 4)
-    }
-}

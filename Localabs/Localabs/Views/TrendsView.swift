@@ -104,14 +104,6 @@ struct TrendsView: View {
             .onAppear {
                 labTrends = LabTrendService.trends(from: LocalStorageService.shared.getHistory())
             }
-            // When the age/sex range recompute finishes (banner goes
-            // away), reload so the new thresholds show even if the user
-            // is already sitting on this tab.
-            .onChange(of: engine.rangeRecompute?.done) { _, _ in
-                if engine.rangeRecompute == nil {
-                    labTrends = LabTrendService.trends(from: LocalStorageService.shared.getHistory())
-                }
-            }
             // Age/sex changed in Profile → re-render so the typical
             // ranges (Apple Health) and any reloaded lab ranges update.
             .onReceive(NotificationCenter.default.publisher(for: .profileDemographicsChanged)) { _ in

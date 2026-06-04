@@ -66,12 +66,6 @@ final class InferenceEngine: ObservableObject {
     /// futile Resume CTA that would just hit the same failure.
     @Published var lastHardFailureMessage: String?
 
-    /// Progress of the age/sex-change reference-range recompute. nil
-    /// when idle; otherwise (done, total). A global banner observes
-    /// this so the user sees progress wherever they navigate, and the
-    /// trend views refresh when it returns to nil.
-    @Published var rangeRecompute: (done: Int, total: Int)?
-
     private var modelURL: URL { selectedModel.localURL }
 
     /// True when the app has received `didEnterBackgroundNotification`
