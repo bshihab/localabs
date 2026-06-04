@@ -28,12 +28,12 @@ struct RecheckRemindersView: View {
             } header: {
                 Text("Default")
             } footer: {
-                Text("New recheck reminders are set this far out — the doctor's usual \u{201C}recheck in 3 months.\u{201D} Out-of-range values are reminded on by default; switch any off below.")
+                Text("New recheck reminders are set this far out — the doctor's usual \u{201C}recheck in 3 months.\u{201D} Markers trending the wrong way are reminded on by default; switch any off below.")
             }
 
             Section {
                 if markers.isEmpty {
-                    Text("No lab markers yet. Scan a report and any out-of-range values will appear here.")
+                    Text("No tracked markers yet. Scan two or more reports that share a lab marker — the same ones on your Trends tab — and they'll appear here.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
@@ -64,27 +64,26 @@ struct RecheckRemindersView: View {
     }
 
     private func load() {
-        let reports = LocalStorageService.shared.getHistory().filter(\.isOwnReport)
-        // Drop reminders for markers no longer in any report.
-        let valid = Set(reports.flatMap { $0.labValues ?? [] }.map { LabValue.normalizeKey($0.canonicalName) })
+        // Mirror the Trends tab EXACTLY: the recheck list is built from the
+        // SAME cross-report trends (own reports, 2+ readings, joined by
+        // normalized name, hidden excluded, worsening sorted first). This is
+        // what keeps one-off extractions — a titer that appears once, a
+        // duplicate name variant, a prose line from a clinical note that got
+        // mis-read as a "marker" — out of here: if it isn't a real trend on
+        // the Trends tab, it can't show up as a reminder.
+        let history = LocalStorageService.shared.getHistory()
+        let trends = LabTrendService.trends(from: history)
+        let valid = Set(trends.map { LabValue.normalizeKey($0.canonicalName) })
+        // Drop any reminder whose marker is no longer a tracked trend
+        // (its reports were deleted, or it was junk that never trended).
         Task { @MainActor in
             for r in RecheckStore.all() where !valid.contains(r.key) {
                 await RecheckService.cancel(id: r.id)
             }
             version += 1
         }
-
-        // Unique marker display names, out-of-range first then alpha.
-        var seen = Set<String>()
-        var outOfRange: [String] = []
-        var normal: [String] = []
-        for value in reports.flatMap({ $0.labValues ?? [] }) {
-            let key = LabValue.normalizeKey(value.canonicalName)
-            guard seen.insert(key).inserted else { continue }
-            if value.isOutOfRange { outOfRange.append(value.canonicalName) }
-            else { normal.append(value.canonicalName) }
-        }
-        markers = outOfRange.sorted() + normal.sorted()
+        // trends() already sorts worsening-first, which is the order we want.
+        markers = trends.map(\.canonicalName)
     }
 
     private func binding(for marker: String) -> Binding<Bool> {

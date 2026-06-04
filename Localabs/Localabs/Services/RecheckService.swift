@@ -57,10 +57,11 @@ enum RecheckService {
     /// marker no longer appears in any of the user's reports (its reports
     /// were deleted) — those toggles + notifications go away with it.
     static func syncAll() async {
+        // Valid = markers that are real cross-report TRENDS (same source as
+        // the Trends tab + the recheck list), so a reminder that was armed
+        // for a one-off / junk marker gets cleared here too.
         let validMarkers = Set(
-            LocalStorageService.shared.getHistory()
-                .filter(\.isOwnReport)
-                .flatMap { $0.labValues ?? [] }
+            LabTrendService.trends(from: LocalStorageService.shared.getHistory())
                 .map { LabValue.normalizeKey($0.canonicalName) }
         )
         for reminder in RecheckStore.all() {

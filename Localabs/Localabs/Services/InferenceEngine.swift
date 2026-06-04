@@ -1444,6 +1444,30 @@ final class InferenceEngine: ObservableObject {
         return words.contains { nonLabFieldWords.contains($0) }
     }
 
+    /// Narrative words that never appear in a real lab-test NAME but do in
+    /// clinical-note prose — used to reject sentence fragments that a number
+    /// makes look like a measurement (e.g. "evaluation reveals a rising
+    /// anti-dsDNA titer"). They were polluting trends/recheck lists.
+    private static let narrativeWords: Set<String> = [
+        "reveals", "rising", "falling", "further", "shows", "showing",
+        "demonstrates", "consistent", "suggestive", "reflects", "worsening",
+        "improving", "evaluation", "indicates", "elevated", "decreased",
+        "increased", "noted", "compared", "previous", "above", "below",
+        "remains", "continues", "and", "with", "the"
+    ]
+
+    /// A plausible lab-marker name is short and isn't a prose fragment. Real
+    /// names are ≤5 words / ≤45 chars and contain none of the narrative
+    /// words above. Guards both the model pass and the deterministic scanner
+    /// so a clinical note's sentences can't become fake markers.
+    static func isPlausibleMarkerName(_ name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let words = trimmed.split(separator: " ")
+        guard trimmed.count <= 45, words.count <= 5 else { return false }
+        let lowered = Set(words.map { $0.lowercased() })
+        return lowered.isDisjoint(with: narrativeWords)
+    }
+
     /// Units that reliably signal "the number before/after me is a lab
     /// result." Used by scanLabLines to tell lab values apart from
     /// other numbers on the page (dates, page numbers, addresses).
@@ -1487,6 +1511,9 @@ final class InferenceEngine: ObservableObject {
                 let name = tokens[0..<i].joined(separator: " ")
                     .trimmingCharacters(in: CharacterSet(charactersIn: " :.-\t"))
                 guard name.count >= 2, name.contains(where: \.isLetter) else { continue }
+                // Reject prose fragments from clinical-note narrative that
+                // happen to precede a number.
+                guard Self.isPlausibleMarkerName(name) else { continue }
 
                 // Unit: the known unit if present, else the following
                 // token when it's a plausible unit (has a letter, short,
@@ -1782,6 +1809,9 @@ final class InferenceEngine: ObservableObject {
             guard parts.count >= 2 else { continue }
             let rawName = parts[0]
             guard !rawName.isEmpty, rawName.uppercased() != "NAME" else { continue }
+            // Reject sentence fragments the model sometimes emits when it
+            // reads a clinical note's prose as if it were a measurement.
+            guard Self.isPlausibleMarkerName(rawName) else { continue }
             // Keep only digits, decimal point, and leading minus.
             let valueStr = parts[1].filter { "0123456789.-".contains($0) }
             guard let value = Double(valueStr) else { continue }
