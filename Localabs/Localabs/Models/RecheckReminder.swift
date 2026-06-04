@@ -60,11 +60,6 @@ enum RecheckStore {
         persist(all().filter { $0.id != id })
     }
 
-    static func removeMarker(_ marker: String) {
-        let k = LabValue.normalizeKey(marker)
-        persist(all().filter { $0.key != k })
-    }
-
     private static func persist(_ list: [RecheckReminder]) {
         guard let data = try? JSONEncoder().encode(list) else { return }
         UserDefaults.standard.set(data, forKey: listKey)

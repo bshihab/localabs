@@ -210,12 +210,6 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         return nil
     }
 
-    var imageURL: URL? {
-        guard let imagePath else { return nil }
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        return docs.appendingPathComponent("scans").appendingPathComponent(imagePath)
-    }
-
     /// True when the report's AI generation didn't produce a normal
     /// 5-section output. Detected by checking whether the patient summary
     /// matches our specific failure / cancellation messages OR every
@@ -375,11 +369,4 @@ struct DetectedMedication: Codable, Equatable, Hashable, Identifiable {
     /// Stable identity from the content (no stored UUID, so it stays
     /// clean through Codable round-trips and dedupes naturally).
     var id: String { "\(name)|\(dose)|\(frequency)".lowercased() }
-
-    /// One-line label for the suggestion chip, e.g. "Metformin · 500 mg".
-    var displayLabel: String {
-        var s = name
-        if !dose.isEmpty { s += " · \(dose)" }
-        return s
-    }
 }

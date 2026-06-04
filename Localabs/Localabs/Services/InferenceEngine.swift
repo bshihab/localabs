@@ -390,12 +390,6 @@ final class InferenceEngine: ObservableObject {
 
     // MARK: - Pipeline
 
-    /// Image → Apple VisionKit OCR → Localabs → StructuredReport
-    /// Single-image convenience wrapper.
-    func analyzeImage(_ image: UIImage) async -> StructuredReport {
-        await analyzeImages([image])
-    }
-
     /// Multi-page entry point. Runs OCR on each image (or PDF page rendered
     /// to image), concatenates the extracted text with page markers so
     /// Localabs can reason about page boundaries, saves every image, and
@@ -470,7 +464,7 @@ final class InferenceEngine: ObservableObject {
         analysisProgress = 0.25
 
         processingStatus = "Localabs is analyzing your results…"
-        var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics, mode: .lab)
+        var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics)
         report.imagePath = firstPath
         report.additionalPagePaths = extraPaths
 
@@ -604,7 +598,7 @@ final class InferenceEngine: ObservableObject {
             analysisProgress = 0.25
 
             processingStatus = "Localabs is analyzing your results…"
-            var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics, mode: .lab)
+            var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics)
             report.imagePath = firstPath
             report.additionalPagePaths = extraPaths
 
@@ -812,7 +806,6 @@ final class InferenceEngine: ObservableObject {
         var fresh = await runInference(
             extractedText: sourceText,
             healthMetrics: healthMetrics,
-            mode: .lab,
             continueFromPartial: continueFromPartial
         )
         // Preserve continuity with the existing record.
@@ -844,29 +837,7 @@ final class InferenceEngine: ObservableObject {
         return fresh
     }
 
-    /// Apple Health-only weekly review (no scan).
-    func generateWeeklyReview() async -> StructuredReport {
-        isProcessing = true
-        defer { isProcessing = false }
-
-        processingStatus = "Reading Apple Health data…"
-        let healthMetrics = await HealthKitService.shared.getHealthMetrics()
-
-        processingStatus = "Localabs is reviewing your week…"
-        let report = await runInference(
-            extractedText: "No physical lab report was scanned. Focus purely on evaluating the Apple Health context.",
-            healthMetrics: healthMetrics,
-            mode: .weekly
-        )
-
-        LocalStorageService.shared.saveReport(report)
-        processingStatus = ""
-        return report
-    }
-
     // MARK: - Private
-
-    enum AnalysisMode { case lab, weekly }
 
     /// Cheap, fully-deterministic pre-flight: does the OCR text look
     /// like a medical document worth handing to the model? Accepts
@@ -989,13 +960,13 @@ final class InferenceEngine: ObservableObject {
     /// model picks up generating tokens *after* the partial instead
     /// of restarting from scratch — that's what makes Resume feel
     /// like continuation rather than a fresh re-run.
-    private func runInference(extractedText: String, healthMetrics: HealthKitService.HealthMetrics, mode: AnalysisMode, continueFromPartial: String? = nil) async -> StructuredReport {
+    private func runInference(extractedText: String, healthMetrics: HealthKitService.HealthMetrics, continueFromPartial: String? = nil) async -> StructuredReport {
         // Belt-and-suspenders: analyzeImages / analyzePDF already
         // gate the heuristic and bail before invoking runInference,
         // but if anything ever calls runInference directly with a
-        // non-lab text (and we're in lab mode), produce the same
-        // rejection shape ScanView knows how to handle.
-        if mode == .lab, !Self.looksLikeMedicalDocument(extractedText) {
+        // non-lab text, produce the same rejection shape ScanView
+        // knows how to handle.
+        if !Self.looksLikeMedicalDocument(extractedText) {
             return Self.makeNonHealthRejectionReport(rawText: extractedText)
         }
 
@@ -1010,9 +981,7 @@ final class InferenceEngine: ObservableObject {
         // document) and they personalize phrasing without supplying
         // substitutable lab values.
 
-        let behaviorPrompt = mode == .weekly
-            ? "The user is requesting their weekly health check-in review. Analyze their Apple Health data provided below."
-            : """
+        let behaviorPrompt = """
             The user just scanned a medical document. The text below was extracted using Apple's VisionKit OCR. The document could be:
             (a) A LAB REPORT — has lab values with units (mg/dL, mmol/L, ng/mL, etc.) accompanied by reference ranges.
             (b) A CLINICAL ENCOUNTER NOTE — visit summary with chief complaint, diagnosis (often ICD-10 coded), assessment, treatment plan, follow-up. May list labs that the doctor ORDERED for the future but typically does NOT contain lab result values.
@@ -1169,8 +1138,7 @@ final class InferenceEngine: ObservableObject {
             // SUMMARY phase. After ~120 tokens the model is well into
             // a real analysis and the phrase wouldn't legitimately
             // appear, so we stop wasting CPU on the contains() check.
-            if mode == .lab,
-               tokenCount < 120,
+            if tokenCount < 120,
                collected.contains(Self.midStreamRefusalSnippet) {
                 streamingText = ""
                 analysisProgress = 0

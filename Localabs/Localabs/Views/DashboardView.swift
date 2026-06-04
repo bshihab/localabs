@@ -1285,27 +1285,3 @@ struct DashboardView: View {
     }
 
 }
-
-// MARK: - Sub-components
-
-struct MetricPill: View {
-    let value: String
-    let unit: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 4) {
-            HStack(alignment: .lastTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundStyle(.blue)
-                Text(unit)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.blue.opacity(0.7))
-            }
-            Text(label)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.blue.opacity(0.7))
-        }
-    }
-}

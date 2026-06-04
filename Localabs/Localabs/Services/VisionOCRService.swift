@@ -282,11 +282,6 @@ class VisionOCRService {
         return bestIndex
     }
 
-    /// Convenience wrapper for callers that only want the table portion.
-    static func detectTable(from blocks: [RecognizedBlock]) -> RecognizedTable? {
-        breakdown(of: blocks).table
-    }
-
     private static func joinedText(_ blocks: [RecognizedBlock]) -> String {
         // Order top-down, then left-to-right within roughly-the-same row.
         let sorted = blocks.sorted { lhs, rhs in
