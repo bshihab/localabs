@@ -115,9 +115,17 @@ struct MedsView: View {
     /// (per their repeat rule) and have scheduled times appear.
     private func todayDoses(in part: Medication.DayPart) -> [TodayDose] {
         let today = Date()
+        let cal = Calendar.current
+        let now = Date()
         var result: [TodayDose] = []
         for med in activeMeds where med.isScheduled(on: today) {
             for (idx, time) in med.times.enumerated() where time.dayPart == part {
+                // "Due" = the dose's scheduled time today has arrived (or
+                // passed) — drives the gentle glow on the unchecked circle.
+                var comps = cal.dateComponents([.year, .month, .day], from: now)
+                comps.hour = time.hour
+                comps.minute = time.minute
+                let doseTime = cal.date(from: comps) ?? now
                 result.append(TodayDose(
                     medID: med.id,
                     medName: med.name,
@@ -125,6 +133,7 @@ struct MedsView: View {
                     time: time,
                     timeIndex: idx,
                     taken: MedicationAdherence.isTaken(medID: med.id, date: Date(), timeIndex: idx),
+                    isDue: doseTime <= now,
                     nextLabel: Self.nextOccurrenceLabel(med: med, time: time)
                 ))
             }
@@ -206,10 +215,10 @@ struct MedsView: View {
 
     private var emptyState: some View {
         VStack(spacing: 18) {
-            Image(systemName: "pills.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.secondary)
-                .opacity(0.6)
+            // Static soft glow — inviting on an idle empty screen without
+            // any motion.
+            GlowingPulseIcon(systemName: "pills.fill", tint: .orange, size: 60, animated: false)
+                .opacity(0.85)
             Text("No medications yet")
                 .font(.title3.weight(.semibold))
             Text("When your scans include medications, add them here for reminders — or tap + to add one yourself.")
@@ -243,6 +252,8 @@ private struct TodayDose: Identifiable {
     let time: Medication.TimeOfDay
     let timeIndex: Int
     let taken: Bool
+    /// Scheduled time today has arrived/passed — drives the "take me" glow.
+    let isDue: Bool
     /// When this dose next comes due after today ("Tomorrow, 12:00 PM").
     let nextLabel: String
     var id: String { "\(medID.uuidString)-\(timeIndex)" }
@@ -293,8 +304,11 @@ private struct DoseRow: View {
             Button(action: toggle) {
                 Image(systemName: dose.taken ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
-                    .foregroundStyle(checkColor)
+                    .foregroundStyle(dose.isDue && !dose.taken ? Color.orange : checkColor)
                     .scaleEffect(celebrating ? 1.14 : 1)
+                    // Gentle glow when the dose is due and not yet taken —
+                    // a quiet "take me," not an alarm.
+                    .glowPulse(active: dose.isDue && !dose.taken && !celebrating, tint: .orange)
             }
             .buttonStyle(.plain)
             .sensoryFeedback(.success, trigger: dose.taken)

@@ -284,17 +284,21 @@ struct ProfileView: View {
                     .fill(.green.opacity(0.12))
             )
         } else if engine.isDownloading {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Downloading…")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text("\(Int(engine.loadingProgress * 100))%")
-                        .font(.subheadline.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(.secondary)
+            VStack(spacing: 14) {
+                // Circular "getting ready" hero — same glow language as the
+                // scan screen, since this is the other big on-device wait.
+                GlowRing(progress: engine.loadingProgress) {
+                    VStack(spacing: 2) {
+                        GlowingPulseIcon(systemName: "arrow.down", size: 24)
+                        Text("\(Int(engine.loadingProgress * 100))%")
+                            .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .contentTransition(.numericText(value: engine.loadingProgress))
+                    }
                 }
-                ProgressView(value: engine.loadingProgress)
-                    .tint(.blue)
+
+                Text("Getting Localabs ready…")
+                    .font(.subheadline.weight(.semibold))
                 if engine.bytesExpected > 0 {
                     Text("\(formatBytes(engine.bytesWritten)) of \(formatBytes(engine.bytesExpected))")
                         .font(.caption.monospacedDigit())
@@ -307,12 +311,14 @@ struct ProfileView: View {
                         .font(.caption)
                 }
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
                 Button("Cancel", role: .destructive) {
                     engine.cancelDownload()
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
             }
+            .frame(maxWidth: .infinity)
             .padding(14)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)

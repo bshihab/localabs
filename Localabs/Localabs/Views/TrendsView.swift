@@ -547,10 +547,9 @@ struct TrendsView: View {
 
     private var labTrendsEmptyState: some View {
         VStack(spacing: 14) {
-            Image(systemName: "chart.xyaxis.line")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-                .opacity(0.6)
+            // Static soft glow — inviting, no motion on an idle screen.
+            GlowingPulseIcon(systemName: "chart.xyaxis.line", tint: .blue, size: 48, animated: false)
+                .opacity(0.85)
             Text("No lab trends yet")
                 .font(.headline)
             Text("Scan two or more lab reports that share a marker — like cholesterol or A1c — and Localabs will track how it changes over time here.")

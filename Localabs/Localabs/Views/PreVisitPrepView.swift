@@ -212,11 +212,14 @@ struct PreVisitPrepView: View {
                 Task { await generateMore() }
             } label: {
                 HStack(spacing: 10) {
-                    if isGenerating {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "sparkles").foregroundStyle(.yellow)
-                    }
+                    // Glowing sparkles while the on-device model drafts
+                    // questions — same "Localabs is thinking" language.
+                    GlowingPulseIcon(
+                        systemName: "sparkles",
+                        tint: .yellow,
+                        size: 17,
+                        animated: isGenerating
+                    )
                     Text(isGenerating ? "Thinking…" : "Suggest questions with Localabs")
                         .foregroundStyle(.primary)
                 }
