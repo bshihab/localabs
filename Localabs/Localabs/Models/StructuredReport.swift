@@ -210,6 +210,16 @@ struct StructuredReport: Codable, Identifiable, Hashable {
         return nil
     }
 
+    /// How many of the 5 report sections have any content yet. Drives the
+    /// streaming progress bar (each started section ≈ 1/5 of the writing
+    /// phase), which tracks the cards filling in far better than a raw
+    /// token count.
+    var startedSectionCount: Int {
+        [patientSummary, doctorQuestions, dietaryAdvice, medicalGlossary, medicationNotes]
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .count
+    }
+
     /// True when the report's AI generation didn't produce a normal
     /// 5-section output. Detected by checking whether the patient summary
     /// matches our specific failure / cancellation messages OR every

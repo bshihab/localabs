@@ -170,7 +170,10 @@ struct DashboardView: View {
             .padding(.top, 16)
             .padding(.bottom, 12)
 
-            LiveReportSectionsView(streamingText: engine.streamingText)
+            LiveReportSectionsView(
+                streamingText: engine.streamingText,
+                isStreaming: engine.isStreaming
+            )
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
         }

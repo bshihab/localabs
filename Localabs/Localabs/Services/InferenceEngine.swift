@@ -17,6 +17,27 @@ final class InferenceEngine: ObservableObject {
     @Published var isProcessing = false
     @Published var processingStatus = ""
     @Published var streamingText = ""
+    /// True ONLY while Localabs is actively streaming the 5 report
+    /// sections. Goes false the instant streaming ends — so the live
+    /// cards stop showing a "still writing" pulse during the post-stream
+    /// trend/medication passes (which used to read as a freeze on the
+    /// last section). The phase stepper takes over from there.
+    @Published var isStreaming = false
+    /// Which macro stage of the pipeline we're in, for the phase stepper
+    /// the scan UI shows. Distinct from `analysisProgress` (the fine
+    /// 0–1 bar): this drives the discrete "Read → Write → Trends → Meds"
+    /// stage indicators, including the trend/med passes that were
+    /// previously invisible.
+    @Published var analysisPhase: AnalysisPhase = .idle
+
+    enum AnalysisPhase: Int, CaseIterable, Equatable {
+        case idle = 0
+        case reading        // OCR + save + Health context
+        case writing        // streaming the 5 sections
+        case findingTrends  // extractLabValues + enrichment
+        case detectingMeds  // extractMedications + save
+        case done
+    }
     /// 0.0–1.0 progress through the current analysis. Updated as each
     /// pipeline phase completes (OCR per page, save, Health fetch) and
     /// then incrementally during Localabs's token-streaming phase. The
@@ -408,6 +429,7 @@ final class InferenceEngine: ObservableObject {
         isInferenceCancelled = false
         isProcessing = true
         analysisProgress = 0
+        analysisPhase = .reading
         streamingText = ""
         lastHardFailureMessage = nil
         defer { isProcessing = false }
@@ -464,6 +486,7 @@ final class InferenceEngine: ObservableObject {
         analysisProgress = 0.25
 
         processingStatus = "Localabs is analyzing your results…"
+        analysisPhase = .writing
         var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics)
         report.imagePath = firstPath
         report.additionalPagePaths = extraPaths
@@ -509,11 +532,19 @@ final class InferenceEngine: ObservableObject {
             // for cross-report trends (#28) before persisting — only
             // for finished reports. The date orders trends by when the
             // bloodwork was done, not when it was scanned.
+            analysisPhase = .findingTrends
+            processingStatus = "Finding your lab values and trends…"
+            analysisProgress = max(analysisProgress, 0.72)
             report.labValues = await extractLabValues(from: combinedText)
             report.reportDate = Self.extractReportDate(from: combinedText)
             report.reportPatientAge = Self.extractPatientAge(from: combinedText)
             report.reportPatientSex = Self.extractPatientSex(from: combinedText)
+            analysisProgress = max(analysisProgress, 0.86)
+            analysisPhase = .detectingMeds
+            processingStatus = "Detecting medications…"
             report.detectedMedications = await extractMedications(from: combinedText)
+            analysisProgress = max(analysisProgress, 0.95)
+            processingStatus = "Saving your report…"
             LocalStorageService.shared.saveReport(report)
             // Default-on recheck reminders, but only for markers on a
             // sustained worsening streak vs. past reports (#31, #1) — a
@@ -534,9 +565,13 @@ final class InferenceEngine: ObservableObject {
             report.additionalPagePaths = nil
             lastHardFailureMessage = report.patientSummary
             analysisProgress = 0
+            analysisPhase = .idle
         }
         processingStatus = ""
-        if !report.isIncomplete { analysisProgress = 1.0 }
+        if !report.isIncomplete {
+            analysisProgress = 1.0
+            analysisPhase = .done
+        }
         return report
     }
 
@@ -572,6 +607,7 @@ final class InferenceEngine: ObservableObject {
             isInferenceCancelled = false
             isProcessing = true
             analysisProgress = 0.20  // OCR is skipped for text-PDFs
+            analysisPhase = .reading
             streamingText = ""
             lastHardFailureMessage = nil
             defer { isProcessing = false }
@@ -598,6 +634,7 @@ final class InferenceEngine: ObservableObject {
             analysisProgress = 0.25
 
             processingStatus = "Localabs is analyzing your results…"
+            analysisPhase = .writing
             var report = await runInference(extractedText: combinedText, healthMetrics: healthMetrics)
             report.imagePath = firstPath
             report.additionalPagePaths = extraPaths
@@ -622,11 +659,19 @@ final class InferenceEngine: ObservableObject {
             let hasResumableState = isInferenceCancelled || !streamingText.isEmpty
             let isHardFailure = report.isIncomplete && !hasResumableState
             if !isInferenceCancelled && !report.isIncomplete && !report.wasRejectedAsNonHealth {
+                analysisPhase = .findingTrends
+                processingStatus = "Finding your lab values and trends…"
+                analysisProgress = max(analysisProgress, 0.72)
                 report.labValues = await extractLabValues(from: combinedText)
                 report.reportDate = Self.extractReportDate(from: combinedText)
                 report.reportPatientAge = Self.extractPatientAge(from: combinedText)
                 report.reportPatientSex = Self.extractPatientSex(from: combinedText)
+                analysisProgress = max(analysisProgress, 0.86)
+                analysisPhase = .detectingMeds
+                processingStatus = "Detecting medications…"
                 report.detectedMedications = await extractMedications(from: combinedText)
+                analysisProgress = max(analysisProgress, 0.95)
+                processingStatus = "Saving your report…"
                 LocalStorageService.shared.saveReport(report)
                 // Worsening-only default — see analyzeImages for rationale.
                 if report.isOwnReport {
@@ -645,9 +690,13 @@ final class InferenceEngine: ObservableObject {
                 report.additionalPagePaths = nil
                 lastHardFailureMessage = report.patientSummary
                 analysisProgress = 0
+                analysisPhase = .idle
             }
             processingStatus = ""
-            if !report.isIncomplete { analysisProgress = 1.0 }
+            if !report.isIncomplete {
+                analysisProgress = 1.0
+                analysisPhase = .done
+            }
             return report
         }
 
@@ -1112,6 +1161,11 @@ final class InferenceEngine: ObservableObject {
         // count assumes ~4 chars/token for English text + medical jargon.
         print("[InferenceEngine] Prompt: \(promptWithPartial.count) chars (~\(promptWithPartial.count / 4) tokens) before Localabs run.")
         let stream = context.predict(prompt: promptWithPartial, maxTokens: maxTokens)
+        // Mark the streaming window so the live cards know when Localabs
+        // is actively writing (caret + pulse) vs. when the post-stream
+        // trend/med passes are running (no pulse, stepper takes over).
+        isStreaming = true
+        defer { isStreaming = false }
         for await piece in stream {
             // Bail if the user paused (or the app got backgrounded /
             // parent Task cancelled). Keep `streamingText` populated so
@@ -1146,15 +1200,18 @@ final class InferenceEngine: ObservableObject {
                 return Self.makeNonHealthRejectionReport(rawText: extractedText)
             }
 
-            // Cap at 0.95 so the bar doesn't visibly hit 100% before save
-            // completes — leaves the final bump for the post-loop write.
-            // Also clamp with max() against the current progress so a
-            // resume-from-pause doesn't visibly walk the bar backwards:
-            // the new run restarts the LLM from token 0, but the bar
-            // stays at the user's prior position until streaming
-            // catches up.
-            let proposed = min(0.25 + Double(tokenCount) / Double(maxTokens) * 0.70, 0.95)
-            analysisProgress = max(analysisProgress, proposed)
+            // Drive the bar off how many of the 5 sections have started,
+            // NOT tokenCount/maxTokens — real reports emit ~300 tokens and
+            // stop, so the old formula could never get past ~37%. Each
+            // started section is worth 1/5 of the "writing" band
+            // (0.25 → 0.70); a small token creep keeps the bar moving
+            // within a section. max() so a resume-from-pause never walks
+            // the bar backwards while the LLM re-streams from token 0.
+            let started = Double(StructuredReport.parse(from: collected).startedSectionCount)
+            let sectionFrac = min(started / 5.0, 1.0)
+            let creep = min(Double(tokenCount) / Double(maxTokens), 0.18)
+            let proposed = 0.25 + min(sectionFrac + creep, 1.0) * 0.45  // → 0.70
+            analysisProgress = max(analysisProgress, min(proposed, 0.70))
         }
 
         // Empty output usually means llama_tokenize bailed because the

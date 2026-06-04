@@ -321,11 +321,20 @@ struct ScanView: View {
                     }
                 }
 
+                // Guided pipeline stepper — Read → Write → Trends → Meds.
+                // Makes the previously-invisible trend/medication passes
+                // visible so the run never reads as "stuck on the last
+                // section." Hidden while paused (nothing's advancing).
+                if !needsResume {
+                    AnalysisPhaseStepper(phase: engine.analysisPhase)
+                        .padding(.top, 2)
+                }
+
                 // Determinate progress bar — replaces the previous
                 // indeterminate spinner. Fills as each pipeline phase
                 // completes (OCR per page → save → Health → Localabs
-                // streaming → final save). Tints orange while paused so
-                // the frozen state reads at a glance.
+                // streaming → trends → meds → save). Tints orange while
+                // paused so the frozen state reads at a glance.
                 ProgressView(value: engine.analysisProgress)
                     .tint(needsResume ? .orange : .blue)
                     .animation(.easeOut(duration: 0.25), value: engine.analysisProgress)
@@ -341,7 +350,10 @@ struct ScanView: View {
             // While paused, the cards stay populated with whatever
             // streamed in before the pause — the user can still scroll
             // through partial content.
-            LiveReportSectionsView(streamingText: engine.streamingText)
+            LiveReportSectionsView(
+                streamingText: engine.streamingText,
+                isStreaming: engine.isStreaming
+            )
                 .padding(.horizontal, 20)
                 .padding(.bottom, needsResume ? 12 : 24)
 
@@ -515,6 +527,11 @@ struct ScanView: View {
 /// fresh scan rather than a single opaque spinner.
 struct LiveReportSectionsView: View {
     let streamingText: String
+    /// True while Localabs is actively writing. When it flips false (the
+    /// post-stream trend/med passes), no card shows the "writing" caret or
+    /// pulse — they all settle to complete so the last section stops
+    /// looking frozen.
+    var isStreaming: Bool = true
 
     private var partial: StructuredReport {
         StructuredReport.parse(from: streamingText)
@@ -593,6 +610,9 @@ struct LiveReportSectionsView: View {
 
     private func state(for section: ReportSection) -> LiveSectionState {
         if !text(for: section).isEmpty {
+            // Once streaming stops, nothing is being "written" anymore —
+            // every populated section settles to complete (no pulse/caret).
+            guard isStreaming else { return .complete }
             return section == activeSection ? .active : .complete
         }
         return .pending
@@ -643,74 +663,297 @@ struct LiveSectionCard: View {
     let text: String
     let state: LiveSectionState
 
-    @State private var pulse = false
+    /// Lines of the current text, for the line-by-line reveal. New lines
+    /// transition in as Localabs writes them.
+    private var lines: [String] {
+        text.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: section.icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(state == .pending ? Color.secondary : section.tint)
-                Text(section.title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(state == .pending ? Color.secondary : Color.primary)
-                Spacer()
-                if state == .active {
-                    Circle()
-                        .fill(section.tint)
-                        .frame(width: 8, height: 8)
-                        .scaleEffect(pulse ? 1.4 : 0.85)
-                        .opacity(pulse ? 0.55 : 1.0)
-                        .onAppear {
-                            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
-                                pulse = true
-                            }
-                        }
-                        .transition(.opacity)
-                }
-            }
-
-            Group {
-                if !text.isEmpty {
-                    // Markdown-aware renderer (lives in SectionCard.swift)
-                    // splits per-line so partial selection works and the
-                    // user can grab one sentence without grabbing the
-                    // whole card.
-                    MarkdownBody(text)
-                        .font(.system(size: 14))
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else if state == .active {
-                    HStack(spacing: 8) {
-                        ProgressView().scaleEffect(0.65)
-                        Text("Generating…")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("Waiting for Localabs…")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary.opacity(0.55))
-                }
-            }
+            header
+            content
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(activeGlow)        // soft radial glow behind the active card
         .glassEffect(
             state == .active
                 ? .regular.tint(section.tint.opacity(0.18))
                 : .regular,
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
         )
-        .overlay(
-            // Subtle tint glow on the active card so the eye knows where to look
+        .overlay(breathingBorder)
+        .opacity(state == .pending ? 0.5 : 1.0)
+        .scaleEffect(state == .active ? 1.0 : (state == .pending ? 0.96 : 0.99))
+        .animation(.spring(response: 0.42, dampingFraction: 0.82), value: state)
+        .animation(.easeOut(duration: 0.2), value: lines.count)
+    }
+
+    // MARK: Header (icon, title, status indicator)
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: section.icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(state == .pending ? Color.secondary : section.tint)
+                .symbolEffect(.bounce, value: state == .complete)
+            Text(section.title)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(state == .pending ? Color.secondary : Color.primary)
+            Spacer()
+            statusIndicator
+        }
+    }
+
+    @ViewBuilder
+    private var statusIndicator: some View {
+        switch state {
+        case .active:
+            PulsingDot(tint: section.tint)
+                .transition(.scale.combined(with: .opacity))
+        case .complete:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(section.tint)
+                .transition(.scale.combined(with: .opacity))
+        case .pending:
+            EmptyView()
+        }
+    }
+
+    // MARK: Content (text / caret / skeleton)
+
+    @ViewBuilder
+    private var content: some View {
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { idx, line in
+                    let isLast = idx == lines.count - 1
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        MarkdownBody(line)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.primary)
+                        // Blinking caret rides the end of the last line
+                        // while this section is actively being written.
+                        if isLast && state == .active {
+                            BlinkingCaret(tint: section.tint)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .offset(y: 6)),
+                        removal: .opacity
+                    ))
+                }
+            }
+        } else if state == .active {
+            // Section just became active but no text yet — a caret blinks
+            // where the first words will land.
+            HStack(spacing: 6) {
+                BlinkingCaret(tint: section.tint)
+                Text("Writing…")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            // Pending — shimmering skeleton lines hint that content is coming.
+            ShimmerLines(tint: section.tint)
+        }
+    }
+
+    // MARK: Decoration
+
+    @ViewBuilder
+    private var activeGlow: some View {
+        if state == .active {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(section.tint.opacity(state == .active ? 0.45 : 0), lineWidth: 1)
-        )
-        .opacity(state == .pending ? 0.55 : 1.0)
-        .scaleEffect(state == .pending ? 0.97 : 1.0)
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: state)
-        .animation(.easeOut(duration: 0.18), value: text)
+                .fill(section.tint.opacity(0.22))
+                .blur(radius: 22)
+                .padding(-4)
+                .transition(.opacity)
+        }
+    }
+
+    /// A gentle "breathing" tinted border on the active card so the eye
+    /// is drawn to wherever Localabs is currently writing.
+    @ViewBuilder
+    private var breathingBorder: some View {
+        if state == .active {
+            TimelineView(.animation) { timeline in
+                let t = timeline.date.timeIntervalSinceReferenceDate
+                let breathe = 0.35 + 0.30 * (0.5 + 0.5 * sin(t * 2.2))  // 0.35→0.65
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(section.tint.opacity(breathe), lineWidth: 1.5)
+            }
+        } else {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(section.tint.opacity(state == .complete ? 0.20 : 0), lineWidth: 1)
+        }
+    }
+}
+
+// MARK: - Streaming animation primitives
+
+/// A blinking text caret (the "▌" that follows the words Localabs is
+/// writing). Smooth opacity blink on the display refresh clock.
+private struct BlinkingCaret: View {
+    let tint: Color
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            // ~1.1s blink cycle, soft (sine) rather than hard on/off.
+            let opacity = 0.15 + 0.85 * pow(max(0, sin(t * 5.7)), 0.5)
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(tint)
+                .frame(width: 3, height: 16)
+                .opacity(opacity)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The active-section "writing" pulse — a dot that scales + fades on the
+/// display clock (smoother than a chained repeatForever animation).
+private struct PulsingDot: View {
+    let tint: Color
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let curve = 0.5 + 0.5 * sin(t * 3.0)
+            Circle()
+                .fill(tint)
+                .frame(width: 9, height: 9)
+                .scaleEffect(0.8 + 0.5 * curve)
+                .opacity(0.5 + 0.5 * curve)
+        }
+        .frame(width: 16, height: 16)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Shimmering skeleton placeholder for a pending section — three lines of
+/// varying width with a soft highlight band sweeping left→right, like
+/// Messages / News loading states. The band is rebuilt each frame as a
+/// horizontal gradient (no GeometryReader needed).
+private struct ShimmerLines: View {
+    let tint: Color
+    private let widths: [CGFloat] = [1.0, 0.82, 0.55]
+
+    var body: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let center = (t / 1.5).truncatingRemainder(dividingBy: 1)  // 0→1 sweep
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(widths.indices, id: \.self) { i in
+                    Capsule()
+                        .fill(shimmerGradient(center: center))
+                        .frame(height: 9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .scaleEffect(x: widths[i], anchor: .leading)
+                }
+            }
+            .frame(height: 41)
+        }
+        .accessibilityLabel("Waiting for Localabs")
+    }
+
+    private func shimmerGradient(center: Double) -> LinearGradient {
+        let base = Color.secondary.opacity(0.16)
+        let band = 0.16
+        let stops: [Gradient.Stop] = [
+            .init(color: base, location: 0),
+            .init(color: base, location: max(0, center - band)),
+            .init(color: tint.opacity(0.5), location: min(max(center, 0), 1)),
+            .init(color: base, location: min(1, center + band)),
+            .init(color: base, location: 1)
+        ]
+        return LinearGradient(stops: stops, startPoint: .leading, endPoint: .trailing)
+    }
+}
+
+// MARK: - Guided pipeline stepper
+
+/// Horizontal "Read → Write → Trends → Meds" stage tracker shown above the
+/// progress bar during a scan. Completed stages get a check, the current
+/// stage glows + pulses, pending stages sit dim — so the run reads as a
+/// journey and the trend/medication passes (previously invisible) are
+/// clearly part of it.
+struct AnalysisPhaseStepper: View {
+    let phase: InferenceEngine.AnalysisPhase
+
+    private struct Stage {
+        let phase: InferenceEngine.AnalysisPhase
+        let icon: String
+        let label: String
+    }
+
+    private let stages: [Stage] = [
+        .init(phase: .reading,       icon: "doc.text.viewfinder",       label: "Read"),
+        .init(phase: .writing,       icon: "square.and.pencil",         label: "Write"),
+        .init(phase: .findingTrends, icon: "chart.line.uptrend.xyaxis", label: "Trends"),
+        .init(phase: .detectingMeds, icon: "pills.fill",                label: "Meds")
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(stages.enumerated()), id: \.offset) { idx, stage in
+                node(for: stage)
+                if idx < stages.count - 1 {
+                    connector(after: stage)
+                }
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: phase)
+    }
+
+    private func status(_ stage: Stage) -> LiveSectionState {
+        if phase == .done || phase.rawValue > stage.phase.rawValue { return .complete }
+        if phase.rawValue == stage.phase.rawValue { return .active }
+        return .pending
+    }
+
+    @ViewBuilder
+    private func node(for stage: Stage) -> some View {
+        let s = status(stage)
+        VStack(spacing: 5) {
+            ZStack {
+                Circle()
+                    .fill(s == .pending ? Color.secondary.opacity(0.14) : Color.blue.opacity(0.16))
+                    .frame(width: 34, height: 34)
+                if s == .active {
+                    // Pulsing ring around the current stage.
+                    TimelineView(.animation) { timeline in
+                        let t = timeline.date.timeIntervalSinceReferenceDate
+                        let p = 0.5 + 0.5 * sin(t * 3.0)
+                        Circle()
+                            .stroke(Color.blue.opacity(0.5 - 0.4 * p), lineWidth: 2)
+                            .frame(width: 34 + 10 * p, height: 34 + 10 * p)
+                    }
+                }
+                Image(systemName: s == .complete ? "checkmark" : stage.icon)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(s == .pending ? Color.secondary : Color.blue)
+                    .contentTransition(.symbolEffect(.replace))
+                    .scaleEffect(s == .active ? 1.05 : 1.0)
+            }
+            Text(stage.label)
+                .font(.system(size: 11, weight: s == .active ? .bold : .medium))
+                .foregroundStyle(s == .pending ? Color.secondary : Color.primary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func connector(after stage: Stage) -> some View {
+        // Filled (blue) once this stage is done, otherwise dim.
+        let done = status(stage) == .complete
+        return Capsule()
+            .fill(done ? Color.blue.opacity(0.55) : Color.secondary.opacity(0.18))
+            .frame(height: 2)
+            .frame(maxWidth: .infinity)
+            .offset(y: -9)  // align with the node circles, not the labels
     }
 }
 
