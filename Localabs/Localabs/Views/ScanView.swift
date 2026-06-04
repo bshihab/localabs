@@ -196,8 +196,13 @@ struct ScanView: View {
                     maxSelectionCount: 10,
                     matching: .images
                 ) {
-                    HomePane(title: "From Photos", icon: "photo.on.rectangle", color: .green, subtitle: "Up to 10 images", textColor: .black)
+                    HomePane(title: "From Photos", icon: "photo.on.rectangle", color: .green, subtitle: "Up to 10 images")
                 }
+                // PhotosPicker tints its label with the accent color
+                // (blue), which bled into the pane text. Force the tint to
+                // the label color so the text matches the other panes
+                // (black in light mode, white in dark).
+                .tint(Color.primary)
                 .disabled(!engine.isModelLoaded)
 
                 Button {
