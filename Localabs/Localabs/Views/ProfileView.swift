@@ -109,11 +109,16 @@ struct ProfileView: View {
                 // user since it re-runs the on-device model per report.
                 let ageChanged = profile.ageDisplay != demoBeforeEdit.age
                 let sexChanged = profile.biologicalSex.trimmingCharacters(in: .whitespaces) != demoBeforeEdit.sex
-                if ageChanged || sexChanged,
-                   !LocalStorageService.shared.getHistory().isEmpty {
-                    // The app-wide banner (ContentView) shows progress;
-                    // no separate popup needed.
-                    Task { await engine.reEnrichAllReports() }
+                if ageChanged || sexChanged {
+                    // Tell Trends/Dashboard to re-read their age/sex-based
+                    // ranges (Apple Health typical ranges update even with
+                    // no saved reports).
+                    NotificationCenter.default.post(name: .profileDemographicsChanged, object: nil)
+                    // Re-enrich saved reports' AI-filled lab ranges for the
+                    // new age/sex. The app-wide banner shows progress.
+                    if !LocalStorageService.shared.getHistory().isEmpty {
+                        Task { await engine.reEnrichAllReports() }
+                    }
                 }
             }) {
                 ProfileEditSheet()

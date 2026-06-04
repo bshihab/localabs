@@ -1314,14 +1314,20 @@ final class InferenceEngine: ObservableObject {
         NAME | RANGE | WORSE
 
         - Copy each NAME back exactly as given.
-        - RANGE: the standard reference range as a short string (e.g. <100, 70-100, >40), adjusted for the patient's age and sex where it matters (e.g. HDL is >40 for men but >50 for women; creatinine differs by sex).
+        - RANGE: the standard reference range as a short string (e.g. <100, 70-100, >40). You MUST use the range for THIS patient's age and sex when the marker is sex- or age-specific. These markers differ by sex — use the correct sex-specific cutoff:
+          • HDL Cholesterol: >40 for men, >50 for women
+          • Creatinine: ~0.7-1.3 for men, ~0.6-1.1 for women
+          • Hemoglobin: ~13.5-17.5 for men, ~12.0-15.5 for women
+          • Hematocrit: ~38.8-50.0% for men, ~34.9-44.5% for women
+          • Ferritin: ~24-336 for men, ~11-307 for women
+          • eGFR: also shifts with age — lower normal in older adults.
+          For markers that are NOT age/sex specific (LDL, glucose, A1c, TSH, sodium, etc.), use the standard adult range.
         - WORSE: HIGH if a higher value is worse, LOW if a lower value is worse, MID if both unusually high and low are concerning.
 
-        Examples:
+        Examples (format only — apply THIS patient's correct age/sex range):
         LDL Cholesterol | <100 | HIGH
-        HDL Cholesterol | >40 | LOW
+        Glucose | 70-99 | HIGH
         eGFR | >60 | LOW
-        Creatinine | 0.6-1.2 | HIGH
         TSH | 0.4-4.0 | MID
 
         Tests:

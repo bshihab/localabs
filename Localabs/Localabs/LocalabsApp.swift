@@ -17,6 +17,11 @@ extension Notification.Name {
     /// Posted when the user taps a "time to recheck your <marker>"
     /// notification. ContentView switches to the Home tab to scan.
     static let openRecheckScan = Notification.Name("localabs.openRecheckScan")
+    /// Posted when the user changes their age or biological sex. Views
+    /// that show age/sex-dependent reference ranges (Trends, Dashboard)
+    /// reload so the "normal" ranges reflect the new demographics — even
+    /// when there are no saved reports to trigger a lab recompute.
+    static let profileDemographicsChanged = Notification.Name("localabs.profileDemographicsChanged")
 }
 
 @main

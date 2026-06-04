@@ -36,6 +36,9 @@ struct TrendsView: View {
     /// Bumped when the user pins/unpins a marker so the lab list re-sorts
     /// pinned markers to the top in place.
     @State private var trackedVersion = 0
+    /// Bumped when the user changes age/sex so the body re-renders and
+    /// the age/sex-dependent typical ranges re-read the new profile.
+    @State private var profileRefresh = 0
     /// A tapped lab-trend card + the global tap point — drives the same
     /// liquid-glass action menu the scan highlights use (#31).
     @State private var trendPopover: EntityPopover?
@@ -118,6 +121,12 @@ struct TrendsView: View {
                 if engine.rangeRecompute == nil {
                     labTrends = LabTrendService.trends(from: LocalStorageService.shared.getHistory())
                 }
+            }
+            // Age/sex changed in Profile → re-render so the typical
+            // ranges (Apple Health) and any reloaded lab ranges update.
+            .onReceive(NotificationCenter.default.publisher(for: .profileDemographicsChanged)) { _ in
+                profileRefresh += 1
+                labTrends = LabTrendService.trends(from: LocalStorageService.shared.getHistory())
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
