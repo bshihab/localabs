@@ -25,11 +25,14 @@ enum RecheckService {
         return reminder
     }
 
-    /// Default-on: after a report saves, schedule a recheck for each
-    /// out-of-range marker the user hasn't turned off and that doesn't
-    /// already have a reminder. The user can opt any of them out from the
-    /// highlight menu or Recheck Reminders settings.
-    static func autoSchedule(forOutOfRange markers: [String]) async {
+    /// Default-on: after a report saves, schedule a recheck only for each
+    /// marker that is on a sustained *worsening* streak (not merely
+    /// out-of-range) — those are the ones worth a proactive nudge to
+    /// re-scan. A marker that's out of range but holding steady or
+    /// improving stays opt-in via the highlight menu / Recheck settings.
+    /// Skips markers the user has turned off or that already have a
+    /// reminder.
+    static func autoSchedule(forWorsening markers: [String]) async {
         for marker in markers {
             guard !RecheckStore.isOptedOut(marker),
                   !RecheckStore.isSet(forMarker: marker) else { continue }

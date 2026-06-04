@@ -8,6 +8,7 @@ import SwiftUI
 struct VisitHubView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var visit: Appointment?
+    @State private var pastVisits: [PastVisit] = []
     @State private var showPrep = false
     @State private var showCheckIn = false
 
@@ -38,6 +39,10 @@ struct VisitHubView: View {
                         subtitle: "Log new or changed meds, new instructions, and schedule your next visit.",
                         highlighted: visitHasPassed
                     ) { showCheckIn = true }
+
+                    if !pastVisits.isEmpty {
+                        pastVisitsSection
+                    }
 
                     Label {
                         Text("Set an appointment in prep and Localabs reminds you the evening after to log what changed. Informational — not medical advice.")
@@ -152,7 +157,66 @@ struct VisitHubView: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Past visits (#4)
+
+    private var pastVisitsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Past visits")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .padding(.leading, 4)
+                .padding(.top, 8)
+
+            ForEach(pastVisits) { past in
+                pastVisitCard(past)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func pastVisitCard(_ past: PastVisit) -> some View {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.green)
+                .frame(width: 28)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(f.string(from: past.date))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.primary)
+                if !past.note.isEmpty {
+                    Text(past.note)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                if !past.instructions.isEmpty {
+                    Text(past.instructions)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .contextMenu {
+            Button(role: .destructive) {
+                VisitHistory.remove(id: past.id)
+                load()
+            } label: {
+                Label("Delete from history", systemImage: "trash")
+            }
+        }
+    }
+
     private func load() {
         visit = Appointment.loadUpcoming()
+        pastVisits = VisitHistory.all()
     }
 }

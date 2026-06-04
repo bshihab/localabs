@@ -173,6 +173,19 @@ struct PostVisitCheckInView: View {
             profile.save()
         }
 
+        // Archive this visit into the Past visits history (#4) so the hub
+        // can show what's already been handled. Only record a meaningful
+        // check-in — a known appointment, or something the user logged.
+        if visit != nil || !instructions.isEmpty || medsAddedThisSession > 0 {
+            VisitHistory.add(
+                PastVisit(
+                    date: visit?.date ?? Date(),
+                    note: visit?.note ?? "",
+                    instructions: instructions
+                )
+            )
+        }
+
         Task { @MainActor in
             if scheduleNext {
                 let appt = Appointment(date: nextDate, note: nextNote.trimmingCharacters(in: .whitespacesAndNewlines))

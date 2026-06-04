@@ -1561,16 +1561,27 @@ private struct SwipeActionCard<Content: View>: View {
             content()
                 .offset(x: offset)
         }
-        .gesture(
+        // `.simultaneousGesture` (not `.gesture`) so the enclosing
+        // vertical ScrollView keeps receiving the same drag — otherwise the
+        // card swallows the gesture stream and the user has to flick two or
+        // three times before scrolling re-engages. We still only move the
+        // card for clearly-horizontal drags, so vertical scrolls pass through
+        // untouched.
+        .simultaneousGesture(
             DragGesture(minimumDistance: 14)
                 .onChanged { v in
-                    // Engage only for a clearly-horizontal drag so vertical
-                    // scrolling is unaffected.
                     guard abs(v.translation.width) > abs(v.translation.height) else { return }
                     offset = max(min(v.translation.width, 96), -96)
                     armed = abs(offset) > 64
                 }
-                .onEnded { _ in
+                .onEnded { v in
+                    // Ignore a drag that turned out to be mostly vertical —
+                    // the ScrollView owned it; don't fire pin/hide.
+                    guard abs(v.translation.width) > abs(v.translation.height) else {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { offset = 0 }
+                        armed = false
+                        return
+                    }
                     let pin = offset > 64
                     let hide = offset < -64
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { offset = 0 }

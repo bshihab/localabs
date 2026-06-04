@@ -527,10 +527,14 @@ final class InferenceEngine: ObservableObject {
             report.reportPatientSex = Self.extractPatientSex(from: combinedText)
             report.detectedMedications = await extractMedications(from: combinedText)
             LocalStorageService.shared.saveReport(report)
-            // Default-on recheck reminders for out-of-range markers (#31).
+            // Default-on recheck reminders, but only for markers on a
+            // sustained worsening streak vs. past reports (#31, #1) — a
+            // single out-of-range value that's holding steady stays opt-in.
             if report.isOwnReport {
-                let oor = (report.labValues ?? []).filter(\.isOutOfRange).map(\.canonicalName)
-                await RecheckService.autoSchedule(forOutOfRange: oor)
+                let history = LocalStorageService.shared.getHistory()
+                let worsening = LabTrendService.worseningTrends(for: report, in: history)
+                    .map(\.canonicalName)
+                await RecheckService.autoSchedule(forWorsening: worsening)
             }
         }
         if (isInferenceCancelled || report.isIncomplete) && hasResumableState {
@@ -636,9 +640,12 @@ final class InferenceEngine: ObservableObject {
                 report.reportPatientSex = Self.extractPatientSex(from: combinedText)
                 report.detectedMedications = await extractMedications(from: combinedText)
                 LocalStorageService.shared.saveReport(report)
+                // Worsening-only default — see analyzeImages for rationale.
                 if report.isOwnReport {
-                    let oor = (report.labValues ?? []).filter(\.isOutOfRange).map(\.canonicalName)
-                    await RecheckService.autoSchedule(forOutOfRange: oor)
+                    let history = LocalStorageService.shared.getHistory()
+                    let worsening = LabTrendService.worseningTrends(for: report, in: history)
+                        .map(\.canonicalName)
+                    await RecheckService.autoSchedule(forWorsening: worsening)
                 }
             }
             if (isInferenceCancelled || report.isIncomplete) && hasResumableState {

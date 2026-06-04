@@ -39,6 +39,73 @@ struct Appointment: Codable, Equatable {
     }
 }
 
+/// A completed doctor visit, archived when the user finishes the
+/// post-visit check-in (#34, #4). Keeps a lightweight record — when the
+/// visit was, what it was for, and the instructions the user logged —
+/// so the "Past visits" history in the visit hub can show what's already
+/// been handled. Stored as a JSON array in one UserDefaults key.
+struct PastVisit: Codable, Equatable, Identifiable {
+    var id: UUID
+    /// When the visit took place.
+    var date: Date
+    /// Who/what the visit was for (the appointment note). May be empty.
+    var note: String
+    /// Instructions or diagnoses the user logged afterward. May be empty.
+    var instructions: String
+    /// When the user completed the check-in.
+    var loggedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        date: Date,
+        note: String = "",
+        instructions: String = "",
+        loggedAt: Date = Date()
+    ) {
+        self.id = id
+        self.date = date
+        self.note = note
+        self.instructions = instructions
+        self.loggedAt = loggedAt
+    }
+}
+
+/// Archive of completed visits, shown in the visit hub's "Past visits"
+/// section. Newest first; capped so the list can't grow unbounded.
+enum VisitHistory {
+    private static let storageKey = "localabs_past_visits"
+    private static let maxEntries = 50
+
+    /// All archived visits, newest visit date first.
+    static func all() -> [PastVisit] {
+        guard
+            let data = UserDefaults.standard.data(forKey: storageKey),
+            let list = try? JSONDecoder().decode([PastVisit].self, from: data)
+        else { return [] }
+        return list.sorted { $0.date > $1.date }
+    }
+
+    /// Append a completed visit, trimming the oldest beyond the cap.
+    static func add(_ visit: PastVisit) {
+        var list = all()
+        list.removeAll { $0.id == visit.id }
+        list.insert(visit, at: 0)
+        let trimmed = Array(list.prefix(maxEntries))
+        guard let data = try? JSONEncoder().encode(trimmed) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func remove(id: UUID) {
+        let remaining = all().filter { $0.id != id }
+        guard let data = try? JSONEncoder().encode(remaining) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: storageKey)
+    }
+}
+
 /// The user's personal "questions to ask my doctor" list for the next
 /// visit. Kept separate from `Appointment` so it survives even when no
 /// appointment date is set, and so seeded suggestions (recomputed each
