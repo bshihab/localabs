@@ -304,7 +304,11 @@ struct ScanView: View {
                     // Active run — the circular phase hero: a progress ring
                     // with the four phases as pips around it, orbiting dots,
                     // and the current phase's icon pulsing in the center.
-                    PhaseOrbitView(phase: engine.analysisPhase, progress: engine.analysisProgress)
+                    PhaseOrbitView(
+                        phase: engine.analysisPhase,
+                        progress: engine.analysisProgress,
+                        report: StructuredReport.parse(from: engine.streamingText)
+                    )
                         .frame(maxWidth: .infinity)
                         .overlay(alignment: .topTrailing) {
                             if engine.isProcessing {
@@ -555,13 +559,7 @@ struct LiveReportSectionsView: View {
     }
 
     private func text(for section: ReportSection) -> String {
-        switch section {
-        case .summary:     return partial.patientSummary
-        case .questions:   return partial.doctorQuestions
-        case .diet:        return partial.dietaryAdvice
-        case .glossary:    return partial.medicalGlossary
-        case .medications: return partial.medicationNotes
-        }
+        section.text(in: partial)
     }
 
     /// Strip a trailing line that looks like an in-progress section header
@@ -633,6 +631,17 @@ enum ReportSection: Int, CaseIterable, Identifiable {
         case .diet:        return .green
         case .glossary:    return .orange
         case .medications: return .pink
+        }
+    }
+
+    /// This section's text within a (possibly partial) report.
+    func text(in report: StructuredReport) -> String {
+        switch self {
+        case .summary:     return report.patientSummary
+        case .questions:   return report.doctorQuestions
+        case .diet:        return report.dietaryAdvice
+        case .glossary:    return report.medicalGlossary
+        case .medications: return report.medicationNotes
         }
     }
 }
@@ -780,23 +789,36 @@ private struct BlinkingCaret: View {
 
 // MARK: - Circular phase hero
 
-/// The scan loading hero: a circular progress ring with the four pipeline
-/// phases as pips around it, a few dots orbiting the middle, and the
-/// current phase's icon pulsing in the center with the live percentage.
-/// Replaces the old linear stepper + bar.
+/// The scan loading hero: a clean circular progress ring with the five
+/// report sections as glowing orbs orbiting inside it. The section being
+/// written expands + glows; finished ones get a check; pending ones sit
+/// dim. The center shows the current phase (or, while writing, the active
+/// section's own icon) plus the live %. The orbs orbit INSIDE the ring so
+/// the progress line never crosses an icon.
 struct PhaseOrbitView: View {
     let phase: InferenceEngine.AnalysisPhase
     let progress: Double
+    /// Partial report parsed from the live stream — drives per-section orbs.
+    let report: StructuredReport
 
-    private let stagePhases: [InferenceEngine.AnalysisPhase] =
-        [.reading, .writing, .findingTrends, .detectingMeds]
-    private let ringSize: CGFloat = 132
+    private let ringSize: CGFloat = 142
     private var radius: CGFloat { ringSize / 2 }
+    private var orbitRadius: CGFloat { radius - 27 }
+    private var sections: [ReportSection] { ReportSection.allCases }
+
+    /// rawValue of the section being written (last non-empty), or nil when
+    /// we're not in the writing phase.
+    private var activeSectionIndex: Int? {
+        guard phase == .writing else { return nil }
+        var last: Int?
+        for s in sections where !s.text(in: report).isEmpty { last = s.rawValue }
+        return last
+    }
 
     var body: some View {
         VStack(spacing: 14) {
             ZStack {
-                // Track + progress ring.
+                // Clean progress ring — nothing sits on the line.
                 Circle()
                     .stroke(Color.secondary.opacity(0.15), lineWidth: 6)
                 Circle()
@@ -811,17 +833,13 @@ struct PhaseOrbitView: View {
                     .rotationEffect(.degrees(-90))
                     .animation(.easeOut(duration: 0.35), value: progress)
 
-                // Dots orbiting the middle.
-                OrbitingDots(radius: radius - 22)
+                // Five section orbs orbiting inside the ring.
+                orbitingOrbs
 
-                // The four phases as pips sitting on the ring.
-                ForEach(Array(stagePhases.enumerated()), id: \.offset) { idx, p in
-                    phasePip(p, at: idx)
-                }
-
-                // Center: pulsing current-phase icon + live %.
+                // Center: pulsing icon (active section's while writing, else
+                // the phase icon) + live %.
                 VStack(spacing: 2) {
-                    PulsingIcon(systemName: icon(phase))
+                    PulsingIcon(systemName: centerIcon, tint: centerTint)
                     Text("\(Int(progress * 100))%")
                         .font(.system(size: 13, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.secondary)
@@ -830,55 +848,83 @@ struct PhaseOrbitView: View {
             }
             .frame(width: ringSize, height: ringSize)
 
-            Text(label(phase))
+            Text(label)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.primary)
                 .animation(.easeInOut(duration: 0.25), value: phase)
+                .animation(.easeInOut(duration: 0.25), value: activeSectionIndex)
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func phasePip(_ p: InferenceEngine.AnalysisPhase, at idx: Int) -> some View {
-        let s = status(p)
-        // Top, right, bottom, left.
-        let angle = Double(idx) * 90 - 90
-        let rad = angle * .pi / 180
-        let dotSize: CGFloat = s == .active ? 24 : 19
+    private var orbitingOrbs: some View {
+        TimelineView(.animation) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let rot = t * 0.45  // slow, calm revolution (~14s)
+            ZStack {
+                ForEach(Array(sections.enumerated()), id: \.offset) { i, section in
+                    let angle = rot + Double(i) * (2 * .pi / Double(sections.count)) - .pi / 2
+                    orb(section, angle: angle)
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func orb(_ section: ReportSection, angle: Double) -> some View {
+        let s = sectionState(section)
+        let size: CGFloat = s == .active ? 32 : 22
+        let glow: CGFloat = s == .active ? 9 : (s == .complete ? 3 : 0)
         return ZStack {
             Circle()
-                .fill(s == .pending ? Color(.secondarySystemBackground) : Color.blue)
-                .frame(width: dotSize, height: dotSize)
-                .overlay(
-                    Circle().stroke(Color.secondary.opacity(s == .pending ? 0.35 : 0), lineWidth: 1)
-                )
-                .shadow(color: s == .active ? .blue.opacity(0.6) : .clear, radius: 5)
-            Image(systemName: s == .complete ? "checkmark" : icon(p))
-                .font(.system(size: 9, weight: .bold))
+                .fill(s == .pending ? AnyShapeStyle(Color.secondary.opacity(0.16))
+                                    : AnyShapeStyle(section.tint.gradient))
+                .frame(width: size, height: size)
+                .shadow(color: s == .pending ? .clear : section.tint.opacity(0.7), radius: glow)
+            Image(systemName: s == .complete ? "checkmark" : section.icon)
+                .font(.system(size: s == .active ? 14 : 10, weight: .bold))
                 .foregroundStyle(s == .pending ? Color.secondary : .white)
         }
-        .offset(x: radius * cos(rad), y: radius * sin(rad))
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: s)
+        .offset(x: orbitRadius * cos(angle), y: orbitRadius * sin(angle))
+        .animation(.spring(response: 0.45, dampingFraction: 0.7), value: s)
     }
 
-    private func status(_ p: InferenceEngine.AnalysisPhase) -> LiveSectionState {
-        if phase == .done || phase.rawValue > p.rawValue { return .complete }
-        if phase.rawValue == p.rawValue { return .active }
-        return .pending
+    private func sectionState(_ section: ReportSection) -> LiveSectionState {
+        // Past the writing phase → every section is done.
+        if phase == .done || phase.rawValue > InferenceEngine.AnalysisPhase.writing.rawValue {
+            return .complete
+        }
+        guard !section.text(in: report).isEmpty else { return .pending }
+        return section.rawValue == activeSectionIndex ? .active : .complete
     }
 
-    private func icon(_ p: InferenceEngine.AnalysisPhase) -> String {
-        switch p {
+    // MARK: Center icon + label
+
+    private var centerIcon: String {
+        if let i = activeSectionIndex, let section = ReportSection(rawValue: i) {
+            return section.icon
+        }
+        switch phase {
         case .reading:       return "doc.text.viewfinder"
-        case .writing:       return "square.and.pencil"
         case .findingTrends: return "chart.line.uptrend.xyaxis"
         case .detectingMeds: return "pills.fill"
         case .done:          return "checkmark"
-        case .idle:          return "hourglass"
+        default:             return "square.and.pencil"
         }
     }
 
-    private func label(_ p: InferenceEngine.AnalysisPhase) -> String {
-        switch p {
+    private var centerTint: Color {
+        if let i = activeSectionIndex, let section = ReportSection(rawValue: i) {
+            return section.tint
+        }
+        return .blue
+    }
+
+    private var label: String {
+        if let i = activeSectionIndex, let section = ReportSection(rawValue: i) {
+            return "Writing \(section.title)"
+        }
+        switch phase {
         case .reading:       return "Reading your report"
         case .writing:       return "Writing your translation"
         case .findingTrends: return "Finding your trends"
@@ -889,43 +935,23 @@ struct PhaseOrbitView: View {
     }
 }
 
-/// The current-phase icon at the center of the hero, gently pulsing on the
-/// display clock and morphing when the phase changes.
+/// The center icon of the hero, gently pulsing on the display clock and
+/// morphing (with the section tint) when the active section/phase changes.
 private struct PulsingIcon: View {
     let systemName: String
+    let tint: Color
     var body: some View {
         TimelineView(.animation) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let scale = 1.0 + 0.10 * (0.5 + 0.5 * sin(t * 3.0))
             Image(systemName: systemName)
                 .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(.blue)
+                .foregroundStyle(tint)
                 .scaleEffect(scale)
                 .contentTransition(.symbolEffect(.replace))
+                .animation(.easeInOut(duration: 0.3), value: tint)
         }
         .frame(height: 30)
-    }
-}
-
-/// Three small dots orbiting the center of the hero, rotating continuously
-/// on the display clock.
-private struct OrbitingDots: View {
-    let radius: CGFloat
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let base = t * 0.9  // radians/sec
-            ZStack {
-                ForEach(0..<3, id: \.self) { i in
-                    let angle = base + Double(i) * (2 * .pi / 3)
-                    Circle()
-                        .fill(Color.blue.opacity(0.5))
-                        .frame(width: 6, height: 6)
-                        .offset(x: radius * cos(angle), y: radius * sin(angle))
-                }
-            }
-        }
-        .accessibilityHidden(true)
     }
 }
 
