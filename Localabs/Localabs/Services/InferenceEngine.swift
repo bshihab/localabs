@@ -1313,6 +1313,7 @@ final class InferenceEngine: ObservableObject {
         let sex = profile.biologicalSex.trimmingCharacters(in: .whitespaces)
         if !sex.isEmpty { demoParts.append(sex.lowercased()) }
         let demoLine = demoParts.isEmpty ? "" : " for a \(demoParts.joined(separator: ", ")) patient"
+        print("[RangeDebug] enrichLabValues — \(values.count) marker(s), demographics in prompt: '\(demoLine.isEmpty ? "(none — age/sex not set!)" : demoLine)'")
 
         let namesBlock = values.map { $0.canonicalName }.joined(separator: "\n")
         let prompt = """
@@ -1364,11 +1365,21 @@ final class InferenceEngine: ObservableObject {
             meta[LabValue.normalizeKey(parts[0])] = (range, dir)
         }
 
+        print("[RangeDebug] parsed \(meta.count) range(s) from model output")
         return values.map { value in
             var v = value
-            guard let m = meta[v.joinKey] else { return v }
+            guard let m = meta[v.joinKey] else {
+                print("[RangeDebug]   '\(v.canonicalName)': NO match in model output — keeping range '\(v.referenceRange ?? "nil")'")
+                return v
+            }
+            let oldRange = v.referenceRange ?? "nil"
             // Report's printed range wins; only fill in when empty.
-            if (v.referenceRange?.isEmpty ?? true), let r = m.range { v.referenceRange = r }
+            if (v.referenceRange?.isEmpty ?? true), let r = m.range {
+                v.referenceRange = r
+                print("[RangeDebug]   '\(v.canonicalName)': '\(oldRange)' → '\(r)' (AI-filled; fromReport=\(v.rangeFromReport ?? false))")
+            } else {
+                print("[RangeDebug]   '\(v.canonicalName)': KEPT '\(oldRange)' (fromReport=\(v.rangeFromReport ?? false)) — model said '\(m.range ?? "nil")'")
+            }
             if let d = m.dir { v.concernDirection = d }
             return v
         }
@@ -1392,10 +1403,14 @@ final class InferenceEngine: ObservableObject {
     /// write at the end, so a force-quit mid-run leaves the original
     /// ranges fully intact.
     func reEnrichAllReports() async {
-        guard llamaContext != nil else { return }
+        guard llamaContext != nil else {
+            print("[RangeDebug] reEnrichAllReports SKIPPED — no model loaded")
+            return
+        }
         let targets = LocalStorageService.shared.getHistory().filter {
             !($0.labValues?.isEmpty ?? true)
         }
+        print("[RangeDebug] reEnrichAllReports START — \(targets.count) report(s) with lab values")
         guard !targets.isEmpty else { return }
 
         rangeRecompute = (0, targets.count)
@@ -1417,6 +1432,7 @@ final class InferenceEngine: ObservableObject {
         }
 
         guard !Task.isCancelled else { return }
+        print("[RangeDebug] reEnrichAllReports DONE — committing \(updates.count) report update(s)")
         LocalStorageService.shared.applyLabValueUpdates(updates)
     }
 

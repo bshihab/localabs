@@ -77,12 +77,18 @@ struct MedsView: View {
     // MARK: - Content
 
     private var content: some View {
-        List {
+        // NOTE: deliberately NOT `.id(adherenceVersion)`. Re-keying the
+        // whole List on every check-off threw away each DoseRow's local
+        // @State, which is what drives the 2-second "just taken → settles
+        // to next dose" animation. A plain @State bump still re-evaluates
+        // this body (so taken-state + streaks recompute), but keeps the
+        // rows' identities — and their animation state — intact.
+        let _ = adherenceVersion
+        return List {
             todaySection
             activeSection
             if !pastMeds.isEmpty { pastSection }
         }
-        .id(adherenceVersion)  // recompute on adherence toggle
     }
 
     // MARK: - Today
@@ -118,11 +124,31 @@ struct MedsView: View {
                     dose: med.dose,
                     time: time,
                     timeIndex: idx,
-                    taken: MedicationAdherence.isTaken(medID: med.id, date: Date(), timeIndex: idx)
+                    taken: MedicationAdherence.isTaken(medID: med.id, date: Date(), timeIndex: idx),
+                    nextLabel: Self.nextOccurrenceLabel(med: med, time: time)
                 ))
             }
         }
         return result.sorted { $0.time < $1.time }
+    }
+
+    /// Human label for the *next* time this dose comes due after today —
+    /// e.g. "Tomorrow, 12:00 PM" or "Mon, 8:00 AM". Shown once a dose has
+    /// been checked off and settled, so the row reads as "done, next at…".
+    /// Walks forward up to two weeks to cover weekly / biweekly schedules.
+    private static func nextOccurrenceLabel(med: Medication, time: Medication.TimeOfDay) -> String {
+        let cal = Calendar.current
+        for offset in 1...14 {
+            guard let day = cal.date(byAdding: .day, value: offset, to: Date()),
+                  med.isScheduled(on: day) else { continue }
+            if cal.isDateInTomorrow(day) {
+                return "Tomorrow, \(time.displayString)"
+            }
+            let wd = DateFormatter()
+            wd.dateFormat = "EEE"
+            return "\(wd.string(from: day)), \(time.displayString)"
+        }
+        return "Next dose, \(time.displayString)"
     }
 
     private func toggleDose(_ dose: TodayDose) {
@@ -217,6 +243,8 @@ private struct TodayDose: Identifiable {
     let time: Medication.TimeOfDay
     let timeIndex: Int
     let taken: Bool
+    /// When this dose next comes due after today ("Tomorrow, 12:00 PM").
+    let nextLabel: String
     var id: String { "\(medID.uuidString)-\(timeIndex)" }
 }
 
@@ -224,19 +252,36 @@ private struct DoseRow: View {
     let dose: TodayDose
     let onToggle: () -> Void
 
+    /// True for ~2 seconds right after the user checks a dose. During
+    /// this window the checkmark stays a bright, slightly-enlarged green
+    /// "just done" tick; once it elapses the row settles into the muted
+    /// state that shows the next dose time with a grayed-out check.
+    @State private var celebrating = false
+
+    /// The dose is checked AND the celebration window has elapsed — show
+    /// the "next dose" treatment.
+    private var settled: Bool { dose.taken && !celebrating }
+
     var body: some View {
         HStack(spacing: 14) {
             Text(dose.time.displayString)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 76, alignment: .leading)
+                .opacity(settled ? 0.4 : 1)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(dose.medName)
                     .font(.body.weight(.medium))
                     .strikethrough(dose.taken, color: .secondary)
                     .foregroundStyle(dose.taken ? .secondary : .primary)
-                if !dose.dose.isEmpty {
+                if settled {
+                    // Once settled, the dose is done for today — point the
+                    // user at when it's next due.
+                    Label(dose.nextLabel, systemImage: "clock.arrow.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if !dose.dose.isEmpty {
                     Text(dose.dose)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -245,15 +290,45 @@ private struct DoseRow: View {
 
             Spacer()
 
-            Button(action: onToggle) {
+            Button(action: toggle) {
                 Image(systemName: dose.taken ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
-                    .foregroundStyle(dose.taken ? Color.green : Color.secondary)
+                    .foregroundStyle(checkColor)
+                    .scaleEffect(celebrating ? 1.14 : 1)
             }
             .buttonStyle(.plain)
             .sensoryFeedback(.success, trigger: dose.taken)
         }
         .padding(.vertical, 2)
+        // A dose that's already taken when the view first appears shows
+        // its settled state immediately — `celebrating` starts false, so
+        // there's no celebration replay on load.
+        .animation(.spring(response: 0.32, dampingFraction: 0.7), value: celebrating)
+        .animation(.easeInOut(duration: 0.25), value: dose.taken)
+    }
+
+    /// Green while freshly checked, gray once settled, secondary when not
+    /// taken.
+    private var checkColor: Color {
+        if settled { return .secondary }
+        return dose.taken ? .green : .secondary
+    }
+
+    private func toggle() {
+        let willBeTaken = !dose.taken
+        onToggle()
+        if willBeTaken {
+            celebrating = true
+            // Hold the celebratory green tick for ~2s, then let the row
+            // settle into "done — next at …".
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation { celebrating = false }
+            }
+        } else {
+            // Un-checking returns to the normal pending state at once.
+            celebrating = false
+        }
     }
 }
 

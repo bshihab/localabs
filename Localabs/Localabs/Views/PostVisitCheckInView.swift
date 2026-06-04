@@ -181,6 +181,7 @@ struct PostVisitCheckInView: View {
                 PastVisit(
                     date: visit?.date ?? Date(),
                     note: visit?.note ?? "",
+                    preVisitQuestions: VisitPrepQuestions.load(),
                     instructions: instructions
                 )
             )

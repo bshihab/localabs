@@ -79,29 +79,19 @@ struct TrendsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                // The "Health Trends" header used to be a Text view
-                // inside this VStack with a manually-set font. That
-                // bypassed the system's large-to-inline title
-                // behavior, so when the user scrolled, the title
-                // just disappeared off the top instead of collapsing
-                // into a centered inline title with the blur-behind-
-                // the-notch effect the other tabs (History, Profile)
-                // get for free. Switched to .navigationTitle +
-                // .navigationBarTitleDisplayMode(.large) — the
-                // system handles the shrink + blur automatically.
-                VStack(alignment: .leading, spacing: 22) {
-                    dataSourcePicker
-                        .padding(.horizontal)
-
-                    if dataSource == .health {
-                        healthContent
-                    } else {
-                        labContent
-                    }
+            // Two different scroll containers: Apple Health stays a
+            // ScrollView (free-form metric cards), but the Lab Reports
+            // branch is a real `List`. A List handles vertical scroll +
+            // horizontal `.swipeActions` natively — the custom DragGesture
+            // we had before fought the ScrollView's pan, which is why
+            // swiping a card left scrolling stuck for a few flicks. Both
+            // containers collapse the large title the same way.
+            Group {
+                if dataSource == .health {
+                    healthScroll
+                } else {
+                    labList
                 }
-                .padding(.top, 8)
-                .padding(.bottom, 100)
             }
             .scrollContentBackground(.hidden)
             .background(.background)
@@ -210,71 +200,107 @@ struct TrendsView: View {
         return pinned + rest
     }
 
-    private var labValuesSection: some View {
-        let rows = sortedLabTrends
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("LAB VALUES OVER TIME")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .tracking(1.0)
-
-            // Tell the user both swipe directions + the privacy effect of
-            // hiding (hidden markers leave the AI's context).
-            Label(
-                "Swipe a card right to pin it to the top, left to hide it. Hidden markers leave your trends and aren't shared with Localabs.",
-                systemImage: "hand.draw"
-            )
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .fixedSize(horizontal: false, vertical: true)
-
-            // Each marker is its own card now (no shared box), and
-            // swiping a card to the right pins it — a yellow pin appears
-            // and it floats to the top.
-            ForEach(rows) { trend in
-                SwipeActionCard(
-                    isPinned: TrackedMarkers.isTracked(trend.canonicalName),
-                    onTogglePin: { togglePin(trend) },
-                    onHide: { hideMarker(trend) }
-                ) {
-                    LabTrendRow(trend: trend)
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .fill(Color(.secondarySystemBackground))
-                        )
-                        .overlay(alignment: .topTrailing) {
-                            if TrackedMarkers.isTracked(trend.canonicalName) {
-                                Image(systemName: "pin.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.yellow)
-                                    .padding(10)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                        // Tap (not swipe) → the same liquid-glass menu the
-                        // scan highlights use, anchored at the tap point.
-                        .gesture(
-                            SpatialTapGesture(coordinateSpace: .global).onEnded { v in
-                                withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
-                                    trendPopover = EntityPopover(
-                                        entity: .labValue(makeLabValue(trend)),
-                                        point: v.location,
-                                        blockID: UUID()
-                                    )
-                                }
-                            }
-                        )
-                }
+    /// The lab-values list rows: a header, one card per marker (native
+    /// leading=pin / trailing=hide swipe actions), and a footnote. Emitted
+    /// straight into the enclosing `List` so scrolling and swiping are both
+    /// handled by UIKit's collection view — no custom gesture arbitration.
+    @ViewBuilder
+    private var labValuesRows: some View {
+        plainRow {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("LAB VALUES OVER TIME")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.0)
+                // Tell the user both swipe directions + the privacy effect
+                // of hiding (hidden markers leave the AI's context).
+                Label(
+                    "Swipe a card right to pin it to the top, left to hide it. Hidden markers leave your trends and aren't shared with Localabs.",
+                    systemImage: "hand.draw"
+                )
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
             }
+        }
 
-            // Explain where the "normal" range comes from + that it's
-            // personalized to the user's age/sex when a report omits one.
+        ForEach(sortedLabTrends) { trend in
+            labTrendCard(trend)
+        }
+
+        // Explain where the "normal" range comes from + that it's
+        // personalized to the user's age/sex when a report omits one.
+        plainRow {
             Text(labRangeFootnote)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    /// One lab-marker card as a List row, with Apple-style swipe actions:
+    /// swipe right (leading) to pin/unpin, swipe left (trailing) to hide.
+    /// Tapping opens the same liquid-glass action menu the scan highlights
+    /// use, anchored at the tap point.
+    private func labTrendCard(_ trend: LabTrend) -> some View {
+        let pinned = TrackedMarkers.isTracked(trend.canonicalName)
+        return LabTrendRow(trend: trend)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(alignment: .topTrailing) {
+                if pinned {
+                    Image(systemName: "pin.fill")
+                        .font(.caption)
+                        .foregroundStyle(.yellow)
+                        .padding(10)
+                }
+            }
+            .contentShape(Rectangle())
+            // `.simultaneousGesture` so the List's own swipe recognizer
+            // still sees the drag — a tap never fires mid-swipe anyway.
+            .simultaneousGesture(
+                SpatialTapGesture(coordinateSpace: .global).onEnded { v in
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
+                        trendPopover = EntityPopover(
+                            entity: .labValue(makeLabValue(trend)),
+                            point: v.location,
+                            blockID: UUID()
+                        )
+                    }
+                }
+            )
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                Button {
+                    togglePin(trend)
+                } label: {
+                    Label(pinned ? "Unpin" : "Pin",
+                          systemImage: pinned ? "pin.slash.fill" : "pin.fill")
+                }
+                .tint(.yellow)
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button(role: .destructive) {
+                    hideMarker(trend)
+                } label: {
+                    Label("Hide", systemImage: "eye.slash.fill")
+                }
+            }
+    }
+
+    /// A full-bleed, separator-less, transparent List row — used for the
+    /// section headers/footnotes that aren't swipeable cards.
+    private func plainRow<V: View>(@ViewBuilder _ content: () -> V) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
     }
 
     /// Toggle a marker's pinned state (swipe action), animating the
@@ -429,50 +455,75 @@ struct TrendsView: View {
         }
     }
 
-    /// Lab-report branch — all cross-report lab trends, or an empty
-    /// state prompting the user to scan two reports that share a marker.
-    @ViewBuilder
-    private var labContent: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            if labTrends.isEmpty {
-                labTrendsEmptyState
-            } else {
-                labValuesSection
+    /// Apple Health branch container — a ScrollView, with the data-source
+    /// picker at the top (scrolls with the metric cards as before).
+    private var healthScroll: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                dataSourcePicker
+                    .padding(.horizontal)
+                healthContent
             }
-            hiddenMarkersSection
+            .padding(.top, 8)
+            .padding(.bottom, 100)
         }
-        .padding(.horizontal)
+    }
+
+    /// Lab-report branch — a real `List` so vertical scroll + horizontal
+    /// swipe-to-pin/hide are both native. The data-source picker rides
+    /// along as the first (non-swipeable) row.
+    private var labList: some View {
+        List {
+            plainRow {
+                dataSourcePicker
+            }
+            .padding(.top, 8)
+
+            if labTrends.isEmpty {
+                plainRow { labTrendsEmptyState }
+            } else {
+                labValuesRows
+            }
+
+            hiddenMarkersRows
+        }
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 0)
     }
 
     /// Lab markers the user hid (swipe-left), with a Restore button each.
     /// Lets them undo a hide without re-scanning. Hidden only — re-reads
-    /// when `trackedVersion` bumps after a restore.
+    /// when `trackedVersion` bumps after a restore. Emitted as List rows.
     @ViewBuilder
-    private var hiddenMarkersSection: some View {
+    private var hiddenMarkersRows: some View {
         let _ = trackedVersion
         let hidden = hiddenMarkerNames()
         if !hidden.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
+            plainRow {
                 Text("HIDDEN FROM TRENDS")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .tracking(1.0)
-                ForEach(hidden, id: \.self) { name in
-                    HStack {
-                        Text(name)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Restore") { restoreMarker(name) }
-                            .font(.caption.weight(.semibold))
-                            .buttonStyle(.bordered)
-                    }
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
+                    .padding(.top, 8)
+            }
+            ForEach(hidden, id: \.self) { name in
+                HStack {
+                    Text(name)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Restore") { restoreMarker(name) }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.bordered)
                 }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
         }
     }
@@ -1518,80 +1569,3 @@ struct MetricDetailView: View {
     }
 }
 
-/// A card with Apple Mail / Files style horizontal swipe actions, built
-/// as a gesture so it works inside the Trends tab's vertical ScrollView
-/// (a vertical scroll only claims vertical drags, so a horizontal swipe
-/// falls through to this gesture). Swipe RIGHT reveals a yellow pin
-/// (toggle pin); swipe LEFT reveals a red trash (hide the marker from
-/// trends). Release past the threshold to fire that side's action.
-private struct SwipeActionCard<Content: View>: View {
-    let isPinned: Bool
-    let onTogglePin: () -> Void
-    let onHide: () -> Void
-    @ViewBuilder var content: () -> Content
-    @State private var offset: CGFloat = 0
-    @State private var armed = false
-
-    var body: some View {
-        ZStack {
-            // Right reveal — pin (yellow).
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.yellow)
-                .overlay(alignment: .leading) {
-                    Image(systemName: isPinned ? "pin.slash.fill" : "pin.fill")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.leading, 22)
-                        .opacity(offset > 16 ? 1 : 0)
-                }
-                .opacity(offset > 0 ? 1 : 0)
-
-            // Left reveal — hide (red).
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.red)
-                .overlay(alignment: .trailing) {
-                    Image(systemName: "eye.slash.fill")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(.white)
-                        .padding(.trailing, 22)
-                        .opacity(offset < -16 ? 1 : 0)
-                }
-                .opacity(offset < 0 ? 1 : 0)
-
-            content()
-                .offset(x: offset)
-        }
-        // `.simultaneousGesture` (not `.gesture`) so the enclosing
-        // vertical ScrollView keeps receiving the same drag — otherwise the
-        // card swallows the gesture stream and the user has to flick two or
-        // three times before scrolling re-engages. We still only move the
-        // card for clearly-horizontal drags, so vertical scrolls pass through
-        // untouched.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 14)
-                .onChanged { v in
-                    guard abs(v.translation.width) > abs(v.translation.height) else { return }
-                    offset = max(min(v.translation.width, 96), -96)
-                    armed = abs(offset) > 64
-                }
-                .onEnded { v in
-                    // Ignore a drag that turned out to be mostly vertical —
-                    // the ScrollView owned it; don't fire pin/hide.
-                    guard abs(v.translation.width) > abs(v.translation.height) else {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { offset = 0 }
-                        armed = false
-                        return
-                    }
-                    let pin = offset > 64
-                    let hide = offset < -64
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { offset = 0 }
-                    if pin { onTogglePin() }
-                    else if hide { onHide() }
-                    armed = false
-                }
-        )
-        .sensoryFeedback(trigger: armed) { _, now in
-            now ? .impact(weight: .medium) : nil
-        }
-    }
-}

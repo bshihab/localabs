@@ -109,7 +109,9 @@ struct ProfileView: View {
                 // user since it re-runs the on-device model per report.
                 let ageChanged = profile.ageDisplay != demoBeforeEdit.age
                 let sexChanged = profile.biologicalSex.trimmingCharacters(in: .whitespaces) != demoBeforeEdit.sex
+                print("[RangeDebug] Profile edit dismissed — before:(age=\(demoBeforeEdit.age), sex=\(demoBeforeEdit.sex)) after:(age=\(profile.ageDisplay), sex=\(profile.biologicalSex)) → ageChanged=\(ageChanged) sexChanged=\(sexChanged)")
                 if ageChanged || sexChanged {
+                    print("[RangeDebug] Demographics changed → posting notification + reEnrich (saved reports=\(LocalStorageService.shared.getHistory().count))")
                     // Tell Trends/Dashboard to re-read their age/sex-based
                     // ranges (Apple Health typical ranges update even with
                     // no saved reports).
@@ -605,6 +607,7 @@ struct ProfileView: View {
                 profile.ageDisplay,
                 profile.biologicalSex.trimmingCharacters(in: .whitespaces)
             )
+            print("[RangeDebug] Opening profile editor — snapshot age=\(demoBeforeEdit.age) sex=\(demoBeforeEdit.sex)")
             // Dedicated edit sheet that shows existing field
             // values + any chat-added entries. The full 4-step
             // welcome / privacy onboarding flow only re-fires

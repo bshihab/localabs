@@ -9,6 +9,7 @@ struct VisitHubView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var visit: Appointment?
     @State private var pastVisits: [PastVisit] = []
+    @State private var selectedPastVisit: PastVisit?
     @State private var showPrep = false
     @State private var showCheckIn = false
 
@@ -69,6 +70,7 @@ struct VisitHubView: View {
         }
         .sheet(isPresented: $showPrep, onDismiss: load) { PreVisitPrepView() }
         .sheet(isPresented: $showCheckIn, onDismiss: load) { PostVisitCheckInView(visit: visit) }
+        .sheet(item: $selectedPastVisit) { past in PastVisitDetailView(visit: past) }
         .onAppear(perform: load)
     }
 
@@ -178,33 +180,40 @@ struct VisitHubView: View {
     private func pastVisitCard(_ past: PastVisit) -> some View {
         let f = DateFormatter()
         f.dateStyle = .medium
-        return HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.green)
-                .frame(width: 28)
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(f.string(from: past.date))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.primary)
-                if !past.note.isEmpty {
-                    Text(past.note)
+        return Button {
+            selectedPastVisit = past
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .frame(width: 28)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(f.string(from: past.date))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    if !past.note.isEmpty {
+                        Text(past.note)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(pastVisitPreview(past))
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                if !past.instructions.isEmpty {
-                    Text(past.instructions)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 3)
             }
-            Spacer(minLength: 0)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .buttonStyle(.plain)
         .contextMenu {
             Button(role: .destructive) {
                 VisitHistory.remove(id: past.id)
@@ -215,8 +224,88 @@ struct VisitHubView: View {
         }
     }
 
+    /// One-line summary of what's stored for a past visit, so the card
+    /// hints at the detail behind the tap.
+    private func pastVisitPreview(_ past: PastVisit) -> String {
+        var parts: [String] = []
+        if !past.preVisitQuestions.isEmpty {
+            parts.append("\(past.preVisitQuestions.count) question\(past.preVisitQuestions.count == 1 ? "" : "s")")
+        }
+        if !past.instructions.isEmpty {
+            parts.append("notes")
+        }
+        return parts.isEmpty ? "Tap to view" : "Tap to view — \(parts.joined(separator: " · "))"
+    }
+
     private func load() {
         visit = Appointment.loadUpcoming()
         pastVisits = VisitHistory.all()
+    }
+}
+
+/// Read-only detail for an archived visit (#4): what the user prepared
+/// before (their questions) and what they logged after (instructions).
+/// Opened by tapping a Past visits card.
+struct PastVisitDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    let visit: PastVisit
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    LabeledContent("Date", value: dateString)
+                    if !visit.note.isEmpty {
+                        LabeledContent("For", value: visit.note)
+                    }
+                } header: {
+                    Text("Visit")
+                }
+
+                Section {
+                    if visit.preVisitQuestions.isEmpty {
+                        Text("No questions were saved before this visit.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(visit.preVisitQuestions.enumerated()), id: \.offset) { _, q in
+                            Text(q)
+                        }
+                    }
+                } header: {
+                    Label("Before your visit", systemImage: "checklist")
+                } footer: {
+                    Text("The questions you prepared to ask.")
+                }
+
+                Section {
+                    if visit.instructions.isEmpty {
+                        Text("No instructions or notes were logged after this visit.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(visit.instructions)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                } header: {
+                    Label("After your visit", systemImage: "square.and.pencil")
+                } footer: {
+                    Text("What you logged the doctor said — saved to your health profile.")
+                }
+            }
+            .navigationTitle("Visit Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }.fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private var dateString: String {
+        let f = DateFormatter()
+        f.dateStyle = .full
+        return f.string(from: visit.date)
     }
 }

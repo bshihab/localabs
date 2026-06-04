@@ -50,6 +50,11 @@ struct PastVisit: Codable, Equatable, Identifiable {
     var date: Date
     /// Who/what the visit was for (the appointment note). May be empty.
     var note: String
+    /// The questions the user prepared *before* the visit (from Visit
+    /// Prep), captured at check-in so the history shows both sides. May be
+    /// empty. Optional in the decoder so visits archived before this field
+    /// existed still load.
+    var preVisitQuestions: [String]
     /// Instructions or diagnoses the user logged afterward. May be empty.
     var instructions: String
     /// When the user completed the check-in.
@@ -59,14 +64,32 @@ struct PastVisit: Codable, Equatable, Identifiable {
         id: UUID = UUID(),
         date: Date,
         note: String = "",
+        preVisitQuestions: [String] = [],
         instructions: String = "",
         loggedAt: Date = Date()
     ) {
         self.id = id
         self.date = date
         self.note = note
+        self.preVisitQuestions = preVisitQuestions
         self.instructions = instructions
         self.loggedAt = loggedAt
+    }
+
+    // Custom decoder so visits saved before `preVisitQuestions` existed
+    // still decode (it defaults to empty).
+    enum CodingKeys: String, CodingKey {
+        case id, date, note, preVisitQuestions, instructions, loggedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = try c.decode(Date.self, forKey: .date)
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        preVisitQuestions = try c.decodeIfPresent([String].self, forKey: .preVisitQuestions) ?? []
+        instructions = try c.decodeIfPresent(String.self, forKey: .instructions) ?? ""
+        loggedAt = try c.decodeIfPresent(Date.self, forKey: .loggedAt) ?? Date()
     }
 }
 
