@@ -326,7 +326,6 @@ final class InferenceEngine: ObservableObject {
             // was loading tensors. We can't distinguish them perfectly,
             // but the user can resolve both via the trash button +
             // re-download or by closing other apps to free memory.
-            print("[InferenceEngine] Failed to load model: \(error)")
             self.downloadError = "Couldn't load the model. The file may be incomplete (try Delete + Download again) or your device may be low on memory (close other apps and reopen Localabs)."
         }
     }
@@ -1156,10 +1155,6 @@ final class InferenceEngine: ObservableObject {
         // any latency for the bigger ceiling.
         let maxTokens = 1800
         var tokenCount = 0
-        // Surface prompt size in the Xcode console — useful for diagnosing
-        // tokenize-overflow / slow-decode complaints. Approximate token
-        // count assumes ~4 chars/token for English text + medical jargon.
-        print("[InferenceEngine] Prompt: \(promptWithPartial.count) chars (~\(promptWithPartial.count / 4) tokens) before Localabs run.")
         let stream = context.predict(prompt: promptWithPartial, maxTokens: maxTokens)
         // Mark the streaming window so the live cards know when Localabs
         // is actively writing (caret + pulse) vs. when the post-stream
@@ -1291,7 +1286,6 @@ final class InferenceEngine: ObservableObject {
             if isInferenceCancelled || Task.isCancelled { break }
             collected += piece
         }
-        print("[LabExtract] raw model output:\n\(collected)\n[LabExtract] end")
 
         // Merge in a deterministic structural line scan for recall — it
         // catches any "name number unit/range" row the model dropped, no
@@ -1386,7 +1380,6 @@ final class InferenceEngine: ObservableObject {
             if isInferenceCancelled || Task.isCancelled { break }
             collected += piece
         }
-        print("[LabEnrich] raw model output:\n\(collected)\n[LabEnrich] end")
 
         // Parse NAME | RANGE | WORSE → keyed by normalized name.
         var meta: [String: (range: String?, dir: ConcernDirection?)] = [:]
@@ -1749,12 +1742,10 @@ final class InferenceEngine: ObservableObject {
             for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length))
             where m.numberOfRanges >= 2 {
                 if let age = Int(ns.substring(with: m.range(at: 1))), (1...120).contains(age) {
-                    print("[LabExtract] patient age detected: \(age)")
                     return age
                 }
             }
         }
-        print("[LabExtract] no patient age detected in report text")
         return nil
     }
 
@@ -1774,12 +1765,11 @@ final class InferenceEngine: ObservableObject {
         where m.numberOfRanges >= 2 {
             let token = ns.substring(with: m.range(at: 1)).lowercased()
             switch token {
-            case "male", "m":   print("[LabExtract] patient sex detected: Male");   return "Male"
-            case "female", "f": print("[LabExtract] patient sex detected: Female"); return "Female"
+            case "male", "m":   return "Male"
+            case "female", "f": return "Female"
             default: break
             }
         }
-        print("[LabExtract] no patient sex detected in report text")
         return nil
     }
 

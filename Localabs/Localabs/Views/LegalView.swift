@@ -2,10 +2,9 @@ import SwiftUI
 
 /// The app's medical disclaimer + Terms of Use (#32). Shown as the
 /// "read the full terms" link from onboarding's acceptance step and
-/// always reachable from Profile. Plain, readable copy — this should be
-/// reviewed by a healthcare/privacy attorney before launch, but it
-/// states the core protections: informational-only, not a diagnosis,
-/// emergency carve-out, no warranty, and the on-device privacy stance.
+/// always reachable from Profile. States the core protections:
+/// informational-only, not a diagnosis, emergency carve-out, no warranty,
+/// and the on-device privacy stance.
 struct LegalView: View {
     @Environment(\.dismiss) private var dismiss
     /// When true, shows a Done button (presented as a sheet). False when
@@ -63,7 +62,7 @@ struct LegalView: View {
 
                     links
 
-                    Text("Last updated: this build. These terms should be reviewed with a qualified attorney before public release.")
+                    Text("Last updated: June 2026")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .padding(.top, 4)
