@@ -44,22 +44,66 @@ struct LocalabsApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                ContentView()
-                    .environmentObject(engine)
-                    .task {
-                        await engine.loadModelIfDownloaded()
-                    }
-
-                if showSplash {
-                    SplashView {
-                        withAnimation(.easeOut(duration: 0.35)) {
-                            showSplash = false
+            // The on-device 4B model needs an 8 GB iPhone (15 Pro and
+            // later). The App Store can't restrict downloads by RAM, so we
+            // gate at launch and show a clear requirement screen rather than
+            // letting the model fail to load on an unsupported device.
+            if DeviceSupport.meetsRequirements {
+                ZStack {
+                    ContentView()
+                        .environmentObject(engine)
+                        .task {
+                            await engine.loadModelIfDownloaded()
                         }
+
+                    if showSplash {
+                        SplashView {
+                            withAnimation(.easeOut(duration: 0.35)) {
+                                showSplash = false
+                            }
+                        }
+                        .transition(.opacity)
                     }
-                    .transition(.opacity)
                 }
+            } else {
+                UnsupportedDeviceView()
             }
+        }
+    }
+}
+
+/// Minimum-device gate. Localabs loads a ~2.5 GB model into Metal GPU
+/// memory, which needs an iPhone with 8 GB of RAM (iPhone 15 Pro and
+/// later). A 7 GiB threshold cleanly separates 8 GB devices (~8.6e9 bytes)
+/// from 6 GB ones (~6.4e9) — `physicalMemory` reports total installed RAM,
+/// not free RAM, so it's stable regardless of what else is running.
+enum DeviceSupport {
+    static var meetsRequirements: Bool {
+        ProcessInfo.processInfo.physicalMemory >= 7 * 1024 * 1024 * 1024
+    }
+}
+
+/// Shown in place of the app on devices that can't run the on-device model.
+/// Explains the requirement instead of failing silently at model-load time.
+struct UnsupportedDeviceView: View {
+    var body: some View {
+        ZStack {
+            Color(uiColor: .systemBackground).ignoresSafeArea()
+            VStack(spacing: 18) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 52, weight: .regular))
+                    .foregroundStyle(.orange)
+                Text("This iPhone isn't supported")
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+                Text("Localabs runs a medical AI model entirely on your device — nothing is sent to a server. That needs an iPhone 15 Pro or later (8 GB of memory). This iPhone doesn't have enough memory to run it.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 32)
+            }
+            .padding()
         }
     }
 }
