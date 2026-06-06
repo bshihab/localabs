@@ -309,6 +309,24 @@ struct DashboardView: View {
                         .padding(.horizontal)
                     }
 
+                    // Persistent disclaimer on the report itself — the most-
+                    // read surface, and where a "confirm with your doctor"
+                    // reminder belongs (it sits right under the AI's output).
+                    if let report = currentReport, !report.isIncomplete {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                            Text("Informational only — not a diagnosis or medical advice. Localabs can be wrong; confirm anything important with your doctor and your original report.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                    }
+
                     // "Regenerate Translation" lives at the bottom now —
                     // it's a rare, destructive action (it overwrites the
                     // current translation), so it belongs below the
