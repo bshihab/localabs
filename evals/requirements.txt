@@ -1,0 +1,4 @@
+# Judge-side deps only — nothing here ships in the app.
+# Install just the provider you judge with; the script imports lazily.
+anthropic>=0.120
+google-genai>=2.16

@@ -326,6 +326,18 @@ struct HistoryView: View {
                     Label("Delete Report", systemImage: "trash")
                 }
                 .tint(.red)
+
+                #if DEBUG
+                // Dev scaffolding: dumps this report as a fixture for the
+                // faithfulness eval (evals/eval_faithfulness.py). DEBUG-only,
+                // so it never reaches the App Store build.
+                Button {
+                    exportEvalFixture(report: report)
+                } label: {
+                    Label("Export Eval Fixture (Dev)", systemImage: "flask")
+                }
+                .tint(.primary)
+                #endif
             }
         }
     }
@@ -517,6 +529,20 @@ struct HistoryView: View {
         shareItems = items
         showShareSheet = true
     }
+
+    #if DEBUG
+    /// Dev-only: writes this report out as an eval fixture and opens the
+    /// share sheet so it can be saved to Files / AirDropped to the dev Mac,
+    /// where it drops into `evals/cases/` unchanged.
+    private func exportEvalFixture(report: StructuredReport) {
+        guard let url = EvalFixtureExporter.writeFixture(for: report) else {
+            print("[HistoryView] eval fixture export failed for \(report.id)")
+            return
+        }
+        shareItems = [url]
+        showShareSheet = true
+    }
+    #endif
 
     /// Builds the share payload (translation text + scan images) for
     /// each selected report, then opens the system share sheet. Sharing

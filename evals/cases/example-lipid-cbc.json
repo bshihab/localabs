@@ -1,0 +1,22 @@
+{
+  "id": "example-lipid-cbc",
+  "_comment": "Template fixture. Replace `source.ocr_text` with the real OCR text VisionOCRService produced for a scan, and `output` with the StructuredReport MedGemma generated from it. Keys under `output` match StructuredReport's Codable field names, so an exported report drops in unchanged.",
+  "source": {
+    "ocr_text": "QUEST DIAGNOSTICS\nPatient: [redacted]   Age: 41   Sex: M\nCollected: 2026-02-18   Reported: 2026-02-19\n\nLIPID PANEL\nCholesterol, Total      232 mg/dL   H    (ref <200)\nTriglycerides           188 mg/dL   H    (ref <150)\nHDL Cholesterol          38 mg/dL   L    (ref >40)\nLDL Cholesterol (calc)  156 mg/dL   H    (ref <100)\n\nCBC WITH DIFFERENTIAL\nWBC                     6.8 K/uL          (ref 4.0-10.5)\nRBC                     4.92 M/uL         (ref 4.20-5.80)\nHemoglobin              14.9 g/dL         (ref 13.2-17.1)\nHematocrit              44.1 %            (ref 38.5-50.0)\nPlatelets               241 K/uL          (ref 140-400)\nNeutrophils             58 %              (ref 40-70)\nLymphocytes             31 %              (ref 22-44)\n\nNo medications listed.",
+    "lab_values": [
+      { "name": "Cholesterol, Total", "value": 232, "unit": "mg/dL", "reference_range": "<200" },
+      { "name": "Triglycerides", "value": 188, "unit": "mg/dL", "reference_range": "<150" },
+      { "name": "HDL Cholesterol", "value": 38, "unit": "mg/dL", "reference_range": ">40" },
+      { "name": "LDL Cholesterol", "value": 156, "unit": "mg/dL", "reference_range": "<100" },
+      { "name": "Hemoglobin", "value": 14.9, "unit": "g/dL", "reference_range": "13.2-17.1" },
+      { "name": "Platelets", "value": 241, "unit": "K/uL", "reference_range": "140-400" }
+    ]
+  },
+  "output": {
+    "patientSummary": "- Your **LDL cholesterol** is high at **156 mg/dL**, above the target of under 100 mg/dL.\n- Your **total cholesterol** is **232 mg/dL** (reference under 200 mg/dL).\n- Your **HDL** — the protective kind — is low at **38 mg/dL** (reference above 40 mg/dL).\n- ✅ Your **complete blood count** is entirely within range, including hemoglobin **14.9 g/dL** and platelets **241 K/uL**.",
+    "doctorQuestions": "- My LDL is 156 mg/dL — does that change how you'd manage my heart risk?\n- Should my triglycerides at 188 mg/dL be rechecked after fasting?\n- How often should this panel be repeated?",
+    "dietaryAdvice": "- Swapping saturated fats for unsaturated ones is a common recommendation when LDL runs high.\n- 🥗 Soluble fiber from oats, beans, and lentils is often suggested alongside a lipid panel like this.\n- Regular aerobic activity is frequently discussed as a way to support HDL.",
+    "medicalGlossary": "- **LDL cholesterol**: often called the 'bad' cholesterol because it can build up in artery walls.\n- **HDL cholesterol**: the 'good' cholesterol, which helps carry cholesterol away from arteries.\n- **Triglycerides**: a type of fat carried in the blood.\n- **Hematocrit**: the share of your blood made up of red blood cells.",
+    "medicationNotes": "- No medications are listed in this report."
+  }
+}
